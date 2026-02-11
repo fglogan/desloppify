@@ -28,7 +28,8 @@ Language is auto-detected. To override: desloppify --lang python scan --path .
 Fix what it finds, then "desloppify resolve fixed <id>" and rescan. For false positives:
 "desloppify resolve wontfix <id> --note 'reason'" (note is required — don't skip work).
 Keep going until all issues are resolved. If you notice anything wrong or confusing about
-desloppify itself, tell me and ask if I want you to log an issue.
+desloppify itself, tell me and ask if I want you to log an issue. If you need to understand
+how desloppify works or debug an issue: git clone https://github.com/peteromallet/desloppify.git /tmp/desloppify
 
 If you're Claude Code, also run:
 mkdir -p .claude/skills/desloppify && curl -sL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md -o .claude/skills/desloppify/SKILL.md
