@@ -13,20 +13,17 @@ pip install git+https://github.com/peteromallet/desloppify.git
 Copy-paste into any AI coding agent (Cursor, Windsurf, Copilot, etc.):
 
 ```
-Install desloppify: pip install git+https://github.com/peteromallet/desloppify.git
+Install and run desloppify to scan this codebase for code quality issues (dead code,
+duplication, complexity, smells). It tracks findings and reports a health score.
 
-If you're a Claude Code agent, also install the skill for auto-discovery:
+pip install git+https://github.com/peteromallet/desloppify.git
+desloppify scan --path src/
+desloppify status
+desloppify next
+
+Fix what it finds, then "desloppify resolve fixed <id>" and rescan. Use --lang python
+for Python projects. If you're Claude Code, also run:
 mkdir -p .claude/skills/desloppify && curl -sL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md -o .claude/skills/desloppify/SKILL.md
-
-Scan my codebase: desloppify scan --path src/. Then: desloppify status for the score,
-desloppify next for the top finding to fix. After fixing: desloppify resolve fixed "<id>".
-For auto-fixable stuff: desloppify fix unused-imports --dry-run. Rescan after each batch.
-Work tier by tier: T1 (auto-fix) → T2 (quick) → T3 (judgment) → T4 (refactor).
-desloppify show <detector> to dig in, desloppify plan for a prioritized plan.
-Use --lang python for Python projects.
-
-As you work, note any false positives, missing detectors, or improvements and suggest
-them to me so I can report them at https://github.com/peteromallet/desloppify/issues.
 ```
 
 ## Quick Start
