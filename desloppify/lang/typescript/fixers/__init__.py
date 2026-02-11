@@ -1,8 +1,4 @@
-"""Auto-fixers for mechanical cleanup tasks.
-
-Re-exports all fix functions so callers can do:
-    from .fixers import fix_unused_imports, fix_debug_logs, ...
-"""
+"""TypeScript auto-fixers for mechanical cleanup tasks."""
 
 from .logs import fix_debug_logs
 from .imports import fix_unused_imports

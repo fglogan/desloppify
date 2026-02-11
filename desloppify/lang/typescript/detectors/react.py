@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from ...utils import PROJECT_ROOT, c, find_tsx_files, print_table, rel
+from ....utils import PROJECT_ROOT, c, find_tsx_files, print_table, rel
 
 MAX_EFFECT_BODY = 1000  # max characters to scan for brace-matching a useEffect callback
 

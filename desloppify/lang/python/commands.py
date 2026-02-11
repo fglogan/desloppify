@@ -17,7 +17,7 @@ DETECTOR_NAMES = [
 
 
 def _build_dep_graph(path):
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     return build_dep_graph(path)
 
 
@@ -48,7 +48,7 @@ def cmd_gods(args):
 
 def cmd_orphaned(args):
     import json
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     from ...detectors.orphaned import detect_orphaned_files
     graph = build_dep_graph(Path(args.path))
     entries = detect_orphaned_files(
@@ -72,7 +72,7 @@ def cmd_orphaned(args):
 
 def cmd_unused(args):
     import json
-    from .unused import detect_unused
+    from .detectors.unused import detect_unused
     entries = detect_unused(Path(args.path))
     if getattr(args, "json", False):
         print(json.dumps({"count": len(entries), "entries": entries}, indent=2))
@@ -87,7 +87,7 @@ def cmd_unused(args):
 
 def cmd_deps(args):
     import json
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     graph = build_dep_graph(Path(args.path))
     if getattr(args, "json", False):
         print(json.dumps({"files": len(graph)}, indent=2))
@@ -101,7 +101,7 @@ def cmd_deps(args):
 
 def cmd_cycles(args):
     import json
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     from ...detectors.graph import detect_cycles
     graph = build_dep_graph(Path(args.path))
     cycles = detect_cycles(graph)
@@ -123,7 +123,7 @@ def cmd_cycles(args):
 
 def cmd_smells(args):
     import json
-    from .smells import detect_smells
+    from .detectors.smells import detect_smells
     entries = detect_smells(Path(args.path))
     if getattr(args, "json", False):
         print(json.dumps({"entries": entries}, indent=2))

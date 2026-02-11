@@ -5,8 +5,8 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from ...utils import PROJECT_ROOT, resolve_path
-from ...detectors.graph import finalize_graph
+from ....utils import PROJECT_ROOT, resolve_path
+from ....detectors.graph import finalize_graph
 
 
 def build_dep_graph(path: Path) -> dict:

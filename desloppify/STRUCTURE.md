@@ -5,7 +5,7 @@ Multi-language codebase health scanner. See README.md for usage.
 ## Directory Layout
 
 ```
-scripts/desloppify/
+desloppify/
 ├── cli.py              # Argparse, main(), shared helpers
 ├── plan.py             # Detector orchestration + finding normalization
 ├── state.py            # Persistent state: load/save, merge_scan, scoring
@@ -26,28 +26,31 @@ scripts/desloppify/
 │   └── passthrough.py  # _classify_params(params, body, pattern_fn) — shared core
 │
 ├── lang/               # Layer 2 + 3: Language plugins (auto-discovered)
-│   ├── __init__.py     # Registry: @register_lang, get_lang, auto-detect
+│   ├── __init__.py     # Registry: @register_lang, get_lang, auto-detect, structural validation
 │   ├── base.py         # LangConfig + shared finding helpers (make_*_findings)
 │   │
 │   ├── typescript/     # Everything TypeScript/React
 │   │   ├── __init__.py # TypeScriptConfig + phase runners + config data (signals, rules)
 │   │   ├── commands.py # detect-subcommand wrappers + command registry
 │   │   ├── extractors.py  # extract_ts_functions, extract_ts_components, detect_passthrough_components
-│   │   ├── smells.py   # TS smell rules + brace-tracked multi-line helpers
-│   │   ├── deps.py     # TS import graph builder + dynamic import detection
-│   │   ├── unused.py   # tsc-based unused detection
-│   │   └── ...         # logs, exports, deprecated, react, concerns, patterns, props
+│   │   ├── detectors/  # TS-specific detector implementations
+│   │   │   ├── smells.py   # TS smell rules + brace-tracked multi-line helpers
+│   │   │   ├── deps.py     # TS import graph builder + dynamic import detection
+│   │   │   ├── unused.py   # tsc-based unused detection
+│   │   │   └── ...         # logs, exports, deprecated, react, concerns, patterns, props
+│   │   └── fixers/     # TS auto-fixers (unused imports, dead exports, etc.)
 │   │
 │   └── python/         # Everything Python
 │       ├── __init__.py # PythonConfig + phase runners + config data (signals, rules)
 │       ├── commands.py # detect-subcommand wrappers + command registry
 │       ├── extractors.py  # extract_py_functions, extract_py_classes, detect_passthrough_functions
-│       ├── smells.py   # PY smell rules + indentation-tracked multi-line helpers
-│       ├── deps.py     # Python import graph builder
-│       └── unused.py   # ruff-based unused detection
+│       ├── detectors/  # PY-specific detector implementations
+│       │   ├── smells.py   # PY smell rules + indentation-tracked multi-line helpers
+│       │   ├── deps.py     # Python import graph builder
+│       │   └── unused.py   # ruff-based unused detection
+│       └── fixers/     # PY auto-fixers (none yet — structural placeholder)
 │
 ├── commands/           # One file per CLI subcommand
-└── fixers/             # One file per auto-fixer
 ```
 
 ## Three-Layer Architecture
@@ -78,7 +81,7 @@ detect:  LangConfig.detect_commands[name](args) → display
 
 **Cmd wrapper**: `cmd_<name>(args) → None` — CLI display function in `lang/<name>/commands.py`. Each language owns all its cmd wrappers — no generic cmd_* in `detectors/`.
 
-**LangConfig**: Dataclass in `lang/<name>/__init__.py`. Key fields: `phases`, `build_dep_graph`, `detect_commands`, `file_finder`, `extract_functions`, `entry_patterns`, `barrel_names`. Auto-discovered — adding a language requires zero changes to shared code.
+**LangConfig**: Dataclass in `lang/<name>/__init__.py`. Key fields: `phases`, `build_dep_graph`, `detect_commands`, `file_finder`, `extract_functions`, `entry_patterns`, `barrel_names`. Auto-discovered — adding a language requires zero changes to shared code. Validated at registration: each plugin must have `commands.py`, `extractors.py`, `detectors/`, and `fixers/` (each dir with `__init__.py`).
 
 ## Non-Obvious Behavior
 

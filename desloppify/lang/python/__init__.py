@@ -12,7 +12,7 @@ from ..base import (DetectorPhase, LangConfig,
                     make_passthrough_findings, phase_dupes)
 from ...detectors.base import ComplexitySignal, GodRule
 from ...utils import find_py_files, log
-from .complexity import compute_max_params, compute_nesting_depth, compute_long_functions
+from .detectors.complexity import compute_max_params, compute_nesting_depth, compute_long_functions
 
 
 # ── Config data (single source of truth) ──────────────────
@@ -68,7 +68,7 @@ def _get_py_area(filepath: str) -> str:
 
 
 def _phase_unused(path: Path, lang: LangConfig) -> list[dict]:
-    from .unused import detect_unused
+    from .detectors.unused import detect_unused
     from ..base import make_unused_findings
     return make_unused_findings(detect_unused(path), log)
 
@@ -106,7 +106,7 @@ def _phase_structural(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _phase_coupling(path: Path, lang: LangConfig) -> list[dict]:
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     from ...detectors.graph import detect_cycles
     from ...detectors.orphaned import detect_orphaned_files
     from ...detectors.single_use import detect_single_use_abstractions
@@ -127,7 +127,7 @@ def _phase_coupling(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _phase_smells(path: Path, lang: LangConfig) -> list[dict]:
-    from .smells import detect_smells
+    from .detectors.smells import detect_smells
     return make_smell_findings(detect_smells(path), log)
 
 
@@ -135,7 +135,7 @@ def _phase_smells(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _py_build_dep_graph(path: Path) -> dict:
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     return build_dep_graph(path)
 
 

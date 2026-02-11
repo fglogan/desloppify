@@ -1,14 +1,39 @@
 """Language registry: auto-detection and lookup."""
 
+import inspect
 from pathlib import Path
 from .base import LangConfig
 
 _registry: dict[str, type] = {}
 
+REQUIRED_FILES = ["commands.py", "extractors.py"]
+REQUIRED_DIRS = ["detectors", "fixers"]
+
+
+def _validate_lang_structure(lang_dir: Path, name: str):
+    """Validate that a language plugin has all required files and directories."""
+    errors = []
+    for f in REQUIRED_FILES:
+        if not (lang_dir / f).exists():
+            errors.append(f"missing required file: {f}")
+    for d in REQUIRED_DIRS:
+        if not (lang_dir / d).exists():
+            errors.append(f"missing required directory: {d}/")
+        elif not (lang_dir / d / "__init__.py").exists():
+            errors.append(f"missing {d}/__init__.py")
+    if errors:
+        raise ValueError(
+            f"Language plugin '{name}' ({lang_dir.name}/) has structural issues:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
 
 def register_lang(name: str):
     """Decorator to register a language config module."""
     def decorator(cls):
+        module = inspect.getmodule(cls)
+        if module and hasattr(module, "__file__"):
+            _validate_lang_structure(Path(module.__file__).parent, name)
         _registry[name] = cls
         return cls
     return decorator

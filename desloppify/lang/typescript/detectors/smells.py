@@ -6,7 +6,7 @@ Defines TS-specific smell rules and multi-line smell helpers (brace-tracked).
 import re
 from pathlib import Path
 
-from ...utils import PROJECT_ROOT, find_ts_files
+from ....utils import PROJECT_ROOT, find_ts_files
 
 
 TS_SMELL_CHECKS = [

@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from ..utils import PROJECT_ROOT, c, rel
+from ....utils import PROJECT_ROOT, c, rel
 
 
 def fix_unused_params(entries: list[dict], *, dry_run: bool = False) -> list[dict]:

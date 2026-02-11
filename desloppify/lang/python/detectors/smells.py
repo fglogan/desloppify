@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from ...utils import PROJECT_ROOT, find_py_files
+from ....utils import PROJECT_ROOT, find_py_files
 
 
 SMELL_CHECKS = [

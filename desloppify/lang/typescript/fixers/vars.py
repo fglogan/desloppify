@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from ..utils import PROJECT_ROOT, c, rel
+from ....utils import PROJECT_ROOT, c, rel
 from .common import collapse_blank_lines
 
 _DESTR_MEMBER_RE = re.compile(r"^\s*(\w+)\s*(?:=\s*[^,]+)?\s*,?\s*$")

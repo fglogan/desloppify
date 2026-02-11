@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ...utils import PROJECT_ROOT
+from ....utils import PROJECT_ROOT
 
 
 def detect_unused(path: Path, category: str = "all") -> list[dict]:

@@ -118,8 +118,8 @@ def cmd_fix(args):
 def _get_fixer(name: str) -> dict | None:
     """Lazy-load and return fixer config by name."""
     if name == "unused-imports":
-        from ..lang.typescript.unused import detect_unused
-        from ..fixers import fix_unused_imports
+        from ..lang.typescript.detectors.unused import detect_unused
+        from ..lang.typescript.fixers import fix_unused_imports
         return {
             "label": "unused imports",
             "detect": lambda path: detect_unused(path, category="imports"),
@@ -128,8 +128,8 @@ def _get_fixer(name: str) -> dict | None:
             "verb": "Removed", "dry_verb": "Would remove",
         }
     elif name == "debug-logs":
-        from ..lang.typescript.logs import detect_logs
-        from ..fixers import fix_debug_logs
+        from ..lang.typescript.detectors.logs import detect_logs
+        from ..lang.typescript.fixers import fix_debug_logs
         return {
             "label": "tagged debug logs",
             "detect": detect_logs,
@@ -139,8 +139,8 @@ def _get_fixer(name: str) -> dict | None:
             "post_fix": _cascade_import_cleanup,
         }
     elif name == "dead-exports":
-        from ..lang.typescript.exports import detect_dead_exports
-        from ..fixers import fix_dead_exports
+        from ..lang.typescript.detectors.exports import detect_dead_exports
+        from ..lang.typescript.fixers import fix_dead_exports
         return {
             "label": "dead exports",
             "detect": detect_dead_exports,
@@ -149,8 +149,8 @@ def _get_fixer(name: str) -> dict | None:
             "verb": "De-exported", "dry_verb": "Would de-export",
         }
     elif name == "unused-vars":
-        from ..lang.typescript.unused import detect_unused
-        from ..fixers import fix_unused_vars
+        from ..lang.typescript.detectors.unused import detect_unused
+        from ..lang.typescript.fixers import fix_unused_vars
         return {
             "label": "unused vars",
             "detect": lambda path: detect_unused(path, category="vars"),
@@ -159,8 +159,8 @@ def _get_fixer(name: str) -> dict | None:
             "verb": "Removed", "dry_verb": "Would remove",
         }
     elif name == "unused-params":
-        from ..lang.typescript.unused import detect_unused
-        from ..fixers import fix_unused_params
+        from ..lang.typescript.detectors.unused import detect_unused
+        from ..lang.typescript.fixers import fix_unused_params
         return {
             "label": "unused params",
             "detect": lambda path: detect_unused(path, category="vars"),
@@ -169,7 +169,7 @@ def _get_fixer(name: str) -> dict | None:
             "verb": "Prefixed", "dry_verb": "Would prefix",
         }
     elif name == "dead-useeffect":
-        from ..fixers import fix_dead_useeffect
+        from ..lang.typescript.fixers import fix_dead_useeffect
         return {
             "label": "dead useEffect calls",
             "detect": lambda path: _detect_smell_flat(path, "dead_useeffect"),
@@ -179,7 +179,7 @@ def _get_fixer(name: str) -> dict | None:
             "post_fix": _cascade_import_cleanup,
         }
     elif name == "empty-if-chain":
-        from ..fixers import fix_empty_if_chain
+        from ..lang.typescript.fixers import fix_empty_if_chain
         return {
             "label": "empty if/else chains",
             "detect": lambda path: _detect_smell_flat(path, "empty_if_chain"),
@@ -220,7 +220,7 @@ def _wrap_debug_logs_fix(fix_fn):
 
 def _detect_smell_flat(path: Path, smell_id: str) -> list[dict]:
     """Run smell detector and extract flat match list for a specific smell type."""
-    from ..lang.typescript.smells import detect_smells
+    from ..lang.typescript.detectors.smells import detect_smells
     entries = detect_smells(path)
     for e in entries:
         if e["id"] == smell_id:
@@ -309,8 +309,8 @@ def _show_dry_run_samples(entries: list[dict], results: list[dict], fixer_name: 
 
 def _cascade_import_cleanup(path: Path, state: dict, prev_score: int, dry_run: bool):
     """Post-fix hook: removing debug logs may leave orphaned imports."""
-    from ..lang.typescript.unused import detect_unused
-    from ..fixers import fix_unused_imports
+    from ..lang.typescript.detectors.unused import detect_unused
+    from ..lang.typescript.fixers import fix_unused_imports
 
     print(c("\n  Running cascading import cleanup...", "dim"), file=sys.stderr)
     import_entries = detect_unused(path, category="imports")

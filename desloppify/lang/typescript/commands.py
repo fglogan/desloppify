@@ -18,7 +18,7 @@ DETECTOR_NAMES = [
 
 
 def _build_dep_graph(path):
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     return build_dep_graph(path)
 
 
@@ -50,7 +50,7 @@ def cmd_gods(args):
 
 def cmd_orphaned(args):
     import json
-    from .deps import build_dep_graph, build_dynamic_import_targets, ts_alias_resolver
+    from .detectors.deps import build_dep_graph, build_dynamic_import_targets, ts_alias_resolver
     from ...detectors.orphaned import detect_orphaned_files
     graph = build_dep_graph(Path(args.path))
     entries = detect_orphaned_files(
@@ -121,7 +121,7 @@ def cmd_dupes(args):
 
 def cmd_smells(args):
     import json
-    from .smells import detect_smells
+    from .detectors.smells import detect_smells
     entries = detect_smells(Path(args.path))
     if getattr(args, "json", False):
         print(json.dumps({"entries": entries}, indent=2))
@@ -146,7 +146,7 @@ def cmd_smells(args):
 
 def cmd_coupling(args):
     import json
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     from ...detectors.coupling import (detect_coupling_violations, detect_boundary_candidates,
                                         detect_cross_tool_imports)
     graph = build_dep_graph(Path(args.path))
@@ -201,15 +201,15 @@ def cmd_coupling(args):
 
 def get_detect_commands() -> dict[str, callable]:
     """Build the TypeScript detector command registry."""
-    from .logs import cmd_logs
-    from .unused import cmd_unused
-    from .exports import cmd_exports
-    from .deprecated import cmd_deprecated
-    from .props import cmd_props
-    from .concerns import cmd_concerns
-    from .deps import cmd_deps, cmd_cycles
-    from .patterns import cmd_patterns
-    from .react import cmd_react
+    from .detectors.logs import cmd_logs
+    from .detectors.unused import cmd_unused
+    from .detectors.exports import cmd_exports
+    from .detectors.deprecated import cmd_deprecated
+    from .detectors.props import cmd_props
+    from .detectors.concerns import cmd_concerns
+    from .detectors.deps import cmd_deps, cmd_cycles
+    from .detectors.patterns import cmd_patterns
+    from .detectors.react import cmd_react
     return {
         "logs":        cmd_logs,
         "unused":      cmd_unused,

@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from ..utils import PROJECT_ROOT, c, rel
+from ....utils import PROJECT_ROOT, c, rel
 from .common import find_balanced_end, extract_body_between_braces, collapse_blank_lines
 
 

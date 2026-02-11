@@ -70,7 +70,7 @@ TS_SKIP_DIRS = {"src/shared/components/ui"}
 
 
 def _phase_logs(path: Path, lang: LangConfig) -> list[dict]:
-    from .logs import detect_logs
+    from .detectors.logs import detect_logs
     log_entries = detect_logs(path)
     log_groups: dict[tuple, list] = defaultdict(list)
     for e in log_entries:
@@ -88,13 +88,13 @@ def _phase_logs(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _phase_unused(path: Path, lang: LangConfig) -> list[dict]:
-    from .unused import detect_unused
+    from .detectors.unused import detect_unused
     from ..base import make_unused_findings
     return make_unused_findings(detect_unused(path), log)
 
 
 def _phase_exports(path: Path, lang: LangConfig) -> list[dict]:
-    from .exports import detect_dead_exports
+    from .detectors.exports import detect_dead_exports
     export_entries = detect_dead_exports(path)
     results = []
     for e in export_entries:
@@ -109,7 +109,7 @@ def _phase_exports(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _phase_deprecated(path: Path, lang: LangConfig) -> list[dict]:
-    from .deprecated import detect_deprecated
+    from .detectors.deprecated import detect_deprecated
     dep_entries = detect_deprecated(path)
     results = []
     for e in dep_entries:
@@ -132,8 +132,8 @@ def _phase_structural(path: Path, lang: LangConfig) -> list[dict]:
     from ...detectors.complexity import detect_complexity
     from ...detectors.gods import detect_gods
     from .extractors import extract_ts_components, detect_passthrough_components
-    from .concerns import detect_mixed_concerns
-    from .props import detect_prop_interface_bloat
+    from .detectors.concerns import detect_mixed_concerns
+    from .detectors.props import detect_prop_interface_bloat
 
     structural: dict[str, dict] = {}
 
@@ -225,8 +225,8 @@ def _phase_coupling(path: Path, lang: LangConfig) -> list[dict]:
     from ...detectors.orphaned import detect_orphaned_files
     from ...detectors.naming import detect_naming_inconsistencies
     from ...utils import SRC_PATH
-    from .deps import build_dep_graph, build_dynamic_import_targets, ts_alias_resolver
-    from .patterns import detect_pattern_anomalies
+    from .detectors.deps import build_dep_graph, build_dynamic_import_targets, ts_alias_resolver
+    from .detectors.patterns import detect_pattern_anomalies
 
     results = []
     graph = build_dep_graph(path)
@@ -299,11 +299,11 @@ def _phase_coupling(path: Path, lang: LangConfig) -> list[dict]:
 
 
 def _phase_smells(path: Path, lang: LangConfig) -> list[dict]:
-    from .smells import detect_smells
+    from .detectors.smells import detect_smells
     results = make_smell_findings(detect_smells(path), log)
 
     # TS-specific: React state sync anti-patterns
-    from .react import detect_state_sync
+    from .detectors.react import detect_state_sync
     react_entries = detect_state_sync(path)
     for e in react_entries:
         setter_str = ", ".join(e["setters"])
@@ -323,8 +323,8 @@ def _get_ts_fixers() -> dict[str, FixerConfig]:
     return {
         "unused-imports": FixerConfig(
             label="unused imports",
-            detect=lambda path: __import__("desloppify.lang.typescript.unused", fromlist=["detect_unused"]).detect_unused(path, category="imports"),
-            fix=lambda entries, **kw: __import__("desloppify.fixers", fromlist=["fix_unused_imports"]).fix_unused_imports(entries, **kw),
+            detect=lambda path: __import__("desloppify.lang.typescript.detectors.unused", fromlist=["detect_unused"]).detect_unused(path, category="imports"),
+            fix=lambda entries, **kw: __import__("desloppify.lang.typescript.fixers", fromlist=["fix_unused_imports"]).fix_unused_imports(entries, **kw),
             detector="unused",
             verb="Removed", dry_verb="Would remove",
         ),
@@ -335,7 +335,7 @@ def _get_ts_fixers() -> dict[str, FixerConfig]:
 
 
 def _ts_build_dep_graph(path: Path) -> dict:
-    from .deps import build_dep_graph
+    from .detectors.deps import build_dep_graph
     return build_dep_graph(path)
 
 
@@ -376,7 +376,7 @@ class TypeScriptConfig(LangConfig):
                 DetectorPhase("Code smells", _phase_smells),
                 DetectorPhase("Duplicates", phase_dupes, slow=True),
             ],
-            fixers={},
+            fixers=_get_ts_fixers(),
             get_area=get_area,
             detector_names=DETECTOR_NAMES,
             detect_commands=get_detect_commands(),
