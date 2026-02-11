@@ -5,7 +5,7 @@ Codebase health scanner. Detects cruft (dead code, duplication, complexity, smel
 ## Install
 
 ```bash
-pip install git+https://github.com/peteromallet/desloppify.git
+pip install --upgrade git+https://github.com/peteromallet/desloppify.git
 ```
 
 ## Use with AI Agents
@@ -13,10 +13,10 @@ pip install git+https://github.com/peteromallet/desloppify.git
 Copy-paste into any AI coding agent (Cursor, Windsurf, Copilot, etc.):
 
 ```
-Install and run desloppify to scan this codebase for code quality issues (dead code,
+Install or update desloppify, then scan this codebase for code quality issues (dead code,
 duplication, complexity, smells). It tracks findings and reports a health score.
 
-pip install git+https://github.com/peteromallet/desloppify.git
+pip install --upgrade git+https://github.com/peteromallet/desloppify.git
 desloppify scan --path .
 desloppify status
 desloppify next
