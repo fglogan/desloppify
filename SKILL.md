@@ -66,3 +66,4 @@ orphaned, single-use, naming
 - After fixing, always rescan — cascading effects can create new findings
 - Use `desloppify show <detector>` to focus on one category at a time
 - Score can temporarily drop after fixes (cascade effects are normal)
+- As you work, note any false positives, missing detectors, or improvements — suggest them to the user so they can report at https://github.com/peteromallet/desloppify/issues

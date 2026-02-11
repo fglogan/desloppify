@@ -15,6 +15,8 @@ Paste this into any AI coding agent (Cursor, Windsurf, Copilot, Claude Code, etc
 > Install desloppify: `pip install git+https://github.com/peteromallet/desloppify.git`
 >
 > Scan my codebase: `desloppify scan --path src/`. Then: `desloppify status` for the score, `desloppify next` for the top finding to fix. After fixing: `desloppify resolve fixed "<id>"`. For auto-fixable stuff: `desloppify fix unused-imports --dry-run`. Rescan after each batch. Work tier by tier: T1 (auto-fix) → T2 (quick) → T3 (judgment) → T4 (refactor). `desloppify show <detector>` to dig in, `desloppify plan` for a prioritized plan. Use `--lang python` for Python projects.
+>
+> As you work, note any false positives, missing detectors, or improvements that would make desloppify more useful — suggest them to the user so they can report them at https://github.com/peteromallet/desloppify/issues.
 
 ## Claude Code
 
