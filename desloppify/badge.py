@@ -227,7 +227,7 @@ def generate_scorecard(state: dict, output_path: str | Path) -> Path:
     draw.rectangle((col_name, line_y, table_x2 - _s(12), line_y), fill=BORDER)
 
     # --- Dimension rows with alternating tint ---
-    y = line_y + _s(4)
+    y = line_y + _s(7)
     for i, (name, data) in enumerate(active_dims):
         if i % 2 == 1:
             draw.rectangle((table_x1 + 1, y - _s(1), table_x2 - 1, y + row_h - _s(3)), fill=BG_ROW_ALT)
