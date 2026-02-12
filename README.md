@@ -38,18 +38,6 @@ mkdir -p .claude/skills/desloppify && curl -sL https://raw.githubusercontent.com
 <details>
 <summary><strong>Stuff you probably won't need to know</strong></summary>
 
-#### Quick start
-
-```bash
-pip install --upgrade git+https://github.com/peteromallet/desloppify.git
-desloppify scan --path src/              # detect findings, update state
-desloppify status                         # health score + tier breakdown
-desloppify next --count 5                 # next 5 highest-priority items
-desloppify fix unused-imports --dry-run   # preview auto-fix
-desloppify resolve fixed "unused::..."    # mark finding resolved
-desloppify scan --path src/              # rescan after fixes
-```
-
 #### Commands
 
 | Command | Description |
@@ -59,7 +47,9 @@ desloppify scan --path src/              # rescan after fixes
 | `show <pattern>` | Findings by file, directory, detector, or ID |
 | `next [--tier N]` | Highest-priority open finding |
 | `resolve <status> <patterns>` | Mark fixed / wontfix / false_positive |
+| `ignore <pattern>` | Suppress findings matching a pattern |
 | `fix <fixer> [--dry-run]` | Auto-fix mechanical issues |
+| `move <src> <dst>` | Move file/directory, update all imports |
 | `detect <name>` | Run a single detector raw |
 | `plan` | Prioritized markdown plan |
 | `tree` | Annotated codebase tree |
