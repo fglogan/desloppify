@@ -31,7 +31,7 @@ def _score_color(score: float, *, muted: bool = False) -> tuple[int, int, int]:
 
 def _load_font(size: int, *, serif: bool = False, bold: bool = False, mono: bool = False):
     """Load a font with cross-platform fallback."""
-    from PIL import ImageFont
+    from PIL import ImageFont  # noqa: deferred — Pillow is optional
 
     size = size * _SCALE
     candidates = []
@@ -95,9 +95,150 @@ def _draw_rule_with_ornament(draw, y: int, x1: int, x2: int, cx: int, line_fill,
     _draw_ornament(draw, cx, y, _s(3), ornament_fill)
 
 
+def _draw_vert_rule_with_ornament(draw, x: int, y1: int, y2: int, cy: int, line_fill, ornament_fill):
+    """Draw a vertical rule with a diamond ornament in the center."""
+    gap = _s(8)
+    draw.rectangle((x, y1, x + 1, cy - gap), fill=line_fill)
+    draw.rectangle((x, cy + gap, x + 1, y2), fill=line_fill)
+    _draw_ornament(draw, x, cy, _s(3), ornament_fill)
+
+
+# -- Palette used by all drawing functions --
+_BG = (247, 240, 228)
+_BG_SCORE = (240, 232, 217)
+_BG_TABLE = (240, 233, 220)
+_BG_ROW_ALT = (234, 226, 212)
+_TEXT = (58, 48, 38)
+_DIM = (138, 122, 102)
+_BORDER = (192, 176, 152)
+_ACCENT = (148, 112, 82)
+_FRAME = (172, 152, 126)
+
+
+def _draw_left_panel(draw, main_score: float, strict_score: float,
+                     lp_left: int, lp_right: int, lp_top: int, lp_bot: int):
+    """Draw the left panel: score panel background, title, score, strict, URL."""
+    font_title = _load_font(15, serif=True, bold=True)
+    font_big = _load_font(42, serif=True, bold=True)
+    font_strict_label = _load_font(12, serif=True)
+    font_strict_val = _load_font(19, serif=True, bold=True)
+
+    lp_cx = (lp_left + lp_right) // 2
+
+    draw.rounded_rectangle(
+        (lp_left, lp_top, lp_right, lp_bot),
+        radius=_s(4), fill=_BG_SCORE, outline=_BORDER, width=1)
+
+    # Measure all elements
+    title = "DESLOPPIFY SCORE"
+    title_bbox = draw.textbbox((0, 0), title, font=font_title)
+    title_h = title_bbox[3] - title_bbox[1]
+    tw = draw.textlength(title, font=font_title)
+
+    score_str = f"{main_score:.1f}"
+    score_bbox = draw.textbbox((0, 0), score_str, font=font_big)
+    score_h = score_bbox[3] - score_bbox[1]
+
+    strict_label_bbox = draw.textbbox((0, 0), "strict", font=font_strict_label)
+    strict_val_str = f"{strict_score:.1f}"
+    strict_val_bbox = draw.textbbox((0, 0), strict_val_str, font=font_strict_val)
+    strict_h = max(strict_label_bbox[3] - strict_label_bbox[1],
+                   strict_val_bbox[3] - strict_val_bbox[1])
+
+    # Stack heights: title → ornament rule → score → strict
+    ornament_gap = _s(7)
+    score_gap = _s(6)
+    total_h = title_h + ornament_gap + _s(6) + ornament_gap + score_h + score_gap + strict_h
+    y0 = (lp_top + lp_bot) // 2 - total_h // 2 + _s(3)
+
+    # Title
+    draw.text((lp_cx - tw / 2, y0 - title_bbox[1]), title, fill=_TEXT, font=font_title)
+
+    # Ornamental rule
+    rule_y = y0 + title_h + ornament_gap
+    rule_inset = _s(28)
+    _draw_rule_with_ornament(draw, rule_y, lp_left + rule_inset, lp_right - rule_inset,
+                             lp_cx, _BORDER, _ACCENT)
+
+    # Main score
+    score_y = rule_y + _s(6) + ornament_gap
+    sw = draw.textlength(score_str, font=font_big)
+    draw.text((lp_cx - sw / 2, score_y - score_bbox[1]), score_str,
+              fill=_score_color(main_score), font=font_big)
+
+    # Strict label + value
+    strict_y = score_y + score_h + score_gap
+    sl_w = draw.textlength("strict", font=font_strict_label)
+    sv_w = draw.textlength(strict_val_str, font=font_strict_val)
+    gap = _s(5)
+    strict_x = lp_cx - (sl_w + gap + sv_w) / 2
+    draw.text((strict_x, strict_y - strict_label_bbox[1]), "strict", fill=_DIM,
+              font=font_strict_label)
+    draw.text((strict_x + sl_w + gap, strict_y - strict_val_bbox[1]), strict_val_str,
+              fill=_score_color(strict_score, muted=True), font=font_strict_val)
+
+
+
+def _draw_right_panel(draw, active_dims: list, row_h: int,
+                      table_x1: int, table_x2: int, table_top: int, table_bot: int):
+    """Draw the right panel: dimension table with header, rows, alternating tints."""
+    font_header = _load_font(10, mono=True)
+    font_row = _load_font(11, mono=True)
+    rule_gap = _s(4)
+    rows_gap = _s(6)
+    row_count = len(active_dims)
+
+    draw.rounded_rectangle(
+        (table_x1, table_top, table_x2, table_bot),
+        radius=_s(4), fill=_BG_TABLE, outline=_BORDER, width=1)
+
+    # Column positions
+    col_name = table_x1 + _s(12)
+    col_health = table_x2 - _s(118)
+    col_strict = table_x2 - _s(52)
+
+    # Measure header for centering
+    header_bbox = draw.textbbox((0, 0), "Dimension", font=font_header)
+    header_h = header_bbox[3] - header_bbox[1]
+
+    # Center table content vertically
+    table_content_h = header_h + rule_gap + rows_gap + row_count * row_h
+    table_content_top = (table_top + table_bot) // 2 - table_content_h // 2 + _s(2)
+
+    # Header row
+    header_y = table_content_top
+    draw.text((col_name, header_y - header_bbox[1]), "Dimension", fill=_DIM, font=font_header)
+    draw.text((col_health, header_y - header_bbox[1]), "Health", fill=_DIM, font=font_header)
+    draw.text((col_strict, header_y - header_bbox[1]), "Strict", fill=_DIM, font=font_header)
+
+    # Header underline
+    line_y = header_y + header_h + rule_gap
+    draw.rectangle((col_name, line_y, table_x2 - _s(12), line_y), fill=_BORDER)
+
+    # Dimension rows
+    sample_bbox = draw.textbbox((0, 0), "Xg", font=font_row)
+    row_text_h = sample_bbox[3] - sample_bbox[1]
+    row_text_offset = sample_bbox[1]
+
+    y_band = line_y + rows_gap
+    for i, (name, data) in enumerate(active_dims):
+        band_top = y_band
+        band_bot = y_band + row_h
+        if i % 2 == 1:
+            draw.rectangle((table_x1 + 1, band_top, table_x2 - 1, band_bot), fill=_BG_ROW_ALT)
+        text_y = band_top + (row_h - row_text_h) // 2 - row_text_offset + _s(1)
+        score = data.get("score", 100)
+        strict = data.get("strict", score)
+        draw.text((col_name, text_y), name, fill=_TEXT, font=font_row)
+        draw.text((col_health, text_y), f"{score:.1f}%", fill=_score_color(score), font=font_row)
+        draw.text((col_strict, text_y), f"{strict:.1f}%",
+                  fill=_score_color(strict, muted=True), font=font_row)
+        y_band += row_h
+
+
 def generate_scorecard(state: dict, output_path: str | Path) -> Path:
-    """Render a scorecard PNG from scan state. Returns the output path."""
-    from PIL import Image, ImageDraw
+    """Render a landscape scorecard PNG from scan state. Returns the output path."""
+    from PIL import Image, ImageDraw  # noqa: deferred — Pillow is optional
 
     output_path = Path(output_path)
     dim_scores = state.get("dimension_scores", {})
@@ -107,166 +248,47 @@ def generate_scorecard(state: dict, output_path: str | Path) -> Path:
     main_score = obj_score if obj_score is not None else state.get("score", 0)
     strict_score = obj_strict if obj_strict is not None else state.get("strict_score", 0)
 
-    # Fonts — serif for headings, mono for data
-    font_title = _load_font(18, serif=True, bold=True)
-    font_big = _load_font(48, serif=True, bold=True)
-    font_strict_label = _load_font(13, serif=True)
-    font_strict_val = _load_font(22, serif=True, bold=True)
-    font_header = _load_font(10, mono=True)
-    font_row = _load_font(11, mono=True)
-    font_tiny = _load_font(9, serif=True)
-
-    # Wes Anderson palette
-    BG = (247, 240, 228)           # warm cream
-    BG_SCORE = (240, 232, 217)     # slightly warm panel behind score
-    BG_TABLE = (240, 233, 220)     # table background
-    BG_ROW_ALT = (234, 226, 212)   # alternating row tint
-    TEXT = (58, 48, 38)            # warm dark brown
-    DIM = (138, 122, 102)         # warm muted
-    BORDER = (192, 176, 152)      # tan border
-    ACCENT = (148, 112, 82)       # warm brown accent
-    FRAME = (172, 152, 126)       # frame color
-
-    # Layout
+    # Layout — landscape (wide)
     active_dims = [(name, data) for name, data in dim_scores.items()
                    if data.get("checks", 0) > 0]
     row_count = len(active_dims)
-    W = _s(420)
-    inner = _s(18)
-    table_top = _s(146)
     row_h = _s(22)
-    table_h = _s(24) + row_count * row_h + _s(10)
-    H = table_top + table_h + _s(32)
+    divider_x = _s(248)
+    W = _s(670)
+    frame_inset = _s(5)
 
-    img = Image.new("RGB", (W, H), BG)
+    # Height driven by whichever side is taller
+    rule_gap = _s(4)
+    rows_gap = _s(6)
+    table_content_h = _s(14) + rule_gap + rows_gap + row_count * row_h
+    content_h = max(table_content_h + _s(28), _s(150))
+    H = _s(12) + content_h
+
+    img = Image.new("RGB", (W, H), _BG)
     draw = ImageDraw.Draw(img)
 
-    # --- Double frame ---
-    draw.rectangle((0, 0, W - 1, H - 1), outline=FRAME, width=_s(2))
-    draw.rectangle((_s(5), _s(5), W - _s(6), H - _s(6)), outline=BORDER, width=1)
+    # Double frame
+    draw.rectangle((0, 0, W - 1, H - 1), outline=_FRAME, width=_s(2))
+    draw.rectangle((frame_inset, frame_inset, W - frame_inset - 1, H - frame_inset - 1),
+                   outline=_BORDER, width=1)
 
-    # --- Title: centered between inner frame top and first rule ---
-    rule_y = _s(40)
-    title = "DESLOPPIFY SCORE"
-    tw = draw.textlength(title, font=font_title)
-    title_bbox = draw.textbbox((0, 0), title, font=font_title)
-    title_h = title_bbox[3] - title_bbox[1]
-    title_zone_top = _s(6)  # inner frame top
-    title_y = title_zone_top + (rule_y - title_zone_top - title_h) // 2
-    draw.text(((W - tw) / 2, title_y - title_bbox[1]), title, fill=TEXT, font=font_title)
+    content_top = frame_inset + _s(1)
+    content_bot = H - frame_inset - _s(1)
+    content_mid_y = (content_top + content_bot) // 2
 
-    # --- Ornamental rule below title ---
-    rule_margin = _s(40)
-    _draw_rule_with_ornament(draw, rule_y, rule_margin, W - rule_margin, W // 2, BORDER, ACCENT)
+    # Left panel: title + score + URL
+    _draw_left_panel(draw, main_score, strict_score,
+                     lp_left=frame_inset + _s(6), lp_right=divider_x - _s(8),
+                     lp_top=content_top + _s(4), lp_bot=content_bot - _s(4))
 
-    # --- Score panel ---
-    panel_top = _s(48)
-    panel_bot = _s(128)
-    panel_margin = inner + _s(4)
-    draw.rounded_rectangle(
-        (panel_margin, panel_top, W - panel_margin, panel_bot),
-        radius=_s(4), fill=BG_SCORE, outline=BORDER, width=1)
+    # Vertical divider with ornament
+    _draw_vert_rule_with_ornament(draw, divider_x, content_top + _s(12), content_bot - _s(12),
+                                  content_mid_y, _BORDER, _ACCENT)
 
-    # Measure text heights for vertical centering
-    score_str = f"{main_score:.1f}"
-    score_color = _score_color(main_score)
-    score_bbox = draw.textbbox((0, 0), score_str, font=font_big)
-    score_h = score_bbox[3] - score_bbox[1]
-
-    strict_label = "strict"
-    strict_val = f"{strict_score:.1f}"
-    strict_label_bbox = draw.textbbox((0, 0), strict_label, font=font_strict_label)
-    strict_val_bbox = draw.textbbox((0, 0), strict_val, font=font_strict_val)
-    strict_h = max(strict_label_bbox[3] - strict_label_bbox[1],
-                   strict_val_bbox[3] - strict_val_bbox[1])
-
-    # Total content height: score + gap + strict line
-    content_gap = _s(8)
-    total_content_h = score_h + content_gap + strict_h
-    panel_mid = (panel_top + panel_bot) // 2
-    content_top = panel_mid - total_content_h // 2 + _s(3)  # optical: descenders skew center up
-
-    # Main score — centered in panel
-    sw = draw.textlength(score_str, font=font_big)
-    draw.text(((W - sw) / 2, content_top - score_bbox[1]), score_str, fill=score_color, font=font_big)
-
-    # Strict label + value below main score
-    sl_w = draw.textlength(strict_label, font=font_strict_label)
-    sv_w = draw.textlength(strict_val, font=font_strict_val)
-    gap = _s(5)
-    strict_total_w = sl_w + gap + sv_w
-    strict_x = (W - strict_total_w) / 2
-    strict_y = content_top + score_h + content_gap
-    # Baseline-align the two strict texts
-    draw.text((strict_x, strict_y - strict_label_bbox[1]), strict_label, fill=DIM, font=font_strict_label)
-    draw.text((strict_x + sl_w + gap, strict_y - strict_val_bbox[1]), strict_val, fill=_score_color(strict_score, muted=True), font=font_strict_val)
-
-    # --- Ornamental rule above table ---
-    rule2_y = table_top - _s(10)
-    _draw_rule_with_ornament(draw, rule2_y, rule_margin, W - rule_margin, W // 2, BORDER, ACCENT)
-
-    # --- Table area ---
-    table_x1 = inner + _s(2)
-    table_x2 = W - inner - _s(2)
-    draw.rounded_rectangle(
-        (table_x1, table_top, table_x2, table_top + table_h),
-        radius=_s(4), fill=BG_TABLE, outline=BORDER, width=1)
-
-    # --- Table content: measure total height, then center within table box ---
-    col_name = table_x1 + _s(12)
-    col_health = _s(262)
-    col_strict = _s(342)
-
-    header_bbox = draw.textbbox((0, 0), "Dimension", font=font_header)
-    header_h = header_bbox[3] - header_bbox[1]
-    rule_gap = _s(4)
-    rows_gap = _s(6)  # gap between header underline and first row
-
-    # Total table content: header + rule + gap + rows
-    table_content_h = header_h + rule_gap + rows_gap + row_count * row_h
-    table_bot = table_top + table_h
-    table_content_top = table_top + (table_h - table_content_h) // 2 + _s(4)  # optical nudge
-
-    header_y = table_content_top
-    draw.text((col_name, header_y - header_bbox[1]), "Dimension", fill=DIM, font=font_header)
-    draw.text((col_health, header_y - header_bbox[1]), "Health", fill=DIM, font=font_header)
-    draw.text((col_strict, header_y - header_bbox[1]), "Strict", fill=DIM, font=font_header)
-
-    # Header underline
-    line_y = header_y + header_h + rule_gap
-    draw.rectangle((col_name, line_y, table_x2 - _s(12), line_y), fill=BORDER)
-
-    # --- Dimension rows with alternating tint ---
-    # Measure actual row text height for vertical centering within bands
-    sample_bbox = draw.textbbox((0, 0), "Xg", font=font_row)
-    row_text_h = sample_bbox[3] - sample_bbox[1]
-    row_text_offset = sample_bbox[1]  # top bearing
-
-    y_band = line_y + rows_gap
-    for i, (name, data) in enumerate(active_dims):
-        band_top = y_band
-        band_bot = y_band + row_h
-        # Alternating background — full band height
-        if i % 2 == 1:
-            draw.rectangle((table_x1 + 1, band_top, table_x2 - 1, band_bot), fill=BG_ROW_ALT)
-        # Center text vertically within band
-        text_y = band_top + (row_h - row_text_h) // 2 - row_text_offset + _s(1)  # optical nudge
-        score = data.get("score", 100)
-        strict = data.get("strict", score)
-        draw.text((col_name, text_y), name, fill=TEXT, font=font_row)
-        draw.text((col_health, text_y), f"{score:.1f}%", fill=_score_color(score), font=font_row)
-        draw.text((col_strict, text_y), f"{strict:.1f}%", fill=_score_color(strict, muted=True), font=font_row)
-        y_band += row_h
-
-    # --- Footer: vertically centered between table bottom and inner frame ---
-    footer = "github.com/peteromallet/desloppify"
-    footer_bbox = draw.textbbox((0, 0), footer, font=font_tiny)
-    footer_h = footer_bbox[3] - footer_bbox[1]
-    footer_zone_top = table_bot
-    footer_zone_bot = H - _s(6)  # inner frame bottom
-    footer_y = footer_zone_top + (footer_zone_bot - footer_zone_top - footer_h) // 2
-    fw = draw.textlength(footer, font=font_tiny)
-    draw.text(((W - fw) / 2, footer_y - footer_bbox[1]), footer, fill=DIM, font=font_tiny)
+    # Right panel: dimension table
+    _draw_right_panel(draw, active_dims, row_h,
+                      table_x1=divider_x + _s(10), table_x2=W - frame_inset - _s(6),
+                      table_top=content_top + _s(4), table_bot=content_bot - _s(4))
 
     img.save(str(output_path), "PNG", optimize=True)
     return output_path
