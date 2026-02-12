@@ -6,6 +6,10 @@ Every scan generates a scorecard badge you can add to your README — here's the
 
 <img src="scorecard.png" width="89%">
 
+## Vibe Engineering
+
+Are you a hardcore vibe engineer who wants to build beautiful things? [This may be the place for you.](https://discord.gg/z7EUWAMVX4)
+
 ## For your agent's consideration...
 
 Copy-paste into any AI coding agent (Cursor, Windsurf, Copilot, etc.):
