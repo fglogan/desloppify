@@ -6,10 +6,6 @@ Every scan generates a scorecard badge you can add to your README — here's the
 
 <img src="scorecard.png" width="89%">
 
-## Vibe Engineering
-
-Are you a hardcore vibe engineer who wants to build beautiful things? [This may be the place for you.](https://discord.gg/z7EUWAMVX4)
-
 ## For your agent's consideration...
 
 Copy-paste into any AI coding agent (Cursor, Windsurf, Copilot, etc.):
@@ -36,6 +32,10 @@ how desloppify works or debug an issue: git clone https://github.com/peteromalle
 If you're Claude Code, also run:
 mkdir -p .claude/skills/desloppify && curl -sL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md -o .claude/skills/desloppify/SKILL.md
 ```
+
+## Vibe Engineer?
+
+Are you a hardcore vibe engineer who wants to build beautiful things? [This may be the place for you.](https://discord.gg/z7EUWAMVX4)
 
 ---
 
