@@ -6,6 +6,47 @@ from ..utils import c
 from ..cli import _state_path, _write_query
 
 
+def _audit_excluded_dirs(exclusions: tuple[str, ...], scanned_files: list[str],
+                         project_root: Path) -> list[dict]:
+    """Check if any --exclude directory has zero references from scanned code.
+
+    Returns findings for directories that appear stale (no file references them).
+    """
+    if not exclusions:
+        return []
+
+    stale_findings = []
+    for ex_dir in exclusions:
+        # Skip DEFAULT_EXCLUSIONS (node_modules, .venv, etc.) — only audit user-specified dirs
+        from ..utils import DEFAULT_EXCLUSIONS
+        if ex_dir in DEFAULT_EXCLUSIONS:
+            continue
+        # Check if the excluded directory actually exists
+        ex_path = project_root / ex_dir
+        if not ex_path.is_dir():
+            continue
+        # Search scanned files for any reference to this directory name
+        ref_count = 0
+        for filepath in scanned_files:
+            try:
+                abs_path = filepath if Path(filepath).is_absolute() else str(project_root / filepath)
+                content = Path(abs_path).read_text(errors="replace")
+                if ex_dir in content:
+                    ref_count += 1
+                    break  # One reference is enough — not stale
+            except OSError:
+                continue
+        if ref_count == 0:
+            from ..state import make_finding
+            stale_findings.append(make_finding(
+                "stale_exclude", ex_dir, ex_dir,
+                tier=4, confidence="info",
+                summary=f"Excluded directory '{ex_dir}' has 0 references from scanned code — may be stale",
+                detail={"directory": ex_dir, "references": 0},
+            ))
+    return stale_findings
+
+
 def _collect_codebase_metrics(lang, path: Path) -> dict | None:
     """Collect LOC/file/directory counts for the configured language."""
     if not lang or not lang.file_finder:
@@ -141,6 +182,15 @@ def cmd_scan(args):
     codebase_metrics = _collect_codebase_metrics(lang, path)
 
     from ..utils import rel, _extra_exclusions, PROJECT_ROOT
+
+    # Audit excluded directories for staleness (Issue #11)
+    if _extra_exclusions and lang and lang.file_finder:
+        scanned_files = lang.file_finder(path)
+        stale = _audit_excluded_dirs(_extra_exclusions, scanned_files, PROJECT_ROOT)
+        if stale:
+            findings.extend(stale)
+            for sf in stale:
+                print(c(f"  ℹ {sf['summary']}", "dim"))
     scan_path_rel = rel(str(path))
     # A scan is "full" when it covers most of the project's source files.
     # Simple path matching breaks for Python (default_src=".") when the user

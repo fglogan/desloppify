@@ -17,12 +17,15 @@ from pathlib import Path
 from .utils import PROJECT_ROOT, c, rel
 
 
-def _collect_file_data(path: Path) -> list[dict]:
-    """Collect LOC for all TS/TSX files."""
-    from .utils import find_ts_files
-    ts_files = find_ts_files(path)
+def _collect_file_data(path: Path, lang=None) -> list[dict]:
+    """Collect LOC for all source files using the language's file finder."""
+    if lang and lang.file_finder:
+        source_files = lang.file_finder(path)
+    else:
+        from .utils import find_ts_files
+        source_files = find_ts_files(path)
     files = []
-    for filepath in ts_files:
+    for filepath in source_files:
         try:
             p = Path(filepath) if Path(filepath).is_absolute() else PROJECT_ROOT / filepath
             content = p.read_text()
@@ -84,13 +87,19 @@ def _build_tree(files: list[dict], dep_graph: dict, findings_by_file: dict) -> d
 
 
 def generate_visualization(path: Path, state: dict | None = None,
-                           output: Path | None = None) -> str:
+                           output: Path | None = None, lang=None) -> str:
     """Generate an HTML treemap visualization."""
-    from .lang.typescript.deps import build_dep_graph
-
     # Collect data
-    files = _collect_file_data(path)
-    dep_graph = build_dep_graph(path)
+    files = _collect_file_data(path, lang)
+    dep_graph = {}
+    if lang and lang.build_dep_graph:
+        dep_graph = lang.build_dep_graph(path)
+    elif not lang:
+        try:
+            from .lang.typescript.deps import build_dep_graph
+            dep_graph = build_dep_graph(path)
+        except (ImportError, ModuleNotFoundError):
+            pass
 
     # Get findings from state if available
     findings_by_file: dict[str, list] = defaultdict(list)
@@ -127,8 +136,10 @@ def generate_visualization(path: Path, state: dict | None = None,
 def cmd_viz(args):
     """Generate HTML treemap visualization."""
     from .state import load_state
+    from .cli import _resolve_lang
 
     path = Path(args.path)
+    lang = _resolve_lang(args)
     state = None
     state_path = getattr(args, "state", None)
     try:
@@ -138,7 +149,7 @@ def cmd_viz(args):
 
     output = Path(getattr(args, "output", None) or ".desloppify/treemap.html")
     print(c("Collecting file data and building dependency graph...", "dim"))
-    generate_visualization(path, state, output)
+    generate_visualization(path, state, output, lang=lang)
     print(c(f"\nTreemap written to {output}", "green"))
     print(c(f"Open in browser: file://{output.resolve()}", "dim"))
 
@@ -216,7 +227,7 @@ def _print_tree(node: dict, indent: int, max_depth: int, min_loc: int,
 def generate_tree_text(path: Path, state: dict | None = None, *,
                        max_depth: int = 2, focus: str | None = None,
                        min_loc: int = 0, sort_by: str = "loc",
-                       detail: bool = False) -> str:
+                       detail: bool = False, lang=None) -> str:
     """Generate text-based annotated tree of the codebase.
 
     Args:
@@ -227,11 +238,18 @@ def generate_tree_text(path: Path, state: dict | None = None, *,
         min_loc: Hide files/dirs below this LOC threshold.
         sort_by: 'loc', 'findings', or 'coupling'.
         detail: Show finding summaries under each file.
+        lang: Language config for file discovery and dep graph.
     """
-    from .lang.typescript.deps import build_dep_graph
-
-    files = _collect_file_data(path)
-    dep_graph = build_dep_graph(path)
+    files = _collect_file_data(path, lang)
+    dep_graph = {}
+    if lang and lang.build_dep_graph:
+        dep_graph = lang.build_dep_graph(path)
+    elif not lang:
+        try:
+            from .lang.typescript.deps import build_dep_graph
+            dep_graph = build_dep_graph(path)
+        except (ImportError, ModuleNotFoundError):
+            pass
 
     findings_by_file: dict[str, list] = defaultdict(list)
     if state and state.get("findings"):
@@ -265,8 +283,10 @@ def generate_tree_text(path: Path, state: dict | None = None, *,
 def cmd_tree(args):
     """Print annotated codebase tree to terminal."""
     from .state import load_state
+    from .cli import _resolve_lang
 
     path = Path(args.path)
+    lang = _resolve_lang(args)
     state = None
     try:
         state = load_state(Path(args.state) if getattr(args, "state", None) else None)
@@ -280,7 +300,7 @@ def cmd_tree(args):
     detail = getattr(args, "detail", False)
 
     print(generate_tree_text(path, state, max_depth=max_depth, focus=focus,
-                             min_loc=min_loc, sort_by=sort_by, detail=detail))
+                             min_loc=min_loc, sort_by=sort_by, detail=detail, lang=lang))
 
 
 # ── HTML Template ────────────────────────────────────────────

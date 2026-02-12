@@ -53,7 +53,9 @@ def get_lang(name: str) -> LangConfig:
 def auto_detect_lang(project_root: Path) -> str | None:
     """Auto-detect language from project files.
 
-    Only returns languages that have a registered implementation.
+    When multiple config files are present (e.g. package.json + pyproject.toml),
+    counts actual source files to pick the dominant language instead of relying
+    on first-match ordering.
     """
     _load_all()
     candidates = []
@@ -67,10 +69,26 @@ def auto_detect_lang(project_root: Path) -> str | None:
         candidates.append("go")
     if (project_root / "Cargo.toml").exists():
         candidates.append("rust")
-    for lang in candidates:
-        if lang in _registry:
-            return lang
-    return None
+
+    # Filter to registered languages only
+    candidates = [c for c in candidates if c in _registry]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple candidates — count source files to pick the dominant one.
+    # Uses file_finder from each lang config to respect DEFAULT_EXCLUSIONS.
+    best, best_count = None, -1
+    for lang_name in candidates:
+        lang_cfg = _registry[lang_name]()
+        if lang_cfg.file_finder:
+            count = len(lang_cfg.file_finder(project_root))
+        else:
+            count = 0
+        if count > best_count:
+            best, best_count = lang_name, count
+    return best
 
 
 def available_langs() -> list[str]:
