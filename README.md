@@ -6,13 +6,7 @@ Every scan generates a scorecard badge you can add to your README — here's the
 
 <img src="scorecard.png" width="380">
 
-## Install
-
-```bash
-pip install --upgrade git+https://github.com/peteromallet/desloppify.git
-```
-
-## Use with AI Agents
+## For your agent's consideration...
 
 Copy-paste into any AI coding agent (Cursor, Windsurf, Copilot, etc.):
 
@@ -39,9 +33,15 @@ If you're Claude Code, also run:
 mkdir -p .claude/skills/desloppify && curl -sL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md -o .claude/skills/desloppify/SKILL.md
 ```
 
-## Quick Start
+---
+
+<details>
+<summary><strong>Stuff you probably won't need to know</strong></summary>
+
+#### Quick start
 
 ```bash
+pip install --upgrade git+https://github.com/peteromallet/desloppify.git
 desloppify scan --path src/              # detect findings, update state
 desloppify status                         # health score + tier breakdown
 desloppify next --count 5                 # next 5 highest-priority items
@@ -50,7 +50,7 @@ desloppify resolve fixed "unused::..."    # mark finding resolved
 desloppify scan --path src/              # rescan after fixes
 ```
 
-## Commands
+#### Commands
 
 | Command | Description |
 |---------|-------------|
@@ -65,13 +65,13 @@ desloppify scan --path src/              # rescan after fixes
 | `tree` | Annotated codebase tree |
 | `viz` | Interactive HTML treemap |
 
-## Detectors
+#### Detectors
 
 **TypeScript/React**: logs, unused, exports, deprecated, large, complexity, gods, single-use, props, passthrough, concerns, deps, dupes, smells, coupling, patterns, naming, cycles, orphaned, react
 
 **Python**: unused, large, complexity, gods, passthrough, smells, dupes, deps, cycles, orphaned, single-use, naming
 
-## Tiers & Scoring
+#### Tiers & scoring
 
 | Tier | Fix type | Examples |
 |------|----------|----------|
@@ -82,7 +82,7 @@ desloppify scan --path src/              # rescan after fixes
 
 Score is weighted (T4 = 4x T1). Strict score excludes wontfix.
 
-## Configuration
+#### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -95,11 +95,11 @@ Score is weighted (T4 = 4x T1). Strict score excludes wontfix.
 | `DESLOPPIFY_NO_BADGE` | — | Set to `true` to disable badge via env |
 | `DESLOPPIFY_BADGE_PATH` | `scorecard.png` | Badge output path via env |
 
-## Adding a Language
+#### Adding a language
 
 Create `desloppify/lang/<name>/` with `__init__.py`, `commands.py`, `extractors.py`, `detectors/`, `fixers/`. Validated at registration. Zero shared code changes. See `lang/python/` for example.
 
-## Architecture
+#### Architecture
 
 ```
 detectors/              ← Generic algorithms (zero language knowledge)
@@ -108,3 +108,5 @@ lang/<name>/            ← Language config + phase runners + extractors + detec
 ```
 
 Import direction: `lang/` → `detectors/`. Never the reverse.
+
+</details>
