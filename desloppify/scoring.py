@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .zones import EXCLUDED_ZONE_VALUES
+
 
 @dataclass
 class Dimension:
@@ -24,11 +26,12 @@ DIMENSIONS = [
     Dimension("File health",         3, ["structural"]),
     Dimension("Component design",    3, ["props"]),
     Dimension("Coupling",            3, ["single_use", "coupling"]),
-    Dimension("Organization",        3, ["orphaned", "flat_dirs", "naming", "facade"]),
+    Dimension("Organization",        3, ["orphaned", "flat_dirs", "naming", "facade", "stale_exclude"]),
     Dimension("Code quality",        3, ["smells", "react", "dict_keys"]),
     Dimension("Duplication",         3, ["dupes"]),
     Dimension("Pattern consistency", 3, ["patterns"]),
     Dimension("Dependency health",   4, ["cycles"]),
+    Dimension("Test health",         4, ["test_coverage"]),
 ]
 
 TIER_WEIGHTS = {1: 1, 2: 2, 3: 3, 4: 4}
@@ -40,10 +43,10 @@ MIN_SAMPLE = 200
 
 # Detectors where potential = file count but findings are per-(file, sub-type).
 # Per-file weighted failures are capped at 1.0 to match the file-based denominator.
-_FILE_BASED_DETECTORS = {"smells", "dict_keys"}
+_FILE_BASED_DETECTORS = {"smells", "dict_keys", "test_coverage"}
 
-# Zones excluded from scoring (findings with these zones are skipped)
-_EXCLUDED_ZONES = {"test", "config", "generated", "vendor"}
+# Zones excluded from scoring (imported from zones.py canonical source)
+_EXCLUDED_ZONES = EXCLUDED_ZONE_VALUES
 
 # Statuses that count as failures
 _LENIENT_FAILURES = {"open"}

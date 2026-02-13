@@ -8,10 +8,24 @@ import re
 
 def compute_max_params(content: str, lines: list[str]) -> tuple[int, str] | None:
     """Find the function with the most parameters. Returns (count, label) or None."""
-    param_re = re.compile(r"def\s+\w+\s*\(([^)]*)\)", re.DOTALL)
+    def_re = re.compile(r"def\s+\w+\s*\(", re.MULTILINE)
     max_params = 0
-    for m in param_re.finditer(content):
-        params = [p.strip() for p in m.group(1).split(",") if p.strip()]
+    for m in def_re.finditer(content):
+        # Track paren depth to find matching close-paren (handles nested parens)
+        depth = 1
+        start = m.end()
+        i = start
+        while i < len(content) and depth > 0:
+            ch = content[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            i += 1
+        if depth != 0:
+            continue
+        param_str = content[start:i - 1]
+        params = [p.strip() for p in param_str.split(",") if p.strip()]
         real_params = [p for p in params
                        if p not in ("self", "cls") and not p.startswith("*")]
         if len(real_params) > max_params:

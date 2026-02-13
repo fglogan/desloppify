@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -274,6 +275,7 @@ def _phase_coupling(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str,
 
     results = []
     graph = build_dep_graph(path)
+    lang._dep_graph = graph
     zm = lang._zone_map
 
     # Single-use (shared helper)
@@ -439,6 +441,60 @@ def _phase_smells(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str, i
     }
 
 
+def _find_external_test_files(path: Path, lang_name: str) -> set[str]:
+    """Find test files in standard locations outside the scanned path."""
+    from ...utils import PROJECT_ROOT
+    extra = set()
+    for test_dir in ("tests", "test", "__tests__"):
+        d = PROJECT_ROOT / test_dir
+        if not d.is_dir():
+            continue
+        try:
+            d.resolve().relative_to(path.resolve())
+            continue
+        except ValueError:
+            pass
+        ext = ".py" if lang_name == "python" else (".ts", ".tsx")
+        for root, _, files in os.walk(d):
+            for f in files:
+                if isinstance(ext, tuple):
+                    if any(f.endswith(e) for e in ext):
+                        extra.add(os.path.join(root, f))
+                elif f.endswith(ext):
+                    extra.add(os.path.join(root, f))
+    return extra
+
+
+def _phase_test_coverage(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str, int]]:
+    from ...detectors.test_coverage import detect_test_coverage
+    from ...state import make_finding
+
+    zm = lang._zone_map
+    if zm is None:
+        return [], {}
+
+    graph = lang._dep_graph or lang.build_dep_graph(path)
+    extra = _find_external_test_files(path, lang.name)
+    entries, potential = detect_test_coverage(graph, zm, lang.name,
+                                              extra_test_files=extra or None)
+    entries = filter_entries(zm, entries, "test_coverage")
+
+    results = []
+    for e in entries:
+        results.append(make_finding(
+            "test_coverage", e["file"], e.get("name", ""),
+            tier=e["tier"], confidence=e["confidence"],
+            summary=e["summary"], detail=e.get("detail", {}),
+        ))
+
+    if results:
+        log(f"         test coverage: {len(results)} findings ({potential} production files)")
+    else:
+        log(f"         test coverage: clean ({potential} production files)")
+
+    return results, {"test_coverage": potential}
+
+
 def _get_ts_fixers() -> dict[str, FixerConfig]:
     """Build the TypeScript fixer registry (lazy-loaded)."""
     return {
@@ -494,6 +550,7 @@ class TypeScriptConfig(LangConfig):
                 DetectorPhase("Deprecated", _phase_deprecated),
                 DetectorPhase("Structural analysis", _phase_structural),
                 DetectorPhase("Coupling + single-use + patterns + naming", _phase_coupling),
+                DetectorPhase("Test coverage", _phase_test_coverage),
                 DetectorPhase("Code smells", _phase_smells),
                 DetectorPhase("Duplicates", phase_dupes, slow=True),
             ],

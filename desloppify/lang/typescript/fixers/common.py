@@ -1,5 +1,6 @@
 """Shared fixer utilities: bracket tracking, body extraction, fixer template."""
 
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -134,7 +135,13 @@ def apply_fixer(entries: list[dict], transform_fn, *, dry_run: bool = False,
                     "lines_removed": lines_removed,
                 })
                 if not dry_run:
-                    p.write_text(new_content)
+                    tmp = p.with_suffix(p.suffix + ".tmp")
+                    try:
+                        tmp.write_text(new_content)
+                        os.replace(str(tmp), str(p))
+                    except BaseException:
+                        tmp.unlink(missing_ok=True)
+                        raise
         except (OSError, UnicodeDecodeError) as ex:
             print(c(f"  Skip {rel(filepath)}: {ex}", "yellow"), file=sys.stderr)
 

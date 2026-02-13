@@ -182,7 +182,9 @@ def _get_fixer(name: str) -> dict | None:
     return registry.get(name)
 
 class _ResultsWithMeta(list):
-    skip_reasons: dict[str, int] = {}
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.skip_reasons: dict[str, int] = {}
 
 def _wrap_unused_vars_fix(fix_fn):
     def wrapper(entries, *, dry_run=False):

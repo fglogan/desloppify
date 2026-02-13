@@ -15,3 +15,6 @@ desloppify = "desloppify.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["desloppify*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

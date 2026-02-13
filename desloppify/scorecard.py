@@ -127,6 +127,7 @@ def _get_project_name() -> str:
         url = subprocess.check_output(
             ["git", "config", "--get", "remote.origin.url"],
             cwd=str(PROJECT_ROOT), stderr=subprocess.DEVNULL, text=True,
+            timeout=5,
         ).strip()
         # SSH: git@github.com:owner/repo.git
         # HTTPS: https://github.com/owner/repo.git
@@ -136,7 +137,8 @@ def _get_project_name() -> str:
         else:
             path = "/".join(url.split("/")[-2:])
         return path.removesuffix(".git")
-    except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
+    except (subprocess.CalledProcessError, FileNotFoundError, IndexError,
+            subprocess.TimeoutExpired):
         return PROJECT_ROOT.name
 
 

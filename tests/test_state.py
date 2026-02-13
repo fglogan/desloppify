@@ -1,0 +1,346 @@
+"""Tests for desloppify.state — finding lifecycle, persistence, and merge logic."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from desloppify import state as state_mod
+from desloppify.state import (
+    _empty_state,
+    _upsert_findings,
+    load_state,
+    make_finding,
+    save_state,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_raw_finding(fid, *, detector="det", file="a.py", tier=3,
+                      confidence="medium", summary="s", status="open",
+                      lang=None, zone=None):
+    """Build a minimal finding dict with explicit ID (bypasses rel())."""
+    now = "2025-01-01T00:00:00+00:00"
+    f = {
+        "id": fid, "detector": detector, "file": file, "tier": tier,
+        "confidence": confidence, "summary": summary, "detail": {},
+        "status": status, "note": None, "first_seen": now, "last_seen": now,
+        "resolved_at": None, "reopen_count": 0,
+    }
+    if lang:
+        f["lang"] = lang
+    if zone:
+        f["zone"] = zone
+    return f
+
+
+# ---------------------------------------------------------------------------
+# make_finding
+# ---------------------------------------------------------------------------
+
+class TestMakeFinding:
+    """make_finding creates a normalised finding dict with a stable ID."""
+
+    def test_id_includes_name(self, monkeypatch):
+        monkeypatch.setattr(state_mod, "rel", lambda p: p)
+        f = make_finding("dead_code", "src/foo.py", "bar",
+                         tier=2, confidence="high", summary="unused")
+        assert f["id"] == "dead_code::src/foo.py::bar"
+
+    def test_id_excludes_name_when_empty(self, monkeypatch):
+        monkeypatch.setattr(state_mod, "rel", lambda p: p)
+        f = make_finding("lint", "src/foo.py", "",
+                         tier=3, confidence="low", summary="lint issue")
+        assert f["id"] == "lint::src/foo.py"
+
+    def test_detail_defaults_to_empty_dict(self, monkeypatch):
+        monkeypatch.setattr(state_mod, "rel", lambda p: p)
+        f = make_finding("x", "a.py", "y", tier=1, confidence="high", summary="s")
+        assert f["detail"] == {}
+
+    def test_detail_passed_through(self, monkeypatch):
+        monkeypatch.setattr(state_mod, "rel", lambda p: p)
+        d = {"lines": [1, 2, 3]}
+        f = make_finding("x", "a.py", "y", tier=1, confidence="high",
+                         summary="s", detail=d)
+        assert f["detail"] is d
+
+    def test_default_field_values(self, monkeypatch):
+        monkeypatch.setattr(state_mod, "rel", lambda p: p)
+        f = make_finding("d", "f.py", "n", tier=2, confidence="medium", summary="sum")
+        assert f["status"] == "open"
+        assert f["note"] is None
+        assert f["resolved_at"] is None
+        assert f["reopen_count"] == 0
+        assert f["first_seen"] == f["last_seen"]
+        assert f["detector"] == "d"
+        assert f["file"] == "f.py"
+        assert f["tier"] == 2
+        assert f["confidence"] == "medium"
+        assert f["summary"] == "sum"
+
+
+# ---------------------------------------------------------------------------
+# _empty_state
+# ---------------------------------------------------------------------------
+
+class TestEmptyState:
+    def test_structure(self):
+        s = _empty_state()
+        assert s["version"] == 1
+        assert s["last_scan"] is None
+        assert s["scan_count"] == 0
+        assert s["config"] == {"ignore": []}
+        assert s["score"] == 0
+        assert s["stats"] == {}
+        assert s["findings"] == {}
+        assert "created" in s
+
+
+# ---------------------------------------------------------------------------
+# load_state
+# ---------------------------------------------------------------------------
+
+class TestLoadState:
+    def test_nonexistent_file_returns_empty_state(self, tmp_path):
+        s = load_state(tmp_path / "missing.json")
+        assert s["version"] == 1
+        assert s["findings"] == {}
+
+    def test_valid_json_returns_parsed_data(self, tmp_path):
+        p = tmp_path / "state.json"
+        data = {"version": 1, "hello": "world"}
+        p.write_text(json.dumps(data))
+        s = load_state(p)
+        assert s["hello"] == "world"
+
+    def test_corrupt_json_tries_backup(self, tmp_path):
+        p = tmp_path / "state.json"
+        p.write_text("{bad json!!")
+        backup = tmp_path / "state.json.bak"
+        backup_data = {"version": 1, "source": "backup"}
+        backup.write_text(json.dumps(backup_data))
+
+        s = load_state(p)
+        assert s["source"] == "backup"
+
+    def test_corrupt_json_no_backup_returns_empty(self, tmp_path):
+        p = tmp_path / "state.json"
+        p.write_text("{bad json!!")
+        s = load_state(p)
+        assert s["version"] == 1
+        assert s["findings"] == {}
+
+    def test_corrupt_json_renames_file(self, tmp_path):
+        p = tmp_path / "state.json"
+        p.write_text("{bad json!!")
+        load_state(p)
+        assert (tmp_path / "state.json.corrupted").exists()
+
+    def test_corrupt_json_and_corrupt_backup_returns_empty(self, tmp_path):
+        p = tmp_path / "state.json"
+        p.write_text("{bad")
+        backup = tmp_path / "state.json.bak"
+        backup.write_text("{also bad")
+
+        s = load_state(p)
+        assert s["version"] == 1
+        assert s["findings"] == {}
+
+
+# ---------------------------------------------------------------------------
+# save_state
+# ---------------------------------------------------------------------------
+
+class TestSaveState:
+    def test_creates_file_and_writes_valid_json(self, tmp_path):
+        p = tmp_path / "sub" / "state.json"
+        st = _empty_state()
+        save_state(st, p)
+        assert p.exists()
+        loaded = json.loads(p.read_text())
+        assert loaded["version"] == 1
+
+    def test_creates_backup_of_previous(self, tmp_path):
+        p = tmp_path / "state.json"
+        # First save
+        st = _empty_state()
+        save_state(st, p)
+        original_content = p.read_text()
+
+        # Second save with different data
+        st["scan_count"] = 42
+        save_state(st, p)
+
+        backup = tmp_path / "state.json.bak"
+        assert backup.exists()
+        backup_data = json.loads(backup.read_text())
+        # Backup should be the *previous* save (before scan_count=42 was added
+        # but after _recompute_stats ran on the first save).
+        original_data = json.loads(original_content)
+        assert backup_data["version"] == original_data["version"]
+
+    def test_atomic_write_produces_valid_json(self, tmp_path):
+        """Even with special types (sets, Paths), the output is valid JSON."""
+        p = tmp_path / "state.json"
+        st = _empty_state()
+        st["findings"] = {}
+        st["custom_set"] = {3, 1, 2}
+        st["custom_path"] = Path("/tmp/hello")
+        save_state(st, p)
+        loaded = json.loads(p.read_text())
+        assert loaded["custom_set"] == [1, 2, 3]  # sorted
+        assert loaded["custom_path"] == "/tmp/hello"
+
+
+# ---------------------------------------------------------------------------
+# _upsert_findings
+# ---------------------------------------------------------------------------
+
+class TestUpsertFindings:
+    """_upsert_findings merges a scan's findings into existing state."""
+
+    def _call(self, existing, current, *, ignore=None, lang=None):
+        now = "2025-06-01T00:00:00+00:00"
+        return _upsert_findings(existing, current, ignore or [], now, lang=lang)
+
+    # -- new findings --
+
+    def test_new_finding_gets_added(self):
+        existing = {}
+        f = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        ids, new, reopened, by_det = self._call(existing, [f])
+        assert "det::a.py::fn" in existing
+        assert new == 1
+        assert reopened == 0
+        assert "det::a.py::fn" in ids
+
+    # -- existing open finding --
+
+    def test_existing_open_finding_updated_last_seen(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        old["last_seen"] = "2025-01-01T00:00:00+00:00"
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                     summary="updated summary")
+        ids, new, reopened, _ = self._call(existing, [current])
+        assert new == 0
+        assert reopened == 0
+        assert existing["det::a.py::fn"]["last_seen"] == "2025-06-01T00:00:00+00:00"
+        assert existing["det::a.py::fn"]["summary"] == "updated summary"
+
+    # -- resolved finding gets reopened --
+
+    def test_resolved_finding_gets_reopened(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                status="auto_resolved")
+        old["resolved_at"] = "2025-03-01T00:00:00+00:00"
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        ids, new, reopened, _ = self._call(existing, [current])
+        assert reopened == 1
+        assert new == 0
+        assert existing["det::a.py::fn"]["status"] == "open"
+        assert existing["det::a.py::fn"]["reopen_count"] == 1
+        assert existing["det::a.py::fn"]["resolved_at"] is None
+        assert "Reopened" in existing["det::a.py::fn"]["note"]
+
+    def test_fixed_finding_gets_reopened(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                status="fixed")
+        old["resolved_at"] = "2025-03-01T00:00:00+00:00"
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        ids, new, reopened, _ = self._call(existing, [current])
+        assert reopened == 1
+        assert existing["det::a.py::fn"]["status"] == "open"
+        assert "was fixed" in existing["det::a.py::fn"]["note"]
+
+    def test_reopen_increments_count(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                status="auto_resolved")
+        old["reopen_count"] = 2
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        self._call(existing, [current])
+        assert existing["det::a.py::fn"]["reopen_count"] == 3
+
+    # -- wontfix finding is NOT reopened --
+
+    def test_wontfix_finding_not_reopened(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                status="wontfix")
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        _, new, reopened, _ = self._call(existing, [current])
+        assert reopened == 0
+        assert existing["det::a.py::fn"]["status"] == "wontfix"
+
+    # -- zone propagation --
+
+    def test_zone_propagated_on_existing(self):
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        existing = {"det::a.py::fn": old}
+
+        current = _make_raw_finding("det::a.py::fn", detector="det", file="a.py",
+                                     zone="production")
+        self._call(existing, [current])
+        assert existing["det::a.py::fn"]["zone"] == "production"
+
+    # -- ignored findings --
+
+    def test_ignored_finding_not_added(self):
+        existing = {}
+        f = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        ids, new, _, _ = self._call(existing, [f], ignore=["det::*"])
+        assert new == 0
+        assert len(existing) == 0
+
+    # -- lang tagging --
+
+    def test_lang_set_on_new_finding(self):
+        existing = {}
+        f = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        self._call(existing, [f], lang="python")
+        assert existing["det::a.py::fn"]["lang"] == "python"
+
+    # -- by_detector counting --
+
+    def test_by_detector_counts(self):
+        f1 = _make_raw_finding("det_a::a.py::x", detector="det_a", file="a.py")
+        f2 = _make_raw_finding("det_a::b.py::y", detector="det_a", file="b.py")
+        f3 = _make_raw_finding("det_b::c.py::z", detector="det_b", file="c.py")
+        _, _, _, by_det = self._call({}, [f1, f2, f3])
+        assert by_det == {"det_a": 2, "det_b": 1}
+
+
+# ---------------------------------------------------------------------------
+# Integration: _upsert_findings used via merge_scan resolves missing findings
+# ---------------------------------------------------------------------------
+
+class TestMissingFindingsResolved:
+    """Findings present in state but absent from scan get auto-resolved
+    (tested via merge_scan which calls _auto_resolve_disappeared)."""
+
+    def test_missing_finding_auto_resolved(self):
+        """A finding that existed before but is absent from the new scan
+        should be auto-resolved."""
+        st = _empty_state()
+        old = _make_raw_finding("det::a.py::fn", detector="det", file="a.py")
+        old["lang"] = "python"
+        st["findings"]["det::a.py::fn"] = old
+
+        # Merge an empty scan — the old finding should disappear
+        from desloppify.state import merge_scan
+        diff = merge_scan(st, [], lang="python", force_resolve=True)
+        assert diff["auto_resolved"] >= 1
+        assert st["findings"]["det::a.py::fn"]["status"] == "auto_resolved"
+        assert st["findings"]["det::a.py::fn"]["resolved_at"] is not None

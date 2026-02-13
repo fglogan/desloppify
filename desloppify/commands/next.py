@@ -49,9 +49,12 @@ def cmd_next(args):
         output = [{"id": f["id"], "tier": f["tier"], "confidence": f["confidence"],
                    "file": f["file"], "summary": f["summary"], "detail": f.get("detail", {})}
                   for f in items]
-        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_file).write_text(json.dumps(output, indent=2) + "\n")
-        print(c(f"Wrote {len(items)} items to {output_file}", "green"))
+        try:
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_file).write_text(json.dumps(output, indent=2) + "\n")
+            print(c(f"Wrote {len(items)} items to {output_file}", "green"))
+        except OSError as e:
+            print(c(f"Could not write to {output_file}: {e}", "red"))
         return
 
     # Look up dimension info for context
@@ -90,6 +93,6 @@ def cmd_next(args):
     if len(items) == 1:
         item = items[0]
         print(c("\n  Resolve with:", "dim"))
-        print(f"    desloppify resolve \"{item['id']}\" fixed --note \"<what you did>\"")
-        print(f"    desloppify resolve \"{item['id']}\" wontfix --note \"<why>\"")
+        print(f"    desloppify resolve fixed \"{item['id']}\" --note \"<what you did>\"")
+        print(f"    desloppify resolve wontfix \"{item['id']}\" --note \"<why>\"")
     print()

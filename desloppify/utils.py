@@ -216,12 +216,13 @@ def _is_excluded_dir(name: str, rel_path: str, extra: tuple[str, ...]) -> bool:
 
 @lru_cache(maxsize=16)
 def _find_source_files_cached(path: str, extensions: tuple[str, ...],
-                               exclusions: tuple[str, ...] | None = None) -> tuple[str, ...]:
+                               exclusions: tuple[str, ...] | None = None,
+                               extra_exclusions: tuple[str, ...] = ()) -> tuple[str, ...]:
     """Cached file discovery using os.walk — cross-platform, prunes during traversal."""
     root = Path(path)
     if not root.is_absolute():
         root = PROJECT_ROOT / root
-    all_exclusions = (exclusions or ()) + _extra_exclusions
+    all_exclusions = (exclusions or ()) + extra_exclusions
     ext_set = set(extensions)
     files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -244,8 +245,10 @@ def _find_source_files_cached(path: str, extensions: tuple[str, ...],
 def find_source_files(path: str | Path, extensions: list[str],
                       exclusions: list[str] | None = None) -> list[str]:
     """Find all files with given extensions under a path, excluding patterns."""
+    # Pass _extra_exclusions as part of the cache key so changes invalidate cached results
     return list(_find_source_files_cached(
-        str(path), tuple(extensions), tuple(exclusions) if exclusions else None))
+        str(path), tuple(extensions), tuple(exclusions) if exclusions else None,
+        _extra_exclusions))
 
 
 def find_ts_files(path: str | Path) -> list[str]:
@@ -274,8 +277,11 @@ def compute_tool_hash() -> str:
     """
     h = hashlib.sha256()
     for py_file in sorted(TOOL_DIR.rglob("*.py")):
-        h.update(str(py_file.relative_to(TOOL_DIR)).encode())
-        h.update(py_file.read_bytes())
+        try:
+            h.update(str(py_file.relative_to(TOOL_DIR)).encode())
+            h.update(py_file.read_bytes())
+        except OSError:
+            continue
     return h.hexdigest()[:12]
 
 

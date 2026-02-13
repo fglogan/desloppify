@@ -30,6 +30,7 @@ def detect_unused(path: Path, category: str = "all") -> tuple[list[dict], int]:
         result = subprocess.run(
             ["npx", "tsc", "--project", str(tmp_path), "--noEmit"],
             capture_output=True, text=True, cwd=PROJECT_ROOT,
+            timeout=120,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -88,7 +89,7 @@ def _categorize_unused(filepath: str, lineno: int) -> str:
                     break
     except (OSError, UnicodeDecodeError):
         pass
-    return "vars"
+    return "imports"  # Default to imports on error (safer — import fixers are less destructive)
 
 
 def cmd_unused(args):

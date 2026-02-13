@@ -69,7 +69,11 @@ def fix_unused_params(entries: list[dict], *, dry_run: bool = False) -> list[dic
                         removed_names.append(name)
                         continue
 
-                new_line = re.sub(r"\b" + re.escape(name) + r"\b", new_name, src, count=1)
+                # Only replace at a parameter position (after (, comma, or start of line)
+                param_re = re.compile(
+                    r"(?<=[\(,\s])" + re.escape(name) + r"(?=\s*[?:,)=])"
+                )
+                new_line = param_re.sub(new_name, src, count=1)
                 if new_line != src:
                     lines[line_idx] = new_line
                     removed_names.append(name)
@@ -103,6 +107,7 @@ def _is_param_context(lines: list[str], line_idx: int) -> bool:
             elif ch == "(":
                 paren_depth -= 1
         if paren_depth < 0:
+            # Found unmatched ( — check if it belongs to a function/catch
             for check_idx in range(max(0, idx - 1), idx + 1):
                 prev = lines[check_idx].strip()
                 if re.search(r"(?:function\s+\w+|catch|\w+\s*=\s*(?:async\s+)?)\s*$", prev):
@@ -111,7 +116,7 @@ def _is_param_context(lines: list[str], line_idx: int) -> bool:
                     return True
                 if prev.endswith("("):
                     return True
-            return True
+            return False  # Unmatched ( but not a function/catch context
         if line.strip().endswith((";", "{")):
             break
     return False

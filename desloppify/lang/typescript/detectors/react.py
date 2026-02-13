@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from ....utils import PROJECT_ROOT, c, find_tsx_files, print_table, rel
+from ._smell_helpers import _strip_ts_comments
 
 MAX_EFFECT_BODY = 1000  # max characters to scan for brace-matching a useEffect callback
 MAX_FUNC_SCAN = 2000    # max lines to scan for function body extent
@@ -71,10 +72,8 @@ def detect_state_sync(path: Path) -> tuple[list[dict], int]:
                 continue
 
             body = content[brace_start + 1:body_end]
-            # Strip comments
-            body_clean = re.sub(r"//[^\n]*", "", body)
-            body_clean = re.sub(r"/\*.*?\*/", "", body_clean, flags=re.DOTALL)
-            body_clean = body_clean.strip()
+            # Strip comments (string-aware to avoid corrupting URLs etc.)
+            body_clean = _strip_ts_comments(body).strip()
 
             if not body_clean:
                 continue  # empty effect — caught by dead_useeffect
@@ -136,19 +135,19 @@ def detect_context_nesting(path: Path) -> tuple[list[dict], int]:
         provider_stack: list[str] = []
 
         for line in lines:
-            # Count closing tags first (handles </Provider> on same line as next open)
-            for m in provider_close.finditer(line):
-                if provider_stack and provider_stack[-1] == m.group(1):
-                    provider_stack.pop()
-                    depth -= 1
-
-            # Count opening tags (non-self-closing)
+            # Process opening tags first, then closing, to handle
+            # <FooProvider></FooProvider> on the same line correctly
             for m in provider_open.finditer(line):
                 depth += 1
                 provider_stack.append(m.group(1))
                 if depth > max_depth:
                     max_depth = depth
                     providers_at_max = list(provider_stack)
+
+            for m in provider_close.finditer(line):
+                if provider_stack and provider_stack[-1] == m.group(1):
+                    provider_stack.pop()
+                    depth -= 1
 
         if max_depth > 5:
             entries.append({
@@ -252,6 +251,8 @@ def _count_return_fields(func_body: str) -> int | None:
     return_positions: list[int] = []
 
     for i, line in enumerate(lines):
+        # Check depth BEFORE processing braces on this line
+        pre_depth = depth
         in_str = None
         prev_ch = ""
         for ci, ch in enumerate(line):
@@ -268,9 +269,9 @@ def _count_return_fields(func_body: str) -> int | None:
                 depth -= 1
             prev_ch = ch
 
-        # depth == 1 means we're at the function body level
+        # pre_depth == 1 means we were at function body level at line start
         stripped = line.strip()
-        if depth == 1 and stripped.startswith("return") and "{" in stripped:
+        if pre_depth == 1 and stripped.startswith("return") and "{" in stripped:
             return_positions.append(i)
 
     if not return_positions:

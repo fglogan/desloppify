@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .scoring import TIER_WEIGHTS
 from .utils import PROJECT_ROOT, rel, matches_exclusion
 
 STATE_DIR = PROJECT_ROOT / ".desloppify"
@@ -44,7 +45,7 @@ def load_state(path: Path | None = None) -> dict:
 
     try:
         data = json.loads(p.read_text())
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         # Try backup
         backup = p.with_suffix(".json.bak")
         if backup.exists():
@@ -113,11 +114,12 @@ def save_state(state: dict, path: Path | None = None):
             os.unlink(tmp_path)
         except (OSError, UnboundLocalError):
             pass
-        p.write_text(content)
+        try:
+            p.write_text(content)
+        except OSError as e:
+            import sys
+            print(f"  \u26a0 Could not save state: {e}", file=sys.stderr)
 
-
-# Structural issues (T3/T4) weigh more than mechanical fixes (T1/T2)
-TIER_WEIGHTS = {1: 1, 2: 2, 3: 3, 4: 4}
 
 
 _EMPTY_COUNTERS = ("open", "fixed", "auto_resolved", "wontfix", "false_positive")

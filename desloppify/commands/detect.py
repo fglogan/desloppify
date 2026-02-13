@@ -14,9 +14,8 @@ def cmd_detect(args):
     lang = _resolve_lang(args)
 
     if not lang:
-        # Default to TypeScript when no --lang flag is passed
-        from ..lang import get_lang
-        lang = get_lang("typescript")
+        print(c("No language specified. Use --lang python or --lang typescript.", "red"))
+        sys.exit(1)
 
     # Validate detector name
     if detector not in lang.detect_commands:

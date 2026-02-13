@@ -41,6 +41,15 @@ SMELL_CHECKS = [
     _smell("dead_function", "Dead function (body is only pass/return)", "medium"),
     _smell("inline_class", "Class defined inside a function", "medium"),
     _smell("deferred_import", "Function-level import (possible circular import workaround)", "low"),
+    _smell("subprocess_no_timeout", "subprocess call without timeout (can hang forever)", "high"),
+    _smell("mutable_class_var", "Class-level mutable default (shared across instances)", "high"),
+    _smell("lru_cache_mutable", "lru_cache on function that reads mutable global state", "medium"),
+    _smell("unsafe_file_write", "Non-atomic file write (use temp+rename for safety)", "medium"),
+    _smell("duplicate_constant", "Constant defined identically in multiple modules", "medium"),
+    _smell("unreachable_code", "Code after unconditional return/raise/break/continue", "high"),
+    _smell("constant_return", "Function always returns the same constant value", "medium"),
+    _smell("regex_backtrack", "Regex with nested quantifiers (ReDoS risk)", "high"),
+    _smell("naive_comment_strip", "re.sub strips comments without string awareness", "medium"),
 ]
 
 
@@ -159,6 +168,8 @@ def detect_smells(path: Path) -> tuple[list[dict], int]:
     """Detect Python code smell patterns. Returns (entries, total_files_checked)."""
     smell_counts: dict[str, list[dict]] = {s["id"]: [] for s in SMELL_CHECKS}
     files = find_py_files(path)
+    # Collect module-level constants for cross-file duplicate detection
+    constants_by_key: dict[tuple[str, str], list[tuple[str, int]]] = {}
 
     for filepath in files:
         try:
@@ -193,6 +204,10 @@ def detect_smells(path: Path) -> tuple[list[dict], int]:
         _detect_swallowed_errors(filepath, lines, smell_counts)
         _detect_ast_smells(filepath, content, smell_counts)
         _detect_star_import_no_all(filepath, content, path, smell_counts)
+        _collect_module_constants(filepath, content, constants_by_key)
+
+    # Cross-file: detect duplicate constants
+    _detect_duplicate_constants(constants_by_key, smell_counts)
 
     severity_order = {"high": 0, "medium": 1, "low": 2}
     entries = []
@@ -212,7 +227,7 @@ def _walk_except_blocks(lines: list[str]):
     """Yield (line_index, except_line_stripped, body_lines) for each except block."""
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if not re.match(r"except\s*(?:\w|:)", stripped) and stripped != "except:":
+        if not re.match(r"except\s*(?:\w|\(|:)", stripped) and stripped != "except:":
             continue
         if not stripped.endswith(":"):
             continue
@@ -271,6 +286,15 @@ def _detect_ast_smells(filepath: str, content: str, smell_counts: dict[str, list
             _detect_dead_functions(filepath, node, smell_counts)
             _detect_deferred_imports(filepath, node, smell_counts)
             _detect_inline_classes(filepath, node, smell_counts)
+            _detect_lru_cache_mutable(filepath, node, tree, smell_counts)
+
+    _detect_subprocess_no_timeout(filepath, tree, smell_counts)
+    _detect_mutable_class_var(filepath, tree, smell_counts)
+    _detect_unsafe_file_write(filepath, tree, smell_counts)
+    _detect_unreachable_code(filepath, tree, smell_counts)
+    _detect_constant_return(filepath, tree, smell_counts)
+    _detect_regex_backtrack(filepath, tree, smell_counts)
+    _detect_naive_comment_strip(filepath, tree, smell_counts)
 
 
 def _detect_monster_functions(filepath: str, node: ast.AST, smell_counts: dict[str, list]):
@@ -349,6 +373,398 @@ def _detect_inline_classes(filepath: str, node: ast.AST, smell_counts: dict[str,
                 "file": filepath, "line": child.lineno,
                 "content": f"class {child.name} defined inside {node.name}()",
             })
+
+
+def _detect_subprocess_no_timeout(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag subprocess.run/Popen/call/check_call/check_output without timeout=."""
+    _SUBPROCESS_FUNCS = {"run", "Popen", "call", "check_call", "check_output"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # Match subprocess.run(...) or subprocess.call(...) etc.
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _SUBPROCESS_FUNCS:
+            # Check if the receiver is 'subprocess'
+            if isinstance(func.value, ast.Name) and func.value.id == "subprocess":
+                has_timeout = any(kw.arg == "timeout" for kw in node.keywords)
+                if not has_timeout:
+                    smell_counts["subprocess_no_timeout"].append({
+                        "file": filepath, "line": node.lineno,
+                        "content": f"subprocess.{func.attr}() without timeout",
+                    })
+
+
+def _detect_mutable_class_var(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag class-level mutable defaults (shared across all instances).
+
+    Detects: class Foo: data = [] / data = {} / data: list = []
+    Skips dataclasses (which use field(default_factory=...)) and __init__ assignments.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        # Skip dataclasses (they handle mutable defaults via field())
+        is_dataclass = any(
+            (isinstance(d, ast.Name) and d.id == "dataclass") or
+            (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id == "dataclass") or
+            (isinstance(d, ast.Attribute) and d.attr == "dataclass")
+            for d in node.decorator_list
+        )
+        if is_dataclass:
+            continue
+
+        for stmt in node.body:
+            # Plain assignment: data = [] or data = {}
+            if isinstance(stmt, ast.Assign):
+                if isinstance(stmt.value, (ast.List, ast.Dict, ast.Set)):
+                    names = [t.id for t in stmt.targets if isinstance(t, ast.Name)]
+                    for name in names:
+                        smell_counts["mutable_class_var"].append({
+                            "file": filepath, "line": stmt.lineno,
+                            "content": f"{node.name}.{name} = {ast.dump(stmt.value)[:40]}",
+                        })
+            # Annotated assignment: data: list = []
+            elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                if isinstance(stmt.value, (ast.List, ast.Dict, ast.Set)):
+                    name = stmt.target.id if isinstance(stmt.target, ast.Name) else "?"
+                    smell_counts["mutable_class_var"].append({
+                        "file": filepath, "line": stmt.lineno,
+                        "content": f"{node.name}.{name}: ... = {ast.dump(stmt.value)[:40]}",
+                    })
+
+
+def _detect_lru_cache_mutable(filepath: str, node: ast.AST, tree: ast.Module,
+                               smell_counts: dict[str, list]):
+    """Flag @lru_cache/@cache functions that reference module-level mutable variables.
+
+    Finds globals referenced in the function body that aren't in the parameter list,
+    checking if those names are assigned to mutable values at module level.
+    """
+    # Check if this function has @lru_cache or @cache decorator
+    has_cache = False
+    for dec in node.decorator_list:
+        if isinstance(dec, ast.Name) and dec.id in ("lru_cache", "cache"):
+            has_cache = True
+        elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name):
+            if dec.func.id in ("lru_cache", "cache"):
+                has_cache = True
+        elif isinstance(dec, ast.Attribute) and dec.attr in ("lru_cache", "cache"):
+            has_cache = True
+    if not has_cache:
+        return
+
+    # Get parameter names
+    param_names = set()
+    for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+        param_names.add(arg.arg)
+    if node.args.vararg:
+        param_names.add(node.args.vararg.arg)
+    if node.args.kwarg:
+        param_names.add(node.args.kwarg.arg)
+
+    # Collect module-level mutable assignments
+    module_mutables = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name) and isinstance(stmt.value, (ast.List, ast.Dict, ast.Set, ast.Call)):
+                    module_mutables.add(target.id)
+        elif isinstance(stmt, ast.AnnAssign) and stmt.target and isinstance(stmt.target, ast.Name):
+            if stmt.value and isinstance(stmt.value, (ast.List, ast.Dict, ast.Set, ast.Call)):
+                module_mutables.add(stmt.target.id)
+
+    # Find Name references in function body that point to module-level mutables
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id in module_mutables and child.id not in param_names:
+            smell_counts["lru_cache_mutable"].append({
+                "file": filepath, "line": node.lineno,
+                "content": f"@lru_cache on {node.name}() reads mutable global '{child.id}'",
+            })
+            return  # One warning per function is enough
+
+
+def _collect_module_constants(filepath: str, content: str,
+                              constants_by_key: dict[tuple[str, str], list[tuple[str, int]]]):
+    """Collect module-level constant assignments for cross-file duplicate detection.
+
+    Only collects UPPER_CASE or _UPPER_CASE names assigned to simple literals
+    (dicts, lists, sets, tuples, numbers, strings).
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and re.match(r"^_?[A-Z][A-Z0-9_]+$", target.id):
+                    try:
+                        value_repr = ast.dump(node.value)
+                    except (RecursionError, ValueError):
+                        continue
+                    if len(value_repr) > 500:
+                        continue  # Skip very large constants
+                    key = (target.id, value_repr)
+                    constants_by_key.setdefault(key, []).append((filepath, node.lineno))
+
+
+def _detect_duplicate_constants(constants_by_key: dict[tuple[str, str], list[tuple[str, int]]],
+                                 smell_counts: dict[str, list]):
+    """Flag constants defined identically in multiple files."""
+    for (name, _value_repr), locations in constants_by_key.items():
+        if len(locations) < 2:
+            continue
+        # Check that locations are in distinct files
+        files = set(fp for fp, _ in locations)
+        if len(files) < 2:
+            continue
+        for filepath, lineno in locations:
+            other_files = [fp for fp, _ in locations if fp != filepath]
+            smell_counts["duplicate_constant"].append({
+                "file": filepath,
+                "line": lineno,
+                "content": f"{name} also defined in {', '.join(Path(f).name for f in other_files[:3])}",
+            })
+
+
+def _detect_unsafe_file_write(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag Path.write_text/write_bytes and open(..., 'w') without atomic pattern.
+
+    Looks for .write_text() or .write_bytes() calls that aren't preceded by
+    a nearby os.replace() or os.rename() call in the same function.
+    Also flags open(file, 'w') without evidence of temp+rename.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        # Collect all method calls and check for atomic patterns in this function
+        has_atomic_pattern = False
+        write_calls: list[ast.Call] = []
+
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            func = child.func
+
+            # Check for os.replace or os.rename (indicates atomic write pattern)
+            if isinstance(func, ast.Attribute) and func.attr in ("replace", "rename"):
+                if isinstance(func.value, ast.Name) and func.value.id == "os":
+                    has_atomic_pattern = True
+
+            # Check for shutil.move (also indicates careful file handling)
+            if isinstance(func, ast.Attribute) and func.attr == "move":
+                if isinstance(func.value, ast.Name) and func.value.id == "shutil":
+                    has_atomic_pattern = True
+
+            # Collect .write_text() and .write_bytes() calls
+            if isinstance(func, ast.Attribute) and func.attr in ("write_text", "write_bytes"):
+                write_calls.append(child)
+
+        # Only flag if no atomic pattern exists in the same function
+        if not has_atomic_pattern:
+            for call in write_calls:
+                smell_counts["unsafe_file_write"].append({
+                    "file": filepath, "line": call.lineno,
+                    "content": f".{call.func.attr}() in {node.name}() without atomic write pattern",
+                })
+
+
+def _detect_unreachable_code(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag statements after unconditional return/raise/break/continue.
+
+    Walks every statement block (function body, if/else body, etc.) and flags
+    any statement that follows an unconditional flow-control statement.
+    """
+    _TERMINAL = (ast.Return, ast.Raise, ast.Break, ast.Continue)
+
+    def _check_block(stmts: list[ast.stmt]):
+        for i, stmt in enumerate(stmts):
+            if isinstance(stmt, _TERMINAL) and i < len(stmts) - 1:
+                next_stmt = stmts[i + 1]
+                # Skip flagging string constants (often used as section markers)
+                if isinstance(next_stmt, ast.Expr) and isinstance(next_stmt.value, ast.Constant):
+                    continue
+                smell_counts["unreachable_code"].append({
+                    "file": filepath, "line": next_stmt.lineno,
+                    "content": f"unreachable after {type(stmt).__name__.lower()} on line {stmt.lineno}",
+                })
+            # Recurse into compound statements
+            for attr in ("body", "orelse", "finalbody", "handlers"):
+                block = getattr(stmt, attr, None)
+                if isinstance(block, list):
+                    child_stmts = [s for s in block if isinstance(s, ast.stmt)]
+                    if child_stmts:
+                        _check_block(child_stmts)
+            # ExceptHandler has a body too
+            if isinstance(stmt, ast.ExceptHandler):
+                _check_block(stmt.body)
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _check_block(node.body)
+
+
+def _detect_constant_return(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag functions that always return the same constant value.
+
+    Analyzes all return paths — if every return statement returns the same
+    literal value (True, False, None, a number, or a string), the function
+    likely has dead logic or is a stub masquerading as real code.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        # Skip tiny functions (stubs/pass-only already caught by dead_function)
+        if not hasattr(node, "end_lineno") or not node.end_lineno:
+            continue
+        loc = node.end_lineno - node.lineno + 1
+        if loc < 4:
+            continue
+        # Skip decorated functions (properties, abstractmethods, etc.)
+        if node.decorator_list:
+            continue
+
+        returns = []
+        has_conditional = False
+        for child in ast.walk(node):
+            if isinstance(child, ast.Return):
+                returns.append(child)
+            if isinstance(child, (ast.If, ast.For, ast.While, ast.With,
+                                   ast.Try, ast.ExceptHandler)):
+                has_conditional = True
+
+        # Need at least 2 returns and some conditional logic to be interesting
+        if len(returns) < 2 or not has_conditional:
+            continue
+
+        # Extract constant values from all returns
+        values = set()
+        all_constant = True
+        for ret in returns:
+            if ret.value is None:
+                values.add(repr(None))
+            elif isinstance(ret.value, ast.Constant):
+                values.add(repr(ret.value.value))
+            else:
+                all_constant = False
+                break
+
+        if all_constant and len(values) == 1:
+            val = next(iter(values))
+            # Skip functions that always return None — they're just procedures
+            if val == "None":
+                continue
+            smell_counts["constant_return"].append({
+                "file": filepath, "line": node.lineno,
+                "content": f"{node.name}() always returns {val} ({len(returns)} return sites)",
+            })
+
+
+def _detect_regex_backtrack(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag regex patterns vulnerable to catastrophic backtracking (ReDoS).
+
+    Detects nested quantifiers like (a+)+, (a*)*b, ([^)]*|.)*,
+    and overlapping alternation inside quantifiers.
+    """
+    _RE_FUNCS = {"compile", "search", "match", "fullmatch", "findall",
+                 "finditer", "sub", "subn", "split"}
+    # Nested quantifier: group with inner +/* quantifier, outer +/* quantifier.
+    # Only + and * are dangerous — ? (zero-or-one) can never cause ReDoS.
+    _NESTED_QUANT = re.compile(
+        r"\([^)]*[+*][^)]*\)[+*]"  # (stuff+stuff)+ or (stuff*stuff)*
+        r"|"
+        r"\(\?:[^)]*[+*][^)]*\)[+*]"  # (?:stuff+stuff)+
+    )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        # Match re.X(...) or compiled.X(...)
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _RE_FUNCS:
+            if isinstance(func.value, ast.Name) and func.value.id == "re":
+                pass  # re.compile(...) etc.
+            else:
+                continue
+        elif isinstance(func, ast.Name) and func.id in _RE_FUNCS:
+            pass  # Bare compile(...) etc. (rare)
+        else:
+            continue
+
+        # Extract pattern string from first arg
+        if not node.args:
+            continue
+        pat_node = node.args[0]
+        if not isinstance(pat_node, ast.Constant) or not isinstance(pat_node.value, str):
+            continue
+        pattern = pat_node.value
+
+        # Check for nested quantifiers
+        m_bt = _NESTED_QUANT.search(pattern)
+        if not m_bt:
+            continue
+
+        # Extract the flagged fragment for safety checks
+        frag = m_bt.group(0)
+
+        # Safe: negated character classes [^X]+ can't overlap with adjacent chars
+        if re.search(r"\[\^[^\]]+\][+*]", frag):
+            continue
+
+        # Safe: inner quantifier is on a literal-anchored subpattern like \.\w+
+        # The required literal prevents ambiguous backtracking
+        if re.search(r"\\.\w*[+*]", frag):
+            continue
+
+        smell_counts["regex_backtrack"].append({
+            "file": filepath, "line": node.lineno,
+            "content": f"pattern: {pattern[:80]}",
+        })
+
+
+def _detect_naive_comment_strip(filepath: str, tree: ast.Module, smell_counts: dict[str, list]):
+    """Flag re.sub() calls that strip comments without string awareness.
+
+    Detects patterns like re.sub(r"//[^\\n]*", "") or re.sub(r"/\\*.*?\\*/", "")
+    which corrupt URLs and other legitimate // or /* sequences inside strings.
+    """
+    _COMMENT_PATTERNS = (
+        r"//",           # Line comment stripping
+        r"/\*",          # Block comment stripping
+        r"#[^\n]",       # Python comment stripping (when applied to non-Python content)
+    )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match re.sub(...)
+        if not (isinstance(func, ast.Attribute) and func.attr == "sub"
+                and isinstance(func.value, ast.Name) and func.value.id == "re"):
+            continue
+
+        if len(node.args) < 2:
+            continue
+        pat_node = node.args[0]
+        if not isinstance(pat_node, ast.Constant) or not isinstance(pat_node.value, str):
+            continue
+        pattern = pat_node.value
+
+        # Check if this is a comment-stripping pattern
+        for comment_sig in _COMMENT_PATTERNS:
+            if comment_sig in pattern:
+                # Check replacement is empty or whitespace
+                repl_node = node.args[1]
+                if isinstance(repl_node, ast.Constant) and isinstance(repl_node.value, str):
+                    if repl_node.value.strip() == "":
+                        smell_counts["naive_comment_strip"].append({
+                            "file": filepath, "line": node.lineno,
+                            "content": f're.sub(r"{pattern[:60]}", "") — not string-aware',
+                        })
+                        break
 
 
 def _detect_star_import_no_all(filepath: str, content: str, scan_root: Path,

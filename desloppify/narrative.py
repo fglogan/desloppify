@@ -48,6 +48,10 @@ DETECTOR_TOOLS = {
     "dict_keys":  {"fixers": [], "action_type": "refactor",
                    "guidance": "fix dict key mismatches — dead writes are likely dead code, "
                                "schema drift suggests a typo or missed rename"},
+    "test_coverage": {"fixers": [], "action_type": "refactor",
+                      "guidance": "add tests for untested production modules — prioritize by import count"},
+    "stale_exclude": {"fixers": [], "action_type": "manual_fix",
+                      "guidance": "remove stale exclusion or verify it's still needed"},
 }
 
 # Structural sub-detectors that merge under "structural" — shared constant
@@ -102,8 +106,8 @@ def compute_narrative(state: dict, *, diff: dict | None = None,
     tools = _compute_tools(by_det, lang, badge)
     headline = _compute_headline(phase, dimensions, debt, milestone, diff,
                                  obj_strict, obj_score, stats, history)
-    reminders = _compute_reminders(state, lang, phase, debt, actions,
-                                   dimensions, badge, command)
+    reminders, updated_reminder_history = _compute_reminders(
+        state, lang, phase, debt, actions, dimensions, badge, command)
 
     return {
         "phase": phase,
@@ -114,6 +118,7 @@ def compute_narrative(state: dict, *, diff: dict | None = None,
         "debt": debt,
         "milestone": milestone,
         "reminders": reminders,
+        "reminder_history": updated_reminder_history,
     }
 
 
@@ -148,13 +153,11 @@ def _detect_phase(history: list[dict], obj_strict: float | None) -> str:
 
     # Early momentum: scans 2-5 with score rising — check BEFORE score thresholds
     # so early projects get motivational framing even if score is already high
-    if len(history) <= 5:
-        if len(history) >= 2:
-            first = history[0].get("objective_strict")
-            last = history[-1].get("objective_strict")
-            if first is not None and last is not None and last > first:
-                return "early_momentum"
-        return "early_momentum"
+    if len(history) <= 5 and len(history) >= 2:
+        first = history[0].get("objective_strict")
+        last = history[-1].get("objective_strict")
+        if first is not None and last is not None and last > first:
+            return "early_momentum"
 
     if strict is not None:
         if strict > 93:
@@ -780,9 +783,9 @@ def _compute_reminders(state: dict, lang: str | None,
         if count < _REMINDER_DECAY_THRESHOLD:
             filtered.append(r)
 
-    # Update reminder history in state (counts will persist across commands)
+    # Compute updated reminder history (returned via narrative result, not mutated here)
+    updated_history = dict(reminder_history)
     for r in filtered:
-        reminder_history[r["type"]] = reminder_history.get(r["type"], 0) + 1
-    state["reminder_history"] = reminder_history
+        updated_history[r["type"]] = updated_history.get(r["type"], 0) + 1
 
-    return filtered
+    return filtered, updated_history

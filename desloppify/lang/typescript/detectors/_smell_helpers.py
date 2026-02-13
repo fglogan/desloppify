@@ -9,6 +9,46 @@ import re
 _MAX_CATCH_BODY = 1000  # max characters to scan for catch block body
 
 
+def _strip_ts_comments(text: str) -> str:
+    """Strip // and /* */ comments while preserving strings."""
+    result: list[str] = []
+    i = 0
+    in_str = None
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == '\\' and i + 1 < len(text):
+                result.append(text[i:i + 2])
+                i += 2
+                continue
+            if ch == in_str:
+                in_str = None
+            result.append(ch)
+            i += 1
+        elif ch in ('"', "'", '`'):
+            in_str = ch
+            result.append(ch)
+            i += 1
+        elif ch == '/' and i + 1 < len(text):
+            if text[i + 1] == '/':
+                nl = text.find('\n', i)
+                if nl == -1:
+                    break
+                i = nl
+            elif text[i + 1] == '*':
+                end = text.find('*/', i + 2)
+                if end == -1:
+                    break
+                i = end + 2
+            else:
+                result.append(ch)
+                i += 1
+        else:
+            result.append(ch)
+            i += 1
+    return ''.join(result)
+
+
 def _ts_match_is_in_string(line: str, match_start: int) -> bool:
     """Check if a match position falls inside a string literal or comment on a single line.
 
@@ -67,12 +107,24 @@ def _detect_async_no_await(filepath: str, content: str, lines: list[str],
         has_await = False
         for j in range(i, min(i + 200, len(lines))):
             body_line = lines[j]
+            in_str = None
+            prev_ch = ""
             for ch in body_line:
-                if ch == '{':
+                if in_str:
+                    if ch == in_str and prev_ch != "\\":
+                        in_str = None
+                    prev_ch = ch
+                    continue
+                if ch in "'\"`":
+                    in_str = ch
+                elif ch == '/' and prev_ch == '/':
+                    break  # Rest of line is comment
+                elif ch == '{':
                     brace_depth += 1
                     found_open = True
                 elif ch == '}':
                     brace_depth -= 1
+                prev_ch = ch
             if "await " in body_line or "await\n" in body_line:
                 has_await = True
             if found_open and brace_depth <= 0:
@@ -256,8 +308,7 @@ def _detect_dead_useeffects(filepath: str, lines: list[str],
             continue
 
         body = text[brace_pos + 1:body_end]
-        body_stripped = re.sub(r"//[^\n]*", "", body)
-        body_stripped = re.sub(r"/\*.*?\*/", "", body_stripped, flags=re.DOTALL)
+        body_stripped = _strip_ts_comments(body)
         if body_stripped.strip() == "":
             smell_counts["dead_useeffect"].append({
                 "file": filepath,
@@ -304,9 +355,7 @@ def _detect_swallowed_errors(filepath: str, content: str, lines: list[str],
             continue
 
         body = content[brace_start + 1:body_end]
-        body_clean = re.sub(r"//[^\n]*", "", body)
-        body_clean = re.sub(r"/\*.*?\*/", "", body_clean, flags=re.DOTALL)
-        body_clean = body_clean.strip()
+        body_clean = _strip_ts_comments(body).strip()
 
         if not body_clean:
             continue  # empty catch — caught by empty_catch detector
@@ -480,10 +529,7 @@ def _detect_dead_functions(filepath: str, lines: list[str],
             continue
 
         body = body_text[first_brace + 1:last_brace]
-        # Strip comments
-        body_clean = re.sub(r"//[^\n]*", "", body)
-        body_clean = re.sub(r"/\*.*?\*/", "", body_clean, flags=re.DOTALL)
-        body_clean = body_clean.strip().rstrip(";")
+        body_clean = _strip_ts_comments(body).strip().rstrip(";")
 
         if body_clean in ("", "return", "return null", "return undefined"):
             label = body_clean or "empty"
@@ -605,9 +651,13 @@ def _detect_catch_return_default(filepath: str, content: str,
 
         if default_fields >= 2:
             line_no = content[:m.start()].count("\n") + 1
-            lines = content.splitlines()
+            # Use content slice to get the line without re-splitting entire file
+            line_start = content.rfind("\n", 0, m.start()) + 1
+            line_end = content.find("\n", m.start())
+            if line_end == -1:
+                line_end = len(content)
             smell_counts["catch_return_default"].append({
                 "file": filepath,
                 "line": line_no,
-                "content": lines[line_no - 1].strip()[:100] if line_no <= len(lines) else "",
+                "content": content[line_start:line_end].strip()[:100],
             })

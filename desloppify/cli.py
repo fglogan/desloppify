@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .state import _json_default
 from .utils import DEFAULT_PATH, PROJECT_ROOT
 
 
@@ -17,9 +18,12 @@ def _write_query(data: dict):
     Every query command calls this so the LLM can always Read the file
     instead of parsing terminal output.
     """
-    QUERY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    QUERY_FILE.write_text(json.dumps(data, indent=2, default=str) + "\n")
-    print(f"  \u2192 query.json updated", file=sys.stderr)
+    try:
+        QUERY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        QUERY_FILE.write_text(json.dumps(data, indent=2, default=_json_default) + "\n")
+        print(f"  \u2192 query.json updated", file=sys.stderr)
+    except OSError as e:
+        print(f"  \u26a0 Could not write query.json: {e}", file=sys.stderr)
 
 
 def _state_path(args) -> Path | None:
@@ -56,8 +60,9 @@ def _resolve_lang(args):
 
 DETECTOR_NAMES = [
     "logs", "unused", "exports", "deprecated", "large", "complexity",
-    "gods", "single-use", "props", "passthrough", "concerns", "deps", "dupes", "smells",
-    "coupling", "patterns", "naming", "cycles", "orphaned", "react",
+    "gods", "single_use", "props", "passthrough", "concerns", "deps", "dupes", "smells",
+    "coupling", "patterns", "naming", "cycles", "orphaned", "react", "facade",
+    "flat_dirs", "dict_keys", "signature",
 ]
 
 USAGE_EXAMPLES = """

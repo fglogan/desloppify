@@ -254,10 +254,7 @@ def py_passthrough_pattern(name: str) -> str:
     return rf"\b{escaped}\s*=\s*{escaped}\b"
 
 
-_PY_FUNC_PATTERN = re.compile(
-    r"^def\s+(\w+)\s*\(([^)]*)\)\s*(?:->.*?)?:",
-    re.MULTILINE | re.DOTALL,
-)
+_PY_DEF_RE = re.compile(r"^def\s+(\w+)\s*\(", re.MULTILINE)
 
 
 def detect_passthrough_functions(path: Path) -> list[dict]:
@@ -268,14 +265,31 @@ def detect_passthrough_functions(path: Path) -> list[dict]:
         if content is None:
             continue
 
-        for m in _PY_FUNC_PATTERN.finditer(content):
+        for m in _PY_DEF_RE.finditer(content):
             name = m.group(1)
-            params = extract_py_params(m.group(2))
+            # Track paren depth to find matching close-paren (handles nested parens)
+            depth = 1
+            i = m.end()
+            while i < len(content) and depth > 0:
+                ch = content[i]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                i += 1
+            if depth != 0:
+                continue
+            param_str = content[m.end():i - 1]
+            params = extract_py_params(param_str)
             if len(params) < 4:
                 continue
 
-            # Extract function body (up to next top-level definition)
-            rest = content[m.end():]
+            # Skip past return annotation and colon to get function body
+            rest_after_paren = content[i:]
+            colon_m = re.search(r":", rest_after_paren)
+            if not colon_m:
+                continue
+            rest = rest_after_paren[colon_m.end():]
             bm = re.search(r"\n(?=[^\s\n#])", rest)
             body = rest[:bm.start()] if bm else rest
 

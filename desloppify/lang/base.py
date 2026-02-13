@@ -72,8 +72,8 @@ class LangConfig:
     # Keys serve as the valid detector name list.
     detect_commands: dict[str, Callable] = field(default_factory=dict)
 
-    # Function extractor (for duplicate detection)
-    extract_functions: Callable[[str], list[dict]] | None = None
+    # Function extractor (for duplicate detection). Returns list[FunctionInfo].
+    extract_functions: Callable[[Path], list] | None = None
 
     # Coupling boundaries (optional, project-specific)
     boundaries: list[BoundaryRule] = field(default_factory=list)
@@ -91,6 +91,7 @@ class LangConfig:
     # Zone classification
     zone_rules: list = field(default_factory=list)
     _zone_map: object = field(default=None, repr=False)  # FileZoneMap, set at scan time
+    _dep_graph: object = field(default=None, repr=False)  # dep graph, set at scan time
 
 
 def make_unused_findings(entries: list[dict], stderr_fn) -> list[dict]:

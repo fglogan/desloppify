@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .. import register_lang
@@ -21,7 +22,7 @@ from .detectors.complexity import compute_max_params, compute_nesting_depth, com
 
 PY_ZONE_RULES = [
     ZoneRule(Zone.GENERATED, ["/migrations/", "_pb2.py", "_pb2_grpc.py"]),
-    ZoneRule(Zone.TEST, ["test_", "_test.py",
+    ZoneRule(Zone.TEST, ["_test.py",
                          "conftest.py", "/factories/"]),
     ZoneRule(Zone.CONFIG, ["setup.py", "setup.cfg", "pyproject.toml",
                            "manage.py", "wsgi.py", "asgi.py",
@@ -40,7 +41,7 @@ PY_COMPLEXITY_SIGNALS = [
     ComplexitySignal("long_functions", None, weight=1, threshold=80, compute=compute_long_functions),
     ComplexitySignal("many_classes", r"^class\s+\w+", weight=3, threshold=3),
     ComplexitySignal("nested_comprehensions",
-                     r"\[.*\bfor\b.*\bfor\b.*\]|\{.*\bfor\b.*\bfor\b.*\}",
+                     r"\[[^\]]*\bfor\b[^\]]*\bfor\b[^\]]*\]|\{[^}]*\bfor\b[^}]*\bfor\b[^}]*\}",
                      weight=2, threshold=2),
     ComplexitySignal("TODOs", r"#\s*(?:TODO|FIXME|HACK|XXX)", weight=2, threshold=0),
 ]
@@ -154,6 +155,7 @@ def _phase_coupling(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str,
     from ...detectors.facade import detect_reexport_facades
 
     graph = build_dep_graph(path)
+    lang._dep_graph = graph
     zm = lang._zone_map
 
     single_entries, single_candidates = detect_single_use_abstractions(
@@ -255,6 +257,61 @@ def _phase_dict_keys(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str
     return results, potentials
 
 
+def _find_external_test_files(path: Path, lang_name: str) -> set[str]:
+    """Find test files in standard locations outside the scanned path."""
+    from ...utils import PROJECT_ROOT
+    extra = set()
+    for test_dir in ("tests", "test"):
+        d = PROJECT_ROOT / test_dir
+        if not d.is_dir():
+            continue
+        # Check that test_dir is not inside the scanned path
+        try:
+            d.resolve().relative_to(path.resolve())
+            continue  # test_dir is inside scanned path, zone_map already has it
+        except ValueError:
+            pass
+        ext = ".py" if lang_name == "python" else (".ts", ".tsx")
+        for root, _, files in os.walk(d):
+            for f in files:
+                if isinstance(ext, tuple):
+                    if any(f.endswith(e) for e in ext):
+                        extra.add(os.path.join(root, f))
+                elif f.endswith(ext):
+                    extra.add(os.path.join(root, f))
+    return extra
+
+
+def _phase_test_coverage(path: Path, lang: LangConfig) -> tuple[list[dict], dict[str, int]]:
+    from ...detectors.test_coverage import detect_test_coverage
+    from ...state import make_finding
+
+    zm = lang._zone_map
+    if zm is None:
+        return [], {}
+
+    graph = lang._dep_graph or lang.build_dep_graph(path)
+    extra = _find_external_test_files(path, lang.name)
+    entries, potential = detect_test_coverage(graph, zm, lang.name,
+                                              extra_test_files=extra or None)
+    entries = filter_entries(zm, entries, "test_coverage")
+
+    results = []
+    for e in entries:
+        results.append(make_finding(
+            "test_coverage", e["file"], e.get("name", ""),
+            tier=e["tier"], confidence=e["confidence"],
+            summary=e["summary"], detail=e.get("detail", {}),
+        ))
+
+    if results:
+        log(f"         test coverage: {len(results)} findings ({potential} production files)")
+    else:
+        log(f"         test coverage: clean ({potential} production files)")
+
+    return results, {"test_coverage": potential}
+
+
 # ── Build the config ──────────────────────────────────────
 
 
@@ -288,6 +345,7 @@ class PythonConfig(LangConfig):
                 DetectorPhase("Unused (ruff)", _phase_unused),
                 DetectorPhase("Structural analysis", _phase_structural),
                 DetectorPhase("Coupling + cycles + orphaned", _phase_coupling),
+                DetectorPhase("Test coverage", _phase_test_coverage),
                 DetectorPhase("Code smells", _phase_smells),
                 DetectorPhase("Dict key flow", _phase_dict_keys),
                 DetectorPhase("Duplicates", phase_dupes, slow=True),

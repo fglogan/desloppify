@@ -40,7 +40,7 @@ def _audit_excluded_dirs(exclusions: tuple[str, ...], scanned_files: list[str],
             from ..state import make_finding
             stale_findings.append(make_finding(
                 "stale_exclude", ex_dir, ex_dir,
-                tier=4, confidence="info",
+                tier=4, confidence="low",
                 summary=f"Excluded directory '{ex_dir}' has 0 references from scanned code — may be stale",
                 detail={"directory": ex_dir, "references": 0},
             ))
@@ -118,7 +118,7 @@ def _show_score_delta(state: dict, prev_score: float, prev_strict: float,
                 "Run a full scan to fix: desloppify scan --path <source-root>", "yellow"))
 
 
-def _show_post_scan_analysis(diff: dict, state: dict, lang) -> tuple[list[str], str | None, dict]:
+def _show_post_scan_analysis(diff: dict, state: dict, lang) -> tuple[list[str], dict]:
     """Print warnings, narrative headline, and top action. Returns (warnings, narrative)."""
     warnings = []
     if diff["reopened"] > 5:
@@ -249,6 +249,11 @@ def cmd_scan(args):
 
     warnings, narrative = _show_post_scan_analysis(diff, state, lang)
 
+    # Persist reminder history (computed by narrative, not mutated)
+    if narrative and "reminder_history" in narrative:
+        state["reminder_history"] = narrative["reminder_history"]
+        save_state(state, sp)
+
     _write_query({"command": "scan", "score": state["score"],
                   "strict_score": state.get("strict_score", 0),
                   "prev_score": prev_score, "diff": diff, "stats": state["stats"],
@@ -285,8 +290,8 @@ def cmd_scan(args):
                 print(c(f"  💡 Ask the user if they'd like to add it to their README with:", "dim"))
                 print(c(f'     <img src="{rel_path}" width="400">', "dim"))
                 print(c(f"     (disable: --no-badge | move: --badge-path <path>)", "dim"))
-    except ImportError:
-        pass  # Pillow not installed — skip silently
+    except (ImportError, OSError):
+        pass  # Pillow not installed or write failed — skip silently
 
 
 def _show_detector_progress(state: dict):
@@ -309,7 +314,8 @@ def _show_detector_progress(state: dict):
 
     DET_ORDER = ["logs", "unused", "exports", "deprecated", "structural", "props",
                  "single_use", "coupling", "cycles", "orphaned", "facade", "patterns",
-                 "naming", "smells", "react", "dupes"]
+                 "naming", "smells", "react", "dupes", "stale exclude",
+                 "dict keys", "flat dirs", "signature", "test coverage"]
     order_map = {d: i for i, d in enumerate(DET_ORDER)}
     sorted_dets = sorted(by_det.items(), key=lambda x: order_map.get(x[0], 99))
 

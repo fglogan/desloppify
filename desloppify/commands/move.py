@@ -133,28 +133,76 @@ def _print_plan(
 # ── Apply changes ─────────────────────────────────────────
 
 
+def _safe_write(filepath: str | Path, content: str) -> None:
+    """Atomic write: write to temp file then rename."""
+    p = Path(filepath)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        tmp.write_text(content)
+        os.replace(str(tmp), str(p))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _apply_changes(
     source_abs: str, dest_abs: str,
     importer_changes: dict[str, list[tuple[str, str]]],
     self_changes: list[tuple[str, str]],
 ) -> None:
-    """Move the file and apply all import replacements."""
-    Path(dest_abs).parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(source_abs, dest_abs)
+    """Move the file and apply all import replacements.
 
-    # Apply self-import changes to the moved file (now at dest)
+    Uses a two-phase approach: compute all new content first, then write.
+    On error, attempts to roll back by restoring original file contents.
+    """
+    # Phase 1: Read all files and compute new contents (no writes yet)
+    new_contents: dict[str, str] = {}
     if self_changes:
-        content = Path(dest_abs).read_text()
+        content = Path(source_abs).read_text()
         for old_str, new_str in self_changes:
             content = content.replace(old_str, new_str)
-        Path(dest_abs).write_text(content)
+        new_contents[dest_abs] = content
 
-    # Apply importer changes
     for filepath, replacements in importer_changes.items():
         content = Path(filepath).read_text()
         for old_str, new_str in replacements:
             content = content.replace(old_str, new_str)
-        Path(filepath).write_text(content)
+        new_contents[filepath] = content
+
+    # Phase 2: Move file and write all changes
+    Path(dest_abs).parent.mkdir(parents=True, exist_ok=True)
+    written_files: dict[str, str] = {}  # filepath -> original content (for rollback)
+    try:
+        shutil.move(source_abs, dest_abs)
+
+        # Write self-import changes to moved file
+        if dest_abs in new_contents:
+            written_files[dest_abs] = Path(dest_abs).read_text()
+            _safe_write(dest_abs, new_contents[dest_abs])
+
+        # Write importer changes
+        for filepath in importer_changes:
+            if filepath in new_contents:
+                written_files[filepath] = Path(filepath).read_text()
+                _safe_write(filepath, new_contents[filepath])
+
+    except Exception as ex:
+        print(c(f"\n  Error during move: {ex}", "red"), file=sys.stderr)
+        print(c("  Rolling back...", "yellow"), file=sys.stderr)
+        # Restore any files we already wrote
+        for fp, original in written_files.items():
+            try:
+                _safe_write(fp, original)
+            except OSError:
+                print(c(f"  WARNING: Could not restore {rel(fp)}", "red"), file=sys.stderr)
+        # Move the file back if it was moved
+        if Path(dest_abs).exists() and not Path(source_abs).exists():
+            try:
+                shutil.move(dest_abs, source_abs)
+            except OSError:
+                print(c(f"  WARNING: Could not move file back to {rel(source_abs)}", "red"),
+                      file=sys.stderr)
+        raise
 
 
 # ── Main command ──────────────────────────────────────────
@@ -366,31 +414,52 @@ def _cmd_move_dir(args, source_abs: str):
         print(c("  Dry run — no files modified.", "yellow"))
         return
 
-    # Execute: move the entire directory at once
-    Path(dest_abs).parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(source_abs, dest_abs)
-
-    # Apply self-import and intra-package changes to the moved files (now at dest)
+    # Phase 1: Compute all new contents (no writes yet)
     all_internal_changes: dict[str, list[tuple[str, str]]] = {}
     for src_file, changes in all_self_changes.items():
         all_internal_changes.setdefault(src_file, []).extend(changes)
     for src_file, changes in intra_pkg_changes.items():
         all_internal_changes.setdefault(src_file, []).extend(changes)
 
-    for src_file, changes in all_internal_changes.items():
-        rel_in_dir = Path(src_file).relative_to(source_path)
-        dest_file = Path(dest_abs) / rel_in_dir
-        content = dest_file.read_text()
-        for old_str, new_str in changes:
-            content = content.replace(old_str, new_str)
-        dest_file.write_text(content)
+    # Phase 2: Execute with rollback on failure
+    Path(dest_abs).parent.mkdir(parents=True, exist_ok=True)
+    written_files: dict[str, str] = {}  # filepath -> original content
+    try:
+        shutil.move(source_abs, dest_abs)
 
-    # Apply importer changes to external files
-    for filepath, replacements in external_changes.items():
-        content = Path(filepath).read_text()
-        for old_str, new_str in replacements:
-            content = content.replace(old_str, new_str)
-        Path(filepath).write_text(content)
+        for src_file, changes in all_internal_changes.items():
+            rel_in_dir = Path(src_file).relative_to(source_path)
+            dest_file = Path(dest_abs) / rel_in_dir
+            original = dest_file.read_text()
+            content = original
+            for old_str, new_str in changes:
+                content = content.replace(old_str, new_str)
+            written_files[str(dest_file)] = original
+            _safe_write(dest_file, content)
+
+        for filepath, replacements in external_changes.items():
+            original = Path(filepath).read_text()
+            content = original
+            for old_str, new_str in replacements:
+                content = content.replace(old_str, new_str)
+            written_files[filepath] = original
+            _safe_write(filepath, content)
+
+    except Exception as ex:
+        print(c(f"\n  Error during directory move: {ex}", "red"), file=sys.stderr)
+        print(c("  Rolling back...", "yellow"), file=sys.stderr)
+        for fp, original in written_files.items():
+            try:
+                _safe_write(fp, original)
+            except OSError:
+                print(c(f"  WARNING: Could not restore {rel(fp)}", "red"), file=sys.stderr)
+        if Path(dest_abs).exists() and not Path(source_abs).exists():
+            try:
+                shutil.move(dest_abs, source_abs)
+            except OSError:
+                print(c(f"  WARNING: Could not move directory back to {rel(source_abs)}", "red"),
+                      file=sys.stderr)
+        raise
 
     print(c("  Done.", "green"))
     if lang_name == "typescript":

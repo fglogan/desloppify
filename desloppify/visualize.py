@@ -108,7 +108,8 @@ def generate_visualization(path: Path, state: dict | None = None,
             findings_by_file[f["file"]].append(f)
 
     tree = _build_tree(files, dep_graph, findings_by_file)
-    tree_json = json.dumps(tree)
+    # Escape </ to prevent </script> in filenames from breaking HTML
+    tree_json = json.dumps(tree).replace("</", r"<\/")
 
     # Stats for header
     total_files = len(files)
@@ -127,8 +128,12 @@ def generate_visualization(path: Path, state: dict | None = None,
     html = html.replace("__SCORE__", str(score))
 
     if output:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(html)
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(html)
+        except OSError as e:
+            import sys
+            print(f"  \u26a0 Could not write visualization: {e}", file=sys.stderr)
 
     return html
 
@@ -372,6 +377,7 @@ const data = __TREE_DATA__;
 const chartEl = document.getElementById('chart');
 const tooltip = document.getElementById('tooltip');
 const breadcrumbEl = document.getElementById('breadcrumb');
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 const colorSelect = document.getElementById('colorMode');
 
 // Color scales
@@ -427,8 +433,8 @@ function render(focus) {
   const ancestors = focus.ancestors().reverse();
   breadcrumbEl.innerHTML = ancestors.map((a, i) =>
     i < ancestors.length - 1
-      ? `<span data-depth="${i}">${a.data.name}</span>`
-      : `<strong>${a.data.name}</strong>`
+      ? `<span data-depth="${i}">${esc(a.data.name)}</span>`
+      : `<strong>${esc(a.data.name)}</strong>`
   ).join(' / ');
 
   if (!focus.children) return;
@@ -516,7 +522,7 @@ function renderLeaf(parent, d) {
 // Tooltips
 function showFileTooltip(event, d) {
   const dd = d.data;
-  let html = `<div class="tt-path">${dd.path || dd.name}</div><div class="tt-stats">`;
+  let html = `<div class="tt-path">${esc(dd.path || dd.name)}</div><div class="tt-stats">`;
   html += `<strong>${(dd.loc||0).toLocaleString()}</strong> LOC`;
   html += ` · Fan-in: <strong>${dd.fan_in||0}</strong> · Fan-out: <strong>${dd.fan_out||0}</strong>`;
   if (dd.findings_open > 0)
@@ -524,7 +530,7 @@ function showFileTooltip(event, d) {
   html += `</div>`;
   if (dd.finding_summaries && dd.finding_summaries.length) {
     html += `<div class="tt-findings">`;
-    dd.finding_summaries.slice(0,5).forEach(s => { html += `<div class="tt-finding">• ${s}</div>`; });
+    dd.finding_summaries.slice(0,5).forEach(s => { html += `<div class="tt-finding">• ${esc(s)}</div>`; });
     if (dd.finding_summaries.length > 5)
       html += `<div class="tt-finding">… +${dd.finding_summaries.length-5} more</div>`;
     html += `</div>`;
@@ -539,7 +545,7 @@ function showDirTooltip(event, d) {
   const loc = d3.sum(leaves, l => l.data.loc || 0);
   const findings = d3.sum(leaves, l => l.data.findings_open || 0);
   const path = d.ancestors().reverse().map(a => a.data.name).join('/');
-  let html = `<div class="tt-path">${path}/</div><div class="tt-stats">`;
+  let html = `<div class="tt-path">${esc(path)}/</div><div class="tt-stats">`;
   html += `<strong>${leaves.length}</strong> files · <strong>${loc.toLocaleString()}</strong> LOC`;
   if (findings > 0) html += ` · <strong style="color:#f0883e">${findings} findings</strong>`;
   html += `</div>`;

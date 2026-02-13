@@ -225,7 +225,9 @@ def extract_ts_components(path: Path) -> list[ClassInfo]:
             use_effects = len(re.findall(r"useEffect\s*\(", content))
             use_states = len(re.findall(r"useState\s*[<(]", content))
             use_refs = len(re.findall(r"useRef\s*[<(]", content))
-            custom_hooks = len(re.findall(r"use[A-Z]\w+\s*\(", content))
+            all_use_hooks = len(re.findall(r"use[A-Z]\w+\s*\(", content))
+            # Subtract built-in hooks to avoid double-counting
+            custom_hooks = max(0, all_use_hooks - context_hooks - use_effects - use_states - use_refs)
 
             results.append(ClassInfo(
                 name=Path(filepath).stem,

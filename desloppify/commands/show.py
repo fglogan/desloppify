@@ -103,9 +103,12 @@ def cmd_show(args):
     # Optional: also write to a custom output file
     output_file = getattr(args, "output", None)
     if output_file:
-        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_file).write_text(json.dumps(payload, indent=2) + "\n")
-        print(c(f"Wrote {len(matches)} findings to {output_file}", "green"))
+        try:
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_file).write_text(json.dumps(payload, indent=2) + "\n")
+            print(c(f"Wrote {len(matches)} findings to {output_file}", "green"))
+        except OSError as e:
+            print(c(f"Could not write to {output_file}: {e}", "red"))
         return
 
     by_file: dict[str, list] = defaultdict(list)

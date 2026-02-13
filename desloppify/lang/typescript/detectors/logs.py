@@ -86,16 +86,31 @@ def cmd_logs(args):
 
 
 def _fix_logs(by_file: dict[str, list]):
+    import os
     removed = 0
+    failed = 0
     for filepath, file_entries in by_file.items():
         lines_to_remove = {e["line"] for e in file_entries}
         p = Path(filepath) if Path(filepath).is_absolute() else PROJECT_ROOT / filepath
-        original = p.read_text()
-        new_lines = []
-        for i, line in enumerate(original.splitlines(keepends=True), start=1):
-            if i not in lines_to_remove:
-                new_lines.append(line)
-            else:
-                removed += 1
-        p.write_text("".join(new_lines))
-    print(c(f"Removed {removed} lines across {len(by_file)} files.", "green"))
+        try:
+            original = p.read_text()
+            new_lines = []
+            for i, line in enumerate(original.splitlines(keepends=True), start=1):
+                if i not in lines_to_remove:
+                    new_lines.append(line)
+                else:
+                    removed += 1
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            tmp.write_text("".join(new_lines))
+            os.replace(str(tmp), str(p))
+        except OSError as e:
+            failed += 1
+            print(c(f"  Failed to fix {filepath}: {e}", "red"))
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+    msg = f"Removed {removed} lines across {len(by_file)} files."
+    if failed:
+        msg += f" ({failed} files failed.)"
+    print(c(msg, "green"))

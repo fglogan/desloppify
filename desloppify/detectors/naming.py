@@ -18,8 +18,10 @@ def _classify_convention(filename: str) -> str | None:
         return "PascalCase"
     if stem[0].islower() and any(c.isupper() for c in stem) and "-" not in stem:
         return "camelCase"
+    if "_" in stem and stem == stem.lower():
+        return "snake_case"
     if stem.islower() and "-" not in stem:
-        return "camelCase"
+        return "flat_lower"
     return None
 
 

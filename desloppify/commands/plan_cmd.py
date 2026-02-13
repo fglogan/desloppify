@@ -22,8 +22,11 @@ def cmd_plan_output(args):
 
     output = getattr(args, "output", None)
     if output:
-        Path(output).parent.mkdir(parents=True, exist_ok=True)
-        Path(output).write_text(plan_md)
-        print(c(f"Plan written to {output}", "green"))
+        try:
+            Path(output).parent.mkdir(parents=True, exist_ok=True)
+            Path(output).write_text(plan_md)
+            print(c(f"Plan written to {output}", "green"))
+        except OSError as e:
+            print(c(f"Could not write plan to {output}: {e}", "red"))
     else:
         print(plan_md)
