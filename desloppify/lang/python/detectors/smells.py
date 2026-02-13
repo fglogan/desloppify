@@ -51,6 +51,7 @@ SMELL_CHECKS = [
     _smell("regex_backtrack", "Regex with nested quantifiers (ReDoS risk)", "high"),
     _smell("naive_comment_strip", "re.sub strips comments without string awareness", "medium"),
     _smell("callback_logging", "Logging callback parameter (use module-level logger instead)", "medium"),
+    _smell("hardcoded_path_sep", "Hardcoded '/' path separator (breaks on Windows)", "medium"),
 ]
 
 
@@ -297,6 +298,7 @@ def _detect_ast_smells(filepath: str, content: str, smell_counts: dict[str, list
     _detect_regex_backtrack(filepath, tree, smell_counts)
     _detect_naive_comment_strip(filepath, tree, smell_counts)
     _detect_callback_logging(filepath, tree, smell_counts)
+    _detect_hardcoded_path_sep(filepath, tree, smell_counts)
 
 
 def _detect_monster_functions(filepath: str, node: ast.AST, smell_counts: dict[str, list]):
@@ -886,4 +888,93 @@ def _detect_callback_logging(filepath: str, tree: ast.Module,
                     "file": filepath,
                     "line": node.lineno,
                     "content": f"{node.name}({name}=...) — called {call_count} time(s)",
+                })
+
+
+# ── Hardcoded path separator detector ───────────────────────
+
+# Variable names that strongly suggest filesystem paths (not module specifiers)
+_PATH_VAR_NAMES = {
+    "filepath", "file_path", "filename", "file_name",
+    "dirpath", "dir_path", "dirname", "dir_name", "directory",
+    "rel_path", "abs_path", "rel_file", "rel_dir", "full_path",
+    "base_path", "parent_path", "scan_path",
+}
+
+# Substrings that suggest a variable holds a path
+_PATH_NAME_PARTS = {"filepath", "dirpath", "file_path", "dir_path"}
+
+
+def _looks_like_path_var(name: str) -> bool:
+    """Check if a variable name suggests it holds a filesystem path."""
+    lower = name.lower()
+    if lower in _PATH_VAR_NAMES:
+        return True
+    # Check for path-related substrings: e.g., old_filepath, scan_path
+    return any(part in lower for part in _PATH_NAME_PARTS)
+
+
+def _detect_hardcoded_path_sep(filepath: str, tree: ast.Module,
+                                smell_counts: dict[str, list]):
+    """Flag .split('/') on path-like variables, and os.path.join mixed with '/'.
+
+    Detects two patterns:
+    1. path_var.split('/') — should use os.sep or normalize with replace('\\\\', '/')
+    2. f-strings or concatenation building paths with hardcoded '/' separators
+       on variables with path-like names
+    """
+    for node in ast.walk(tree):
+        # Pattern 1: var.split("/") where var looks like a path
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "split"
+                and len(node.args) == 1
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "/"):
+            # Check what's being split
+            obj = node.func.value
+            var_name = ""
+            if isinstance(obj, ast.Name):
+                var_name = obj.id
+            elif isinstance(obj, ast.Attribute):
+                var_name = obj.attr
+            # Also catch chained: os.path.relpath(...).split("/")
+            elif isinstance(obj, ast.Call):
+                if (isinstance(obj.func, ast.Attribute)
+                        and obj.func.attr in ("relpath", "relative_to")):
+                    smell_counts["hardcoded_path_sep"].append({
+                        "file": filepath,
+                        "line": node.lineno,
+                        "content": f'{ast.dump(obj.func)[:40]}.split("/")',
+                    })
+                    continue
+
+            if var_name and _looks_like_path_var(var_name):
+                smell_counts["hardcoded_path_sep"].append({
+                    "file": filepath,
+                    "line": node.lineno,
+                    "content": f'{var_name}.split("/")',
+                })
+
+        # Pattern 2: path_var.startswith("something/with/slashes")
+        # Skip module specifiers (@/, http://, etc.)
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "startswith"
+                and len(node.args) == 1
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and "/" in node.args[0].value
+                and not node.args[0].value.startswith(("@", "http", "//"))):
+            obj = node.func.value
+            var_name = ""
+            if isinstance(obj, ast.Name):
+                var_name = obj.id
+            elif isinstance(obj, ast.Attribute):
+                var_name = obj.attr
+            if var_name and _looks_like_path_var(var_name):
+                smell_counts["hardcoded_path_sep"].append({
+                    "file": filepath,
+                    "line": node.lineno,
+                    "content": f'{var_name}.startswith("{node.args[0].value}")',
                 })
