@@ -219,9 +219,23 @@ def _compute_reminders(state: dict, lang: str | None,
             "command": None,
         })
 
+    # Always remind agents to report scores (no decay — this is core)
+    if command == "scan":
+        reminders.insert(0, {
+            "type": "report_scores",
+            "message": ("ALWAYS share ALL scores with the user: overall health "
+                        "(lenient + strict), every dimension score (lenient + strict), "
+                        "and all review dimension scores. The goal is to maximize strict scores."),
+            "command": None,
+            "no_decay": True,
+        })
+
     # Apply decay: suppress reminders shown >= threshold times
     filtered = []
     for r in reminders:
+        if r.get("no_decay"):
+            filtered.append(r)
+            continue
         count = reminder_history.get(r["type"], 0)
         if count < _REMINDER_DECAY_THRESHOLD:
             filtered.append(r)

@@ -380,9 +380,8 @@ class TestPrepareReview:
         assert data["total_candidates"] == 1
         assert data["dimensions"] == [
             "naming_quality", "comment_quality", "error_consistency",
-            "convention_outlier", "abstraction_fitness",
-            "logic_clarity", "contract_coherence", "initialization_coupling",
-            "logging_quality", "type_safety", "cross_module_architecture",
+            "abstraction_fitness", "logic_clarity", "contract_coherence",
+            "type_safety", "cross_module_architecture",
             "ai_generated_debt", "authorization_coherence",
         ]
         assert "system_prompt" in data
@@ -1054,18 +1053,6 @@ class TestNewDimensions:
         assert "contract" in dim["description"].lower()
         assert any("return type" in item.lower() for item in dim["look_for"])
 
-    def test_initialization_coupling_dimension(self):
-        from desloppify.review import DIMENSION_PROMPTS
-        dim = DIMENSION_PROMPTS["initialization_coupling"]
-        assert "initialization" in dim["description"].lower() or "ordering" in dim["description"].lower()
-
-    def test_logging_quality_dimension(self):
-        from desloppify.review import DIMENSION_PROMPTS
-        dim = DIMENSION_PROMPTS["logging_quality"]
-        assert "logging" in dim["description"].lower() or "debugging" in dim["description"].lower()
-        assert len(dim["look_for"]) >= 3
-        assert len(dim["skip"]) >= 1
-
     def test_type_safety_dimension(self):
         from desloppify.review import DIMENSION_PROMPTS
         dim = DIMENSION_PROMPTS["type_safety"]
@@ -1084,8 +1071,6 @@ class TestNewDimensions:
         from desloppify.review import DEFAULT_DIMENSIONS
         assert "logic_clarity" in DEFAULT_DIMENSIONS
         assert "contract_coherence" in DEFAULT_DIMENSIONS
-        assert "initialization_coupling" in DEFAULT_DIMENSIONS
-        assert "logging_quality" in DEFAULT_DIMENSIONS
         assert "type_safety" in DEFAULT_DIMENSIONS
         assert "cross_module_architecture" in DEFAULT_DIMENSIONS
 
@@ -1108,7 +1093,7 @@ class TestNewDimensions:
             },
             {
                 "file": "src/config.py",
-                "dimension": "initialization_coupling",
+                "dimension": "cross_module_architecture",
                 "identifier": "DB_URL",
                 "summary": "Module reads DB_URL at import time before config is loaded",
                 "confidence": "low",
@@ -1163,9 +1148,9 @@ class TestNewDimensions:
         data = [
             {
                 "file": "src/app.py",
-                "dimension": "logging_quality",
+                "dimension": "abstraction_fitness",
                 "identifier": "handle_request",
-                "summary": "Print statement in production handler",
+                "summary": "Wrapper that just forwards to inner handler",
                 "confidence": "high",
             },
             {

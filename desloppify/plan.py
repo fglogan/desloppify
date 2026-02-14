@@ -133,10 +133,11 @@ def _plan_dimension_table(state: dict) -> list[str]:
     lines = [
         "## Health by Dimension",
         "",
-        "| Dimension | Tier | Checks | Issues | Health | Strict |",
-        "|-----------|------|--------|--------|--------|--------|",
+        "| Dimension | Tier | Checks | Issues | Health | Strict | Action |",
+        "|-----------|------|--------|--------|--------|--------|--------|",
     ]
     from .scoring import DIMENSIONS
+    from .registry import dimension_action_type
     static_names: set[str] = set()
     for dim in DIMENSIONS:
         ds = dim_scores.get(dim.name)
@@ -148,15 +149,16 @@ def _plan_dimension_table(state: dict) -> list[str]:
         score_val = ds.get("score", 100)
         strict_val = ds.get("strict", score_val)
         bold = "**" if score_val < 93 else ""
+        action = dimension_action_type(dim.name)
         lines.append(
             f"| {bold}{dim.name}{bold} | T{dim.tier} | "
-            f"{checks:,} | {issues} | {score_val:.1f}% | {strict_val:.1f}% |"
+            f"{checks:,} | {issues} | {score_val:.1f}% | {strict_val:.1f}% | {action} |"
         )
     # Append assessment dimensions (review-based) not in static DIMENSIONS
     assessment_dims = [(name, ds) for name, ds in sorted(dim_scores.items())
                        if name not in static_names]
     if assessment_dims:
-        lines.append("| **Review Dimensions** | | | | | |")
+        lines.append("| **Review Dimensions** | | | | | | |")
         for name, ds in assessment_dims:
             issues = ds.get("issues", 0)
             score_val = ds.get("score", 100)
@@ -165,7 +167,7 @@ def _plan_dimension_table(state: dict) -> list[str]:
             bold = "**" if score_val < 93 else ""
             lines.append(
                 f"| {bold}{name}{bold} | T{tier} | "
-                f"— | {issues} | {score_val:.1f}% | {strict_val:.1f}% |"
+                f"— | {issues} | {score_val:.1f}% | {strict_val:.1f}% | review |"
             )
     lines.append("")
     return lines

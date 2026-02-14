@@ -202,7 +202,7 @@ def _build_investigation_batches(holistic_ctx: dict, lang) -> list[dict]:
     batch1_files = _collect([god_modules, module_io])
     batch1 = {
         "name": "Architecture & Coupling",
-        "dimensions": ["cross_module_architecture", "initialization_coupling"],
+        "dimensions": ["cross_module_architecture"],
         "files_to_read": batch1_files,
         "why": "god modules, import-time side effects",
     }
@@ -223,7 +223,7 @@ def _build_investigation_batches(holistic_ctx: dict, lang) -> list[dict]:
     batch2_files = _collect([outlier_files, mixed_error_files])
     batch2 = {
         "name": "Conventions & Errors",
-        "dimensions": ["convention_outlier", "error_consistency"],
+        "dimensions": ["error_consistency"],
         "files_to_read": batch2_files,
         "why": "naming drift, behavioral outliers, mixed error strategies",
     }

@@ -270,10 +270,12 @@ def cmd_scan(args):
         print(c("  * Fast scan — slow phases (duplicates) skipped", "yellow"))
     _show_detector_progress(state)
 
-    # Dimension deltas (show which dimensions moved)
+    # Dimension deltas and low-dimension hints
     new_dim_scores = state.get("dimension_scores", {})
     if new_dim_scores and prev_dim_scores:
         _show_dimension_deltas(prev_dim_scores, new_dim_scores)
+    if new_dim_scores:
+        _show_low_dimension_hints(new_dim_scores)
 
     zone_distribution = state.get("zone_distribution")
 
@@ -351,8 +353,10 @@ def _print_llm_summary(state: dict, badge_path: Path | None,
 
     print("─" * 60)
     print("INSTRUCTIONS FOR LLM")
-    print("Present the scan results to the user in a markdown table.")
-    print("Use this data to build the table:\n")
+    print("IMPORTANT: ALWAYS present ALL scores to the user after a scan.")
+    print("Show overall health (lenient + strict), ALL dimension scores,")
+    print("AND all review dimension scores in a markdown table.")
+    print("The goal is to maximize strict scores. Never skip the scores.\n")
 
     print(f"Overall health: {obj_score:.1f}/100")
     if obj_strict is not None:
@@ -368,22 +372,24 @@ def _print_llm_summary(state: dict, badge_path: Path | None,
               if name not in static_names and data.get("checks", 0) > 0]
 
     if mechanical or review:
-        print("| Dimension | Health | Strict | Issues | Tier |")
-        print("|-----------|--------|--------|--------|------|")
+        from ..registry import dimension_action_type
+        print("| Dimension | Health | Strict | Issues | Tier | Action |")
+        print("|-----------|--------|--------|--------|------|--------|")
         for name, data in sorted(mechanical, key=lambda x: x[0]):
             score = data.get("score", 100)
             strict = data.get("strict", score)
             issues = data.get("issues", 0)
             tier = data.get("tier", "")
-            print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} |")
+            action = dimension_action_type(name)
+            print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} | {action} |")
         if review:
-            print("| **Review Dimensions** | | | | |")
+            print("| **Review Dimensions** | | | | | |")
             for name, data in sorted(review, key=lambda x: x[0]):
                 score = data.get("score", 100)
                 strict = data.get("strict", score)
                 issues = data.get("issues", 0)
                 tier = data.get("tier", "")
-                print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} |")
+                print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} | review |")
         print()
 
     stats = state.get("stats", {})
@@ -405,7 +411,9 @@ def _print_llm_summary(state: dict, badge_path: Path | None,
     print("- **Tackle**: T1/T2 (high impact), auto-fixable, security findings")
     print("- **Consider skipping**: T4 low-confidence, test/config zone findings (lower impact)")
     print("- **Wontfix**: Intentional patterns, false positives →")
-    print('  `desloppify resolve wontfix "<id>" --note "<why>"`\n')
+    print('  `desloppify resolve wontfix "<id>" --note "<why>"`')
+    print("- **Batch wontfix**: Multiple intentional patterns →")
+    print('  `desloppify resolve wontfix "<detector>::*::<category>" --note "<why>"`\n')
     print("### Understanding Dimensions")
     print("- **Mechanical** (Import hygiene, File health, etc.): Fix code → rescan")
     print("- **Review** (Naming Quality, Logic Clarity, etc.): Address review findings → re-review")
@@ -516,6 +524,44 @@ def _show_dimension_deltas(prev: dict, current: dict):
             s_sign = "+" if s_delta > 0 else ""
             strict_str = c(f"  strict: {old_s:.1f}→{new_s:.1f}% ({s_sign}{s_delta:.1f}%)", "dim")
         print(c(f"    {name:<22} {old:.1f}% → {new:.1f}%  ({sign}{delta:.1f}%)", color) + strict_str)
+    print()
+
+
+def _show_low_dimension_hints(dim_scores: dict):
+    """Show actionable hints for dimensions below 50%."""
+    from ..scoring import DIMENSIONS
+    static_names = {d.name for d in DIMENSIONS}
+
+    _MECHANICAL_HINTS = {
+        "Import hygiene": "run `desloppify fix unused` to auto-fix",
+        "File health": "run `desloppify show structural` — split large files",
+        "Coupling": "run `desloppify show single_use` — inline or merge",
+        "Organization": "run `desloppify show facade` — consolidate re-exports",
+        "Code quality": "run `desloppify show smells` — fix code smells",
+        "Duplication": "run `desloppify show dupes` — deduplicate functions",
+        "Dependency health": "run `desloppify show naming` — fix naming",
+        "Test health": "add tests for uncovered files: `desloppify show test_coverage`",
+        "Security": "run `desloppify show security` — fix security issues",
+        "Audit coverage": "run `desloppify review --prepare` to start file reviews",
+    }
+
+    low = []
+    for name, data in dim_scores.items():
+        strict = data.get("strict", data.get("score", 100))
+        if strict < 50:
+            if name in static_names:
+                hint = _MECHANICAL_HINTS.get(name, "run `desloppify show` for details")
+            else:
+                hint = "run `desloppify review --prepare` to assess"
+            low.append((name, strict, hint))
+
+    if not low:
+        return
+
+    low.sort(key=lambda x: x[1])
+    print(c("  Needs attention:", "yellow"))
+    for name, score, hint in low:
+        print(c(f"    {name} ({score:.0f}%) — {hint}", "yellow"))
     print()
 
 

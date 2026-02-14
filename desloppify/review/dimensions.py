@@ -255,9 +255,8 @@ enough to follow without further research."""
 
 DEFAULT_DIMENSIONS = [
     "naming_quality", "comment_quality", "error_consistency",
-    "convention_outlier", "abstraction_fitness",
-    "logic_clarity", "contract_coherence", "initialization_coupling",
-    "logging_quality", "type_safety", "cross_module_architecture",
+    "abstraction_fitness", "logic_clarity", "contract_coherence",
+    "type_safety", "cross_module_architecture",
     "ai_generated_debt", "authorization_coherence",
 ]
 
@@ -304,19 +303,6 @@ DIMENSION_PROMPTS = {
             "Error handling in test code",
         ],
     },
-    "convention_outlier": {
-        "description": "Files that break the codebase's own established patterns",
-        "look_for": [
-            "Export pattern different from siblings (named vs default, class vs functions)",
-            "Naming convention different from directory norms",
-            "Error handling style different from module neighbors",
-            "File organization (constants, helpers, exports) different from peers",
-        ],
-        "skip": [
-            "Intentional variation (e.g., index files, config files)",
-            "Files in directories with no established convention (<3 files)",
-        ],
-    },
     "abstraction_fitness": {
         "description": "Abstractions that earn their complexity cost",
         "look_for": [
@@ -360,35 +346,6 @@ DIMENSION_PROMPTS = {
             "Protocol/interface stubs (abstract methods with placeholder returns)",
             "Test helpers where loose typing is intentional",
             "Overloaded functions with multiple valid return types",
-        ],
-    },
-    "initialization_coupling": {
-        "description": "Implicit ordering dependencies between module initializations",
-        "look_for": [
-            "Module-level code that depends on another module's side effects having run first",
-            "Global mutable state that must be set before import (import-order-dependent)",
-            "Circular imports hidden behind lazy imports or runtime checks",
-            "Configuration that must be called before module can be used but isn't enforced",
-            "Singleton patterns where creation order matters across modules",
-        ],
-        "skip": [
-            "Standard library module initialization (logging.basicConfig, etc.)",
-            "Framework bootstrap code (app.configure, server.listen)",
-            "Explicit dependency injection where ordering is visible at call site",
-        ],
-    },
-    "logging_quality": {
-        "description": "Logging that aids debugging without cluttering output",
-        "look_for": [
-            "Excessive sequential debug logs that should be a single structured log",
-            "Log messages missing context (no task_id, no function name, no relevant state)",
-            "Inconsistent log level usage: debug for errors, info for trace-level detail",
-            "Sensitive data in log messages (tokens, passwords, PII)",
-            "Print statements in production code (should use logger)",
-        ],
-        "skip": [
-            "Log verbosity in test/debug code",
-            "Intentionally minimal logging in hot paths for performance",
         ],
     },
     "type_safety": {
@@ -515,15 +472,15 @@ medium = most would agree, low = reasonable engineers might disagree.
 not just the happy path. Check docstrings describe actual parameters.
 9. For logic_clarity: only flag provably meaningless control flow — \
 identical branches, always-true conditions, dead code after unconditional returns.
-10. For initialization_coupling: focus on implicit ordering — \
-module-level globals that must be set before import, circular lazy imports.
+10. For cross_module_architecture: focus on boundaries — \
+leaky abstractions, god modules, hidden coupling through shared state.
 
 CALIBRATION — use these examples to anchor your confidence scale:
 
 HIGH confidence (any senior engineer would agree):
 - "getUser() mutates session state — rename to loadUserSession()" (line 42)
 - "return type -> Config but line 58 returns None on failure" (contract_coherence)
-- "3 consecutive console.log dumps logging full request object" (logging_quality)
+- "3 consecutive console.log dumps logging full request object" (comment_quality)
 
 MEDIUM confidence (most engineers would agree):
 - "processData is vague — callers use it for invoice reconciliation" (naming_quality)

@@ -370,22 +370,11 @@ class TestIDCollision:
 class TestNewDimensions:
     """3 new dimensions present in DEFAULT_DIMENSIONS and DIMENSION_PROMPTS."""
 
-    def test_logging_quality_in_defaults(self):
-        assert "logging_quality" in DEFAULT_DIMENSIONS
-
     def test_type_safety_in_defaults(self):
         assert "type_safety" in DEFAULT_DIMENSIONS
 
     def test_cross_module_architecture_in_defaults(self):
         assert "cross_module_architecture" in DEFAULT_DIMENSIONS
-
-    def test_logging_quality_prompt(self):
-        assert "logging_quality" in DIMENSION_PROMPTS
-        prompt = DIMENSION_PROMPTS["logging_quality"]
-        assert "description" in prompt
-        assert "look_for" in prompt
-        assert "skip" in prompt
-        assert len(prompt["look_for"]) >= 3
 
     def test_type_safety_prompt(self):
         assert "type_safety" in DIMENSION_PROMPTS
@@ -399,7 +388,7 @@ class TestNewDimensions:
 
     def test_new_dimensions_accepted_by_import(self):
         """New dimensions should not be rejected by import_review_findings validation."""
-        for dim in ("logging_quality", "type_safety", "cross_module_architecture"):
+        for dim in ("type_safety", "cross_module_architecture", "abstraction_fitness"):
             findings_data = [{
                 "file": "module.py",
                 "dimension": dim,

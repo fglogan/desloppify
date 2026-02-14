@@ -220,8 +220,15 @@ def compute_dimension_scores(
     assessed = review_assessments or {}
     existing_lower = {k.lower() for k in results}
 
+    _SHORT_NAMES: dict[str, str] = {
+        "authorization_coherence": "Auth Coherence",
+        "cross_module_architecture": "Cross-Module Arch",
+        "abstraction_fitness": "Abstraction Fit",
+        "contract_coherence": "Contract Clarity",
+    }
+
     for dim_name in DEFAULT_DIMENSIONS:
-        display = dim_name.replace("_", " ").title()
+        display = _SHORT_NAMES.get(dim_name, dim_name.replace("_", " ").title())
         if display.lower() in existing_lower:
             display = f"{display} (review)"
 
@@ -235,9 +242,7 @@ def compute_dimension_scores(
             and f.get("detail", {}).get("dimension") == dim_name
         )
 
-        # Skip unassessed dimensions with no open findings
-        if assessment is None and issue_count == 0:
-            continue
+        # Always show review dimensions — unassessed ones appear at 0%
 
         score = max(0, min(100, assessment.get("score", 0))) if assessment else 0.0
         pass_rate = score / 100.0

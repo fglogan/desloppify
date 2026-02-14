@@ -20,7 +20,7 @@ from desloppify.scoring import (
 from desloppify.zones import FileZoneMap, Zone, ZoneRule, ZONE_POLICIES
 from desloppify.state import make_finding
 from desloppify.narrative.headline import _compute_headline
-from desloppify.registry import DETECTORS, _DISPLAY_ORDER
+from desloppify.registry import DETECTORS, _DISPLAY_ORDER, dimension_action_type
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -685,6 +685,75 @@ class TestTsJsonParse:
         finally:
             os.unlink(path)
 
+    def test_json_parse_in_try_catch_not_flagged(self):
+        """JSON.parse inside try { ... } catch should not flag."""
+        content = textwrap.dedent("""\
+            try {
+              const data = JSON.parse(userInput);
+              return data;
+            } catch (e) {
+              return null;
+            }
+        """)
+        path = _write_temp_file(content, suffix=".ts")
+        try:
+            entries, _ = detect_ts_security([path], None)
+            jp = [e for e in entries if e["detail"]["kind"] == "json_parse_unguarded"]
+            assert len(jp) == 0
+        finally:
+            os.unlink(path)
+
+    def test_json_parse_in_try_multiline(self):
+        """try on one line, { on next — JSON.parse should still be guarded."""
+        content = textwrap.dedent("""\
+            try
+            {
+              const data = JSON.parse(raw);
+            } catch (e) {
+              console.error(e);
+            }
+        """)
+        path = _write_temp_file(content, suffix=".ts")
+        try:
+            entries, _ = detect_ts_security([path], None)
+            jp = [e for e in entries if e["detail"]["kind"] == "json_parse_unguarded"]
+            assert len(jp) == 0
+        finally:
+            os.unlink(path)
+
+    def test_json_parse_outside_try_still_flagged(self):
+        """JSON.parse with no enclosing try should still be flagged."""
+        content = textwrap.dedent("""\
+            function parseData(raw: string) {
+              const data = JSON.parse(raw);
+              return data;
+            }
+        """)
+        path = _write_temp_file(content, suffix=".ts")
+        try:
+            entries, _ = detect_ts_security([path], None)
+            jp = [e for e in entries if e["detail"]["kind"] == "json_parse_unguarded"]
+            assert len(jp) >= 1
+        finally:
+            os.unlink(path)
+
+    def test_json_parse_nested_function_in_try(self):
+        """JSON.parse in inner function inside try — still flagged (conservative)."""
+        content = textwrap.dedent("""\
+            try {
+              function inner() {
+                const data = JSON.parse(raw);
+              }
+            } catch (e) {}
+        """)
+        path = _write_temp_file(content, suffix=".ts")
+        try:
+            entries, _ = detect_ts_security([path], None)
+            jp = [e for e in entries if e["detail"]["kind"] == "json_parse_unguarded"]
+            assert len(jp) >= 1
+        finally:
+            os.unlink(path)
+
 
 class TestTsOpenRedirect:
     def test_open_redirect(self):
@@ -753,6 +822,13 @@ class TestSecurityRegistry:
         security_dim = [d for d in DIMENSIONS if d.name == "Security"][0]
         assert security_dim.tier == 4
         assert "security" in security_dim.detectors
+
+    def test_dimension_action_type(self):
+        """dimension_action_type returns correct labels for known dimensions."""
+        assert dimension_action_type("Import hygiene") == "fix"
+        assert dimension_action_type("Organization") == "move"
+        assert dimension_action_type("File health") == "refactor"
+        assert dimension_action_type("Security") == "manual"
 
 
 class TestSecurityDimensionScoring:

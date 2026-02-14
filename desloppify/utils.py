@@ -356,6 +356,29 @@ def check_tool_staleness(state: dict) -> str | None:
     return None
 
 
+def read_code_snippet(filepath: str, line: int, context: int = 1) -> str | None:
+    """Read ±context lines around a line number. Returns formatted string or None."""
+    try:
+        full = str(PROJECT_ROOT / filepath)
+        content = Path(full).read_text(errors="replace")
+    except OSError:
+        return None
+    lines = content.splitlines()
+    if line < 1 or line > len(lines):
+        return None
+    start = max(0, line - 1 - context)
+    end = min(len(lines), line + context)
+    parts = []
+    for i in range(start, end):
+        ln = i + 1
+        marker = "→" if ln == line else " "
+        text = lines[i]
+        if len(text) > 120:
+            text = text[:117] + "..."
+        parts.append(f"    {marker} {ln:>4} │ {text}")
+    return "\n".join(parts)
+
+
 def get_area(filepath: str) -> str:
     """Derive an area name from a file path (generic: first 2 path components)."""
     parts = filepath.split("/")

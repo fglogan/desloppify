@@ -140,12 +140,13 @@ def cmd_status(args):
 def _show_dimension_table(dim_scores: dict):
     """Show dimension health table with dual scores and progress bars."""
     from ..scoring import DIMENSIONS
+    from ..registry import dimension_action_type
 
     print()
     bar_len = 20
     # Header
-    print(c(f"  {'Dimension':<22} {'Checks':>7}  {'Health':>6}  {'Strict':>6}  {'Bar':<{bar_len+2}} {'Tier'}", "dim"))
-    print(c("  " + "─" * 76, "dim"))
+    print(c(f"  {'Dimension':<22} {'Checks':>7}  {'Health':>6}  {'Strict':>6}  {'Bar':<{bar_len+2}} {'Tier'}  {'Action'}", "dim"))
+    print(c("  " + "─" * 86, "dim"))
 
     # Find lowest score for focus arrow (includes assessment dimensions)
     lowest_name = None
@@ -173,7 +174,8 @@ def _show_dimension_table(dim_scores: dict):
 
         focus = c(" ←", "yellow") if dim.name == lowest_name else "  "
         checks_str = f"{checks:>7,}"
-        print(f"  {dim.name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{dim.tier}{focus}")
+        action = dimension_action_type(dim.name)
+        print(f"  {dim.name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{dim.tier}  {action}{focus}")
 
 
     # Assessment dimensions (not in DIMENSIONS list)
@@ -181,7 +183,7 @@ def _show_dimension_table(dim_scores: dict):
     assessment_dims = [(name, ds) for name, ds in sorted(dim_scores.items())
                        if name not in static_names]
     if assessment_dims:
-        print(c("  ── Review Dimensions ─────────────────────────────────────────", "dim"))
+        print(c("  ── Review Dimensions ─────────────────────────────────────────────────", "dim"))
         for name, ds in assessment_dims:
             score_val = ds["score"]
             strict_val = ds.get("strict", score_val)
@@ -197,8 +199,9 @@ def _show_dimension_table(dim_scores: dict):
 
             focus = c(" ←", "yellow") if name == lowest_name else "  "
             checks_str = f"{'—':>7}"
-            print(f"  {name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{tier}{focus}")
+            print(f"  {name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{tier}  {'review'}{focus}")
     print(c("  Health = open penalized | Strict = open + wontfix penalized", "dim"))
+    print(c("  Action: fix=auto-fixer | move=reorganize | refactor=manual rewrite | manual=review & fix", "dim"))
     print()
 
 

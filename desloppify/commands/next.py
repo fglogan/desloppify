@@ -56,8 +56,10 @@ def cmd_next(args):
             print(c(f"Could not write to {output_file}: {e}", "red"))
         return
 
-    # Look up dimension info for context
+    # Look up dimension info and scoped findings for context
     dim_scores = state.get("dimension_scores", {})
+    from ..state import path_scoped_findings
+    findings_scoped = path_scoped_findings(state["findings"], state.get("scan_path"))
 
     for i, item in enumerate(items):
         if i > 0:
@@ -77,6 +79,15 @@ def cmd_next(args):
         if detail.get("importers") is not None:
             print(f"  Active importers: {detail['importers']}")
 
+        # Code snippet
+        target_line = detail.get("line") or (detail.get("lines", [None]) or [None])[0]
+        if target_line and item["file"] not in (".", ""):
+            from ..utils import read_code_snippet
+            snippet = read_code_snippet(item["file"], target_line)
+            if snippet:
+                print(c("\n  Code:", "dim"))
+                print(snippet)
+
         # Dimension context
         if dim_scores:
             from ..scoring import get_dimension_for_detector
@@ -89,16 +100,50 @@ def cmd_next(args):
                         f"(strict: {strict_val:.1f}%) "
                         f"({ds['issues']} of {ds['checks']:,} checks failing)", "dim"))
 
+        # Fixer context — suggest batch fixer when available
+        from ..registry import DETECTORS
+        det_name = item.get("detector", "")
+        if det_name in DETECTORS:
+            meta = DETECTORS[det_name]
+            if meta.action_type == "auto_fix" and meta.fixers:
+                similar_count = sum(1 for f in findings_scoped.values()
+                                    if f.get("detector") == det_name and f["status"] == "open")
+                if similar_count > 1:
+                    fixer = meta.fixers[0]
+                    print(c(f"\n  Auto-fixable: {similar_count} similar findings. "
+                            f"Run `desloppify fix {fixer} --dry-run` to fix all at once.", "cyan"))
+
     if len(items) == 1:
         item = items[0]
-        print(c("\n  Resolve with:", "dim"))
+        # Check if auto-fixable — show fixer command first
+        det_name = item.get("detector", "")
+        if det_name in DETECTORS and DETECTORS[det_name].action_type == "auto_fix" and DETECTORS[det_name].fixers:
+            print(c("\n  Fix with:", "dim"))
+            fixer = DETECTORS[det_name].fixers[0]
+            print(f"    desloppify fix {fixer} --dry-run")
+            print(c("  Or resolve individually:", "dim"))
+        else:
+            print(c("\n  Resolve with:", "dim"))
         print(f"    desloppify resolve fixed \"{item['id']}\" --note \"<what you did>\"")
         print(f"    desloppify resolve wontfix \"{item['id']}\" --note \"<why>\"")
 
+        # Batch resolve hint — surface glob pattern for bulk wontfix
+        det_name = item.get("detector", "")
+        detail = item.get("detail", {})
+        smell_id = detail.get("smell_id") or detail.get("kind") or detail.get("category") or ""
+        if det_name and smell_id:
+            pattern = f"{det_name}::*::{smell_id}"
+            batch_count = sum(1 for f in findings_scoped.values()
+                              if f.get("detector") == det_name and f["status"] == "open"
+                              and (f.get("detail", {}).get("smell_id") or
+                                   f.get("detail", {}).get("kind") or
+                                   f.get("detail", {}).get("category") or "") == smell_id)
+            if batch_count > 1:
+                print(c(f"\n  Batch resolve ({batch_count} similar):", "dim"))
+                print(f'    desloppify resolve wontfix "{pattern}" --note "<why all>"')
+
     # Review findings nudge — remind agent about the parallel work queue
-    from ..state import path_scoped_findings
-    scoped = path_scoped_findings(state["findings"], state.get("scan_path"))
-    open_review = [f for f in scoped.values()
+    open_review = [f for f in findings_scoped.values()
                    if f["status"] == "open" and f.get("detector") == "review"]
     if open_review:
         uninvestigated = sum(1 for f in open_review

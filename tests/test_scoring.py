@@ -367,13 +367,14 @@ class TestComputeDimensionScores:
         # Debug cleanliness requires "logs" which has no potential
         assert "Debug cleanliness" not in result
 
-    def test_no_potentials_unassessed_dims_excluded(self):
-        """Unassessed dimensions with no findings are excluded."""
+    def test_no_potentials_unassessed_dims_at_zero(self):
+        """Unassessed dimensions with no findings appear at 0%."""
         result = compute_dimension_scores({}, {})
         # No mechanical dimensions
         assert "Import hygiene" not in result
-        # Unassessed review dimensions with no open findings are excluded
-        assert "Naming Quality" not in result
+        # Unassessed review dimensions always appear at 0%
+        assert "Naming Quality" in result
+        assert result["Naming Quality"]["score"] == 0.0
 
     def test_unassessed_dim_with_review_findings_included(self):
         """Unassessed dimension with open review findings is still included."""
@@ -817,12 +818,12 @@ class TestAssessmentScoring:
 
     def test_assessment_in_objective_score(self):
         """Assessment dimensions feed into compute_objective_score correctly."""
-        # Only assessed dimensions appear (unassessed with no findings excluded)
+        # All 10 review dimensions appear; naming_quality assessed at 50%, rest at 0%
         assessments = {"naming_quality": {"score": 50}}
         result = compute_dimension_scores({}, {}, review_assessments=assessments)
         score = compute_objective_score(result)
-        # Only 1 dimension present (naming_quality at 50%) → score = 50
-        assert score == pytest.approx(50.0, abs=0.2)
+        # 1 dim at 50% + 9 dims at 0% → score = 50/10 = 5
+        assert score == pytest.approx(5.0, abs=0.2)
 
     def test_assessment_dampened_weight(self):
         """Assessment dimensions are dampened: effective_weight = tier * (checks / MIN_SAMPLE)."""

@@ -172,35 +172,48 @@ def detect_ts_security(
     return entries, scanned
 
 
+def _is_in_try_scope(lines: list[str], target_line: int) -> bool:
+    """Check if target_line (1-indexed) is inside a try block by scanning backwards.
+
+    Tracks brace depth going upward. If we reach a `try` keyword when depth <= 0,
+    the target is inside a try block. Stops if we encounter a function/arrow boundary
+    (conservative: inner functions reset scope).
+    """
+    depth = 0
+    for i in range(target_line - 2, -1, -1):  # 0-indexed, go backwards
+        stripped = lines[i].strip()
+        # Stop at function boundaries — inner functions are not guarded by outer try
+        if re.match(r"(?:async\s+)?function\b", stripped) or '=>' in stripped:
+            return False
+        depth += stripped.count('}') - stripped.count('{')
+        if depth <= 0 and re.search(r'\btry\b', stripped):
+            return True
+    return False
+
+
 def _check_json_parse_unguarded(
     filepath: str, lines: list[str], entries: list[dict]
 ) -> None:
     """Check for JSON.parse not inside a try block."""
     from ....detectors.security import _make_entry
 
-    in_try = 0
     for line_num, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if re.match(r"try\s*\{", stripped):
-            in_try += 1
-        elif stripped.startswith("}") and in_try > 0:
-            if "catch" in stripped or "finally" in stripped:
-                pass  # still in try/catch/finally
-            else:
-                in_try = max(0, in_try - 1)
-        elif "catch" in stripped or "finally" in stripped:
-            pass  # still in try/catch context
-
-        if _JSON_PARSE_RE.search(line) and in_try == 0:
-            # Skip JSON.parse(JSON.stringify(...)) — safe deep-clone idiom
-            if _JSON_DEEP_CLONE_RE.search(line):
-                continue
-            entries.append(_make_entry(
-                filepath, line_num, "json_parse_unguarded",
-                "JSON.parse() without try/catch — may throw on malformed input",
-                "low", "low", line,
-                "Wrap JSON.parse() in a try/catch block",
-            ))
+        if not _JSON_PARSE_RE.search(line):
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("//"):
+            continue
+        # Skip JSON.parse(JSON.stringify(...)) — safe deep-clone idiom
+        if _JSON_DEEP_CLONE_RE.search(line):
+            continue
+        if _is_in_try_scope(lines, line_num):
+            continue
+        entries.append(_make_entry(
+            filepath, line_num, "json_parse_unguarded",
+            "JSON.parse() without try/catch — may throw on malformed input",
+            "low", "low", line,
+            "Wrap JSON.parse() in a try/catch block",
+        ))
 
 
 def _check_rls_bypass(

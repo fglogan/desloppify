@@ -11,6 +11,15 @@ allowed-tools: Bash(desloppify *)
 
 # Desloppify — Codebase Health Scanner
 
+## Goal
+
+**Your goal is to get strict scores as high as possible.** Strict scoring counts wontfix items as failures — it's the true measure of codebase health. After every scan, ALWAYS share with the user:
+1. **Overall health** (lenient and strict)
+2. **All dimension scores** (lenient and strict) in a table
+3. **Review dimension scores** (lenient and strict) — these are 0% until reviews are run
+
+Never skip the scores. The user needs to see progress.
+
 ## Prerequisite
 
 !`command -v desloppify >/dev/null 2>&1 && echo "desloppify: installed" || echo "NOT INSTALLED — run: pip install --upgrade git+https://github.com/peteromallet/desloppify.git"`

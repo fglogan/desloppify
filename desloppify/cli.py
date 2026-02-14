@@ -94,6 +94,8 @@ def create_parser() -> argparse.ArgumentParser:
     p_show.add_argument("--output", type=str, metavar="FILE", help="Write JSON to file instead of terminal")
     p_show.add_argument("--chronic", action="store_true",
                         help="Show findings that have been reopened 2+ times (chronic reopeners)")
+    p_show.add_argument("--code", action="store_true",
+                        help="Show inline code snippets for each finding")
 
     p_next = sub.add_parser("next", help="Show next highest-priority open finding")
     p_next.add_argument("--state", type=str, default=None)

@@ -71,6 +71,7 @@ def cmd_show(args):
         print(c(f"  {stale_warning}", "yellow"))
 
     chronic = getattr(args, "chronic", False)
+    show_code = getattr(args, "code", False)
     pattern = args.pattern
 
     if chronic:
@@ -148,6 +149,14 @@ def cmd_show(args):
             detail_parts = _format_detail(f.get("detail", {}))
             if detail_parts:
                 print(c(f"      {' · '.join(detail_parts)}", "dim"))
+            if show_code:
+                detail = f.get("detail", {})
+                target_line = detail.get("line") or (detail.get("lines", [None]) or [None])[0]
+                if target_line and f["file"] not in (".", ""):
+                    from ..utils import read_code_snippet
+                    snippet = read_code_snippet(f["file"], target_line)
+                    if snippet:
+                        print(snippet)
             if f.get("reopen_count", 0) >= 2:
                 print(c(f"      ⟳ reopened {f['reopen_count']} times — fix properly or wontfix", "red"))
             if f.get("note"):

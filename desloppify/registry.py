@@ -138,6 +138,25 @@ def display_order() -> list[str]:
     return list(_DISPLAY_ORDER)
 
 
+def dimension_action_type(dim_name: str) -> str:
+    """Return a compact action type label for a dimension based on its detectors.
+
+    Priority: auto_fix > reorganize > refactor > manual_fix.
+    Returns the most actionable type present.
+    """
+    _PRIORITY = {"auto_fix": 0, "reorganize": 1, "refactor": 2, "manual_fix": 3}
+    best = "manual"
+    best_pri = 99
+    for d in DETECTORS.values():
+        if d.dimension == dim_name:
+            pri = _PRIORITY.get(d.action_type, 99)
+            if pri < best_pri:
+                best_pri = pri
+                best = d.action_type
+    _LABELS = {"auto_fix": "fix", "reorganize": "move", "refactor": "refactor", "manual_fix": "manual"}
+    return _LABELS.get(best, "manual")
+
+
 def detector_tools() -> dict[str, dict]:
     """DETECTOR_TOOLS-shaped dict for narrative.py backward compat."""
     result = {}

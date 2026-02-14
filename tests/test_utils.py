@@ -14,6 +14,7 @@ from desloppify.utils import (
     grep_files,
     grep_files_containing,
     matches_exclusion,
+    read_code_snippet,
     rel,
     resolve_path,
     set_exclusions,
@@ -314,3 +315,56 @@ def test_check_tool_staleness_no_stored_hash():
     """Returns None when no tool_hash in state (first run)."""
     assert check_tool_staleness({}) is None
     assert check_tool_staleness({"other_key": "val"}) is None
+
+
+# ── read_code_snippet() ────────────────────────────────────
+
+
+def test_read_code_snippet_basic(tmp_path, monkeypatch):
+    """Returns lines around target with arrow marker."""
+    f = tmp_path / "test.py"
+    f.write_text("line1\nline2\nline3\nline4\nline5\n")
+    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    result = read_code_snippet("test.py", 3, context=1)
+    assert result is not None
+    assert "→" in result
+    assert "line3" in result
+    assert "line2" in result
+    assert "line4" in result
+
+
+def test_read_code_snippet_first_line(tmp_path, monkeypatch):
+    """First line should work without negative indices."""
+    f = tmp_path / "test.py"
+    f.write_text("first\nsecond\nthird\n")
+    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    result = read_code_snippet("test.py", 1, context=1)
+    assert result is not None
+    assert "first" in result
+    assert "→" in result
+
+
+def test_read_code_snippet_out_of_range(tmp_path, monkeypatch):
+    """Line out of range returns None."""
+    f = tmp_path / "test.py"
+    f.write_text("only line\n")
+    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    assert read_code_snippet("test.py", 99) is None
+    assert read_code_snippet("test.py", 0) is None
+
+
+def test_read_code_snippet_nonexistent_file(tmp_path, monkeypatch):
+    """Missing file returns None."""
+    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    assert read_code_snippet("no_such_file.py", 1) is None
+
+
+def test_read_code_snippet_long_line_truncated(tmp_path, monkeypatch):
+    """Lines longer than 120 chars are truncated."""
+    f = tmp_path / "test.py"
+    f.write_text("x" * 200 + "\n")
+    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    result = read_code_snippet("test.py", 1, context=0)
+    assert result is not None
+    assert "..." in result
+    assert len(result.split("│")[1].strip()) <= 120
