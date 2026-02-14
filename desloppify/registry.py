@@ -110,10 +110,10 @@ DETECTORS: dict[str, DetectorMeta] = {
         "review and fix security findings — prioritize by severity"),
     # ── Subjective review ────────────────────────────────────
     "review": DetectorMeta(
-        "review", "design review", "Design quality", "refactor",
+        "review", "design review", "Audit coverage", "refactor",
         "address design quality findings from AI code review"),
     "subjective_review": DetectorMeta(
-        "subjective_review", "subjective review", "Design quality", "manual_fix",
+        "subjective_review", "subjective review", "Audit coverage", "manual_fix",
         "run `desloppify fix review` to evaluate files against quality dimensions"),
 }
 

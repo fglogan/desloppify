@@ -16,12 +16,16 @@ def _compute_headline(phase: str, dimensions: dict, debt: dict,
         s = "s" if security_count != 1 else ""
         security_prefix = f"\u26a0 {security_count} security finding{s} — review before other cleanup. "
 
-    # Review findings callout — only in maintenance/stagnation
+    # Review findings callout — all phases
     review_count = (open_by_detector or {}).get("review", 0)
     review_suffix = ""
-    if review_count > 0 and phase in ("maintenance", "stagnation"):
+    if review_count > 0:
         s = "s" if review_count != 1 else ""
-        review_suffix = f" ({review_count} design review finding{s} pending)"
+        uninvestigated = (open_by_detector or {}).get("review_uninvestigated", 0)
+        if uninvestigated > 0:
+            review_suffix = f" ({review_count} review finding{s} \u2014 run `desloppify issues`)"
+        else:
+            review_suffix = f" ({review_count} review finding{s} pending)"
 
     headline = _compute_headline_inner(
         phase, dimensions, debt, milestone, diff,

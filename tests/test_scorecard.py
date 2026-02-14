@@ -22,33 +22,33 @@ from desloppify.scorecard import (
 # ===========================================================================
 
 class TestScoreColor:
-    def test_high_score_returns_sage_green(self):
+    def test_high_score_returns_deep_sage(self):
         color = _score_color(95)
-        assert color == (88, 129, 87)
+        assert color == (68, 120, 68)
 
-    def test_score_exactly_90_returns_sage_green(self):
+    def test_score_exactly_90_returns_deep_sage(self):
         color = _score_color(90)
-        assert color == (88, 129, 87)
+        assert color == (68, 120, 68)
 
-    def test_mid_score_returns_mustard(self):
+    def test_mid_score_returns_olive_green(self):
         color = _score_color(80)
-        assert color == (178, 148, 72)
+        assert color == (120, 140, 72)
 
-    def test_score_exactly_70_returns_mustard(self):
+    def test_score_exactly_70_returns_olive_green(self):
         color = _score_color(70)
-        assert color == (178, 148, 72)
+        assert color == (120, 140, 72)
 
-    def test_low_score_returns_dusty_rose(self):
+    def test_low_score_returns_yellow_green(self):
         color = _score_color(50)
-        assert color == (168, 90, 90)
+        assert color == (145, 155, 80)
 
-    def test_zero_score_returns_dusty_rose(self):
+    def test_zero_score_returns_yellow_green(self):
         color = _score_color(0)
-        assert color == (168, 90, 90)
+        assert color == (145, 155, 80)
 
-    def test_score_100_returns_sage_green(self):
+    def test_score_100_returns_deep_sage(self):
         color = _score_color(100)
-        assert color == (88, 129, 87)
+        assert color == (68, 120, 68)
 
     def test_muted_differs_from_base(self):
         base = _score_color(95, muted=False)
@@ -61,22 +61,22 @@ class TestScoreColor:
         assert len(color) == 3
         assert all(isinstance(c, int) for c in color)
 
-    def test_muted_blends_toward_gray(self):
-        """Muted color should be closer to gray than base color."""
-        gray = (158, 142, 122)
+    def test_muted_is_pastel_variant(self):
+        """Muted color should be a lighter/warmer variant of the base."""
         base = _score_color(50, muted=False)
         muted = _score_color(50, muted=True)
-        # Each channel of muted should be between base and gray (or equal)
-        for b, m, g in zip(base, muted, gray):
-            assert min(b, g) <= m <= max(b, g) or abs(m - int(b * 0.55 + g * 0.45)) <= 1
+        # Muted should be distinctly different (pastel orange family)
+        assert base != muted
+        # Muted should be lighter overall (higher average channel value)
+        assert sum(muted) > sum(base)
 
-    def test_boundary_at_69_is_dusty_rose(self):
+    def test_boundary_at_69_is_yellow_green(self):
         color = _score_color(69.9)
-        assert color == (168, 90, 90)
+        assert color == (145, 155, 80)
 
-    def test_boundary_at_89_is_mustard(self):
+    def test_boundary_at_89_is_olive_green(self):
         color = _score_color(89.9)
-        assert color == (178, 148, 72)
+        assert color == (120, 140, 72)
 
 
 # ===========================================================================
@@ -185,6 +185,30 @@ class TestGetBadgeConfig:
         path, disabled = get_badge_config(args)
         assert disabled is False
         assert path is not None
+
+    def test_config_generate_scorecard_false_disables(self, monkeypatch):
+        monkeypatch.delenv("DESLOPPIFY_NO_BADGE", raising=False)
+        args = SimpleNamespace()
+        config = {"generate_scorecard": False}
+        path, disabled = get_badge_config(args, config)
+        assert disabled is True
+        assert path is None
+
+    def test_config_badge_path_used(self, monkeypatch):
+        monkeypatch.delenv("DESLOPPIFY_NO_BADGE", raising=False)
+        monkeypatch.delenv("DESLOPPIFY_BADGE_PATH", raising=False)
+        args = SimpleNamespace()
+        config = {"badge_path": "badges/custom.png"}
+        path, disabled = get_badge_config(args, config)
+        assert disabled is False
+        assert path.name == "custom.png"
+
+    def test_cli_badge_path_overrides_config(self, monkeypatch):
+        monkeypatch.delenv("DESLOPPIFY_NO_BADGE", raising=False)
+        args = SimpleNamespace(no_badge=False, badge_path="/cli/path.png")
+        config = {"badge_path": "config/path.png"}
+        path, disabled = get_badge_config(args, config)
+        assert path == Path("/cli/path.png")
 
 
 # ===========================================================================

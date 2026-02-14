@@ -34,8 +34,14 @@ def _analyze_dimensions(dim_scores: dict, history: list[dict],
                      for k, v in dim_scores.items()},
                     potentials, det, det_data["issues"])
                 impact = max(impact, imp)
-        lowest.append({"name": name, "strict": round(strict, 1),
-                        "issues": issues, "impact": round(impact, 1)})
+        # Assessment dimensions have "review_assessment" as their only detector
+        is_assessment = "review_assessment" in ds.get("detectors", {})
+        entry = {"name": name, "strict": round(strict, 1),
+                 "issues": issues, "impact": round(impact, 1)}
+        if is_assessment:
+            entry["assessment"] = True
+            entry["impact_description"] = "re-review to improve"
+        lowest.append(entry)
 
     # Biggest gap dimensions (lenient - strict)
     biggest_gap = []
@@ -44,8 +50,10 @@ def _analyze_dimensions(dim_scores: dict, history: list[dict],
         strict = ds.get("strict", lenient)
         gap = lenient - strict
         if gap > 1.0:
+            from ..state import path_scoped_findings
+            scoped = path_scoped_findings(state.get("findings", {}), state.get("scan_path"))
             wontfix_count = sum(
-                1 for f in state.get("findings", {}).values()
+                1 for f in scoped.values()
                 if f["status"] == "wontfix" and _finding_in_dimension(f, name, dim_scores)
             )
             biggest_gap.append({"name": name, "lenient": round(lenient, 1),

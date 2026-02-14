@@ -1,7 +1,7 @@
 """plan command: generate prioritized markdown plan from state."""
 
 from ..utils import c
-from ..cli import _state_path
+from ._helpers import _state_path
 
 
 def cmd_plan_output(args):

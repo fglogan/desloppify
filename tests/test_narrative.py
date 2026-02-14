@@ -1422,6 +1422,37 @@ class TestComputeStrategyHint:
         hint = _compute_strategy_hint(fixer, lanes, False, "middle_grind")
         assert "priority order" in hint.lower()
 
+    def test_rescan_in_strong_parallel(self):
+        fixer = {"recommendation": "strong", "coverage": 0.5}
+        lanes = {
+            "cleanup": {"run_first": True, "file_count": 10, "total_impact": 5.0},
+            "refactor_0": {"run_first": False, "file_count": 8, "total_impact": 3.0},
+            "refactor_1": {"run_first": False, "file_count": 6, "total_impact": 2.0},
+        }
+        hint = _compute_strategy_hint(fixer, lanes, True, "middle_grind")
+        assert "rescan" in hint.lower()
+
+    def test_rescan_in_strong_only(self):
+        fixer = {"recommendation": "strong", "coverage": 0.45}
+        lanes = {"cleanup": {"run_first": False, "file_count": 10, "total_impact": 5.0}}
+        hint = _compute_strategy_hint(fixer, lanes, False, "middle_grind")
+        assert "rescan" in hint.lower()
+
+    def test_rescan_in_parallel_only(self):
+        fixer = {"recommendation": "none", "coverage": 0.0}
+        lanes = {
+            "refactor_0": {"run_first": False, "file_count": 8, "total_impact": 3.0},
+            "refactor_1": {"run_first": False, "file_count": 6, "total_impact": 2.0},
+        }
+        hint = _compute_strategy_hint(fixer, lanes, True, "middle_grind")
+        assert "rescan" in hint.lower()
+
+    def test_rescan_in_default_fallback(self):
+        fixer = {"recommendation": "none", "coverage": 0.0}
+        lanes = {}
+        hint = _compute_strategy_hint(fixer, lanes, False, "middle_grind")
+        assert "rescan" in hint.lower()
+
 
 # ===================================================================
 # _compute_strategy
@@ -1514,3 +1545,168 @@ class TestComputeStrategy:
                      "count": 1, "impact": 1.0}]
         result = _compute_strategy(findings, by_det, actions, "middle_grind", "typescript")
         assert result["can_parallelize"] is False
+
+
+# ===================================================================
+# Review headline / reminder / strategy tests
+# ===================================================================
+
+class TestReviewHeadline:
+    """Headline should mention review findings in all phases."""
+
+    def test_review_suffix_in_middle_grind(self):
+        """Review suffix should appear even during middle_grind (not just maintenance)."""
+        by_det = {"unused": 5, "review": 3, "review_uninvestigated": 2}
+        headline = _compute_headline(
+            "middle_grind", {"lowest_dimensions": []}, {}, None, None,
+            85.0, 85.0, {"open": 8}, [],
+            open_by_detector=by_det,
+        )
+        assert headline is not None
+        assert "review finding" in headline.lower()
+
+    def test_review_suffix_with_uninvestigated(self):
+        """Uninvestigated review findings should mention `desloppify issues`."""
+        by_det = {"review": 2, "review_uninvestigated": 2}
+        headline = _compute_headline(
+            "maintenance", {}, {}, None, None,
+            95.0, 95.0, {}, [],
+            open_by_detector=by_det,
+        )
+        assert headline is not None
+        assert "desloppify issues" in headline
+
+    def test_review_suffix_all_investigated(self):
+        """When all review findings are investigated, show 'pending' not 'issues'."""
+        by_det = {"review": 2, "review_uninvestigated": 0}
+        headline = _compute_headline(
+            "maintenance", {}, {}, None, None,
+            95.0, 95.0, {}, [],
+            open_by_detector=by_det,
+        )
+        assert headline is not None
+        assert "pending" in headline
+        assert "desloppify issues" not in headline
+
+    def test_no_review_suffix_when_zero(self):
+        by_det = {"unused": 3, "review": 0, "review_uninvestigated": 0}
+        headline = _compute_headline(
+            "middle_grind", {"lowest_dimensions": []}, {}, None, None,
+            85.0, 85.0, {"open": 3}, [],
+            open_by_detector=by_det,
+        )
+        # Should not mention review at all
+        if headline:
+            assert "review finding" not in headline.lower()
+
+
+class TestReviewUninvestigatedCount:
+    """_count_open_by_detector should track review_uninvestigated."""
+
+    def test_uninvestigated_count(self):
+        findings = {
+            "a": {"status": "open", "detector": "review", "detail": {}},
+            "b": {"status": "open", "detector": "review",
+                   "detail": {"investigation": "looked at it"}},
+            "c": {"status": "open", "detector": "review", "detail": {}},
+            "d": {"status": "fixed", "detector": "review", "detail": {}},
+        }
+        result = _count_open_by_detector(findings)
+        assert result["review"] == 3  # a, b, c
+        assert result["review_uninvestigated"] == 2  # a, c
+
+    def test_no_review_findings(self):
+        findings = {
+            "a": {"status": "open", "detector": "unused"},
+        }
+        result = _count_open_by_detector(findings)
+        assert result.get("review_uninvestigated", 0) == 0
+
+
+class TestReviewReminders:
+    """Review-related reminders: pending findings + re-review needed."""
+
+    def _base_state(self):
+        return {
+            "findings": {
+                "r1": {"status": "open", "detector": "review",
+                        "detail": {}},
+                "r2": {"status": "open", "detector": "review",
+                        "detail": {"investigation": "done"}},
+            },
+            "reminder_history": {},
+        }
+
+    def test_review_findings_pending_reminder(self):
+        state = self._base_state()
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {}, [], {}, {}, "scan")
+        types = [r["type"] for r in reminders]
+        assert "review_findings_pending" in types
+        msg = next(r for r in reminders if r["type"] == "review_findings_pending")
+        assert "1 review finding" in msg["message"]
+        assert "desloppify issues" in msg["message"]
+
+    def test_no_review_pending_when_all_investigated(self):
+        state = self._base_state()
+        state["findings"]["r1"]["detail"]["investigation"] = "done too"
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {}, [], {}, {}, "scan")
+        types = [r["type"] for r in reminders]
+        assert "review_findings_pending" not in types
+
+    def test_rereview_needed_after_resolve(self):
+        state = self._base_state()
+        state["review_assessments"] = {"naming_quality": {"score": 70}}
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {}, [], {}, {}, "resolve")
+        types = [r["type"] for r in reminders]
+        assert "rereview_needed" in types
+        msg = next(r for r in reminders if r["type"] == "rereview_needed")
+        assert "review --prepare" in msg["message"]
+
+    def test_no_rereview_when_not_resolve_command(self):
+        state = self._base_state()
+        state["review_assessments"] = {"naming_quality": {"score": 70}}
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {}, [], {}, {}, "scan")
+        types = [r["type"] for r in reminders]
+        assert "rereview_needed" not in types
+
+    def test_no_rereview_without_assessments(self):
+        state = self._base_state()
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {}, [], {}, {}, "resolve")
+        types = [r["type"] for r in reminders]
+        assert "rereview_needed" not in types
+
+
+class TestStrategyReviewHint:
+    """Strategy hint should mention review findings when issue_queue action exists."""
+
+    def test_review_appended_to_hint(self):
+        findings = _findings_dict(
+            _finding("unused", file="a.py"),
+        )
+        by_det = {"unused": 1}
+        actions = [
+            {"priority": 1, "type": "auto_fix", "detector": "unused",
+             "count": 1, "impact": 1.0, "command": "desloppify fix unused"},
+            {"priority": 2, "type": "issue_queue", "detector": "review",
+             "count": 3, "impact": 0, "command": "desloppify issues"},
+        ]
+        result = _compute_strategy(findings, by_det, actions, "middle_grind", "typescript")
+        assert "desloppify issues" in result["hint"]
+        assert "3 finding" in result["hint"]
+
+    def test_no_review_in_hint_without_action(self):
+        findings = _findings_dict(
+            _finding("unused", file="a.py"),
+        )
+        by_det = {"unused": 1}
+        actions = [
+            {"priority": 1, "type": "auto_fix", "detector": "unused",
+             "count": 1, "impact": 1.0, "command": "desloppify fix unused"},
+        ]
+        result = _compute_strategy(findings, by_det, actions, "middle_grind", "typescript")
+        assert "desloppify issues" not in result["hint"]

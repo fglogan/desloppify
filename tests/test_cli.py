@@ -10,11 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
+from desloppify.commands._helpers import _write_query
 from desloppify.cli import (
     DETECTOR_NAMES,
     _apply_persisted_exclusions,
     _state_path,
-    _write_query,
     create_parser,
 )
 
@@ -214,9 +214,19 @@ class TestDetectorNames:
 # ===========================================================================
 
 class TestStatePath:
-    def test_returns_none_when_no_state_or_lang(self):
+    def test_auto_detects_lang_when_no_state_or_lang(self):
+        """_state_path auto-detects language and returns lang-specific path."""
+        from unittest.mock import patch
         args = SimpleNamespace()
-        assert _state_path(args) is None
+        # When auto_detect_lang finds a language, _state_path returns lang-specific path
+        with patch("desloppify.lang.auto_detect_lang", return_value="python"):
+            result = _state_path(args)
+            assert result is not None
+            assert "state-python.json" in str(result)
+        # When auto_detect_lang finds nothing, _state_path returns None
+        with patch("desloppify.lang.auto_detect_lang", return_value=None):
+            result = _state_path(args)
+            assert result is None
 
     def test_returns_explicit_state_path(self):
         args = SimpleNamespace(state="/tmp/custom.json")
@@ -243,7 +253,7 @@ class TestStatePath:
 class TestWriteQuery:
     def test_writes_valid_json(self, tmp_path, monkeypatch):
         query_file = tmp_path / ".desloppify" / "query.json"
-        monkeypatch.setattr("desloppify.cli.QUERY_FILE", query_file)
+        monkeypatch.setattr("desloppify.commands._helpers.QUERY_FILE", query_file)
 
         data = {"results": [1, 2, 3], "count": 3}
         _write_query(data)
@@ -255,7 +265,7 @@ class TestWriteQuery:
 
     def test_creates_parent_directory(self, tmp_path, monkeypatch):
         query_file = tmp_path / "deep" / "nested" / "query.json"
-        monkeypatch.setattr("desloppify.cli.QUERY_FILE", query_file)
+        monkeypatch.setattr("desloppify.commands._helpers.QUERY_FILE", query_file)
 
         _write_query({"ok": True})
         assert query_file.exists()
@@ -263,7 +273,7 @@ class TestWriteQuery:
     def test_handles_write_error_gracefully(self, tmp_path, monkeypatch):
         """If the file cannot be written, no exception should escape."""
         query_file = Path("/nonexistent/readonly/path/query.json")
-        monkeypatch.setattr("desloppify.cli.QUERY_FILE", query_file)
+        monkeypatch.setattr("desloppify.commands._helpers.QUERY_FILE", query_file)
 
         # Should not raise
         _write_query({"data": 1})
@@ -279,8 +289,8 @@ class TestApplyPersistedExclusions:
         monkeypatch.setattr("desloppify.utils.set_exclusions",
                             lambda pats: captured.extend(pats))
         args = SimpleNamespace(exclude=["node_modules", "dist"])
-        state = {"config": {"exclude": []}}
-        _apply_persisted_exclusions(args, state)
+        config = {"exclude": []}
+        _apply_persisted_exclusions(args, config)
         assert "node_modules" in captured
         assert "dist" in captured
 
@@ -289,8 +299,8 @@ class TestApplyPersistedExclusions:
         monkeypatch.setattr("desloppify.utils.set_exclusions",
                             lambda pats: captured.extend(pats))
         args = SimpleNamespace(exclude=["cli_only"])
-        state = {"config": {"exclude": ["persisted_one"]}}
-        _apply_persisted_exclusions(args, state)
+        config = {"exclude": ["persisted_one"]}
+        _apply_persisted_exclusions(args, config)
         assert "cli_only" in captured
         assert "persisted_one" in captured
 
@@ -299,8 +309,8 @@ class TestApplyPersistedExclusions:
         monkeypatch.setattr("desloppify.utils.set_exclusions",
                             lambda pats: captured.extend(pats))
         args = SimpleNamespace(exclude=["shared"])
-        state = {"config": {"exclude": ["shared"]}}
-        _apply_persisted_exclusions(args, state)
+        config = {"exclude": ["shared"]}
+        _apply_persisted_exclusions(args, config)
         assert captured.count("shared") == 1
 
     def test_no_exclusions_does_nothing(self, monkeypatch):
@@ -308,17 +318,17 @@ class TestApplyPersistedExclusions:
         monkeypatch.setattr("desloppify.utils.set_exclusions",
                             lambda pats: called.append(pats))
         args = SimpleNamespace(exclude=None)
-        state = {"config": {"exclude": []}}
-        _apply_persisted_exclusions(args, state)
+        config = {"exclude": []}
+        _apply_persisted_exclusions(args, config)
         # set_exclusions should not be called if combined is empty
         assert len(called) == 0
 
     def test_missing_config_key_handled(self, monkeypatch):
-        """State with no 'config' key should not crash."""
+        """Config with no 'exclude' key should not crash."""
         captured = []
         monkeypatch.setattr("desloppify.utils.set_exclusions",
                             lambda pats: captured.extend(pats))
         args = SimpleNamespace(exclude=["foo"])
-        state = {}
-        _apply_persisted_exclusions(args, state)
+        config = {}
+        _apply_persisted_exclusions(args, config)
         assert "foo" in captured

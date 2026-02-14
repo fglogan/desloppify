@@ -50,10 +50,10 @@ def _empty_state() -> dict:
         "created": _now(),
         "last_scan": None,
         "scan_count": 0,
-        "config": {"ignore": []},
         "score": 0,
         "stats": {},
         "findings": {},
+        "review_assessments": {},
     }
 
 
@@ -184,8 +184,11 @@ def _update_objective_health(state: dict, findings: dict):
     merged = merge_potentials(pots)
     if not merged:
         return
-    ds = compute_dimension_scores(findings, merged, strict=False)
-    ss = compute_dimension_scores(findings, merged, strict=True)
+    review_assessments = state.get("review_assessments") or None
+    ds = compute_dimension_scores(findings, merged, strict=False,
+                                   review_assessments=review_assessments)
+    ss = compute_dimension_scores(findings, merged, strict=True,
+                                   review_assessments=review_assessments)
     state["dimension_scores"] = {
         n: {"score": ds[n]["score"], "strict": ss[n]["score"], "checks": ds[n]["checks"],
             "issues": ds[n]["issues"], "tier": ds[n]["tier"], "detectors": ds[n].get("detectors", {})}
@@ -195,12 +198,16 @@ def _update_objective_health(state: dict, findings: dict):
 
 
 def path_scoped_findings(findings: dict, scan_path: str | None) -> dict:
-    """Filter findings to those within the given scan path."""
+    """Filter findings to those within the given scan path.
+
+    Always includes holistic findings (file=".") regardless of scan_path.
+    """
     if not scan_path or scan_path == ".":
         return findings
     prefix = scan_path.rstrip("/") + "/"
     return {k: v for k, v in findings.items()
-            if v.get("file", "").startswith(prefix) or v.get("file") == scan_path}
+            if v.get("file", "").startswith(prefix) or v.get("file") == scan_path
+            or v.get("file") == "."}
 
 
 def _recompute_stats(state: dict, scan_path: str | None = None):
@@ -233,18 +240,26 @@ def is_ignored(finding_id: str, file: str, ignore_patterns: list[str]) -> bool:
     return False
 
 
-def add_ignore(state: dict, pattern: str) -> int:
-    """Add an ignore pattern. Removes matching findings from state. Returns count removed."""
-    config = state.setdefault("config", {})
-    ignores = config.setdefault("ignore", [])
-    if pattern not in ignores:
-        ignores.append(pattern)
-
+def remove_ignored_findings(state: dict, pattern: str) -> int:
+    """Remove findings matching an ignore pattern. Returns count removed."""
     to_remove = [fid for fid, f in state["findings"].items()
                  if is_ignored(fid, f["file"], [pattern])]
     for fid in to_remove:
         del state["findings"][fid]
     return len(to_remove)
+
+
+def add_ignore(state: dict, pattern: str) -> int:
+    """Add an ignore pattern. Removes matching findings from state. Returns count removed.
+
+    Deprecated: prefer config.add_ignore_pattern() + remove_ignored_findings().
+    Kept for backward compatibility.
+    """
+    config = state.setdefault("config", {})
+    ignores = config.setdefault("ignore", [])
+    if pattern not in ignores:
+        ignores.append(pattern)
+    return remove_ignored_findings(state, pattern)
 
 
 def make_finding(detector: str, file: str, name: str, *,
@@ -370,7 +385,8 @@ def merge_scan(state: dict, current_findings: list[dict], *,
                force_resolve: bool = False, exclude: tuple[str, ...] = (),
                potentials: dict[str, int] | None = None,
                codebase_metrics: dict | None = None,
-               include_slow: bool = True) -> dict:
+               include_slow: bool = True,
+               ignore: list[str] | None = None) -> dict:
     """Merge a fresh scan into existing state. Returns diff summary."""
     from .utils import compute_tool_hash
     now = _now()
@@ -386,7 +402,7 @@ def merge_scan(state: dict, current_findings: list[dict], *,
 
     state["scan_path"] = scan_path
     existing = state["findings"]
-    ignore = state.get("config", {}).get("ignore", [])
+    ignore = ignore if ignore is not None else state.get("config", {}).get("ignore", [])
     current_ids, new_count, reopened_count, current_by_detector = _upsert_findings(
         existing, current_findings, ignore, now, lang=lang)
     # Detectors that appear in potentials actually ran — trust their 0-finding results.

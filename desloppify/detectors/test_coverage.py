@@ -60,6 +60,9 @@ _MIN_LOC = 10
 # Max untested modules to report when there are zero tests
 _MAX_NO_TESTS_ENTRIES = 50
 
+# Python: does the file contain any function definition?
+_PY_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+", re.MULTILINE)
+
 
 def detect_test_coverage(
     graph: dict,
@@ -106,8 +109,10 @@ def detect_test_coverage(
     if extra_test_files:
         test_files |= {_to_rel(f) for f in extra_test_files}
 
-    # Only score production files that are substantial enough to warrant tests
-    scorable = {f for f in production_files if _file_loc(f) >= _MIN_LOC}
+    # Only score production files that are substantial and have testable logic.
+    # Excludes type-only files, barrel re-exports, and declaration-only files.
+    scorable = {f for f in production_files
+                if _file_loc(f) >= _MIN_LOC and _has_testable_logic(f, lang_name)}
 
     if not scorable:
         return [], 0
@@ -159,6 +164,119 @@ def _file_loc(filepath: str) -> int:
 def _loc_weight(loc: int) -> float:
     """Compute LOC weight for a file: sqrt(loc) capped at 50."""
     return min(math.sqrt(loc), 50)
+
+
+def _has_testable_logic(filepath: str, lang_name: str) -> bool:
+    """Check whether a file contains runtime logic worth testing.
+
+    Returns False for files that need no dedicated tests:
+    - .d.ts type definition files (TypeScript)
+    - Files containing only type/interface declarations and imports
+    - Barrel files containing only re-exports
+    - Python files with no function or method definitions
+    """
+    if filepath.endswith(".d.ts"):
+        return False
+
+    try:
+        content = Path(filepath).read_text()
+    except (OSError, UnicodeDecodeError):
+        return True  # assume testable if unreadable
+
+    if lang_name == "python":
+        return bool(_PY_DEF_RE.search(content))
+    if lang_name == "typescript":
+        return _ts_has_testable_logic(content)
+    return True
+
+
+def _ts_has_testable_logic(content: str) -> bool:
+    """Return True if a TypeScript file has runtime logic worth testing.
+
+    Returns False when every substantive line is a type/interface declaration,
+    import, re-export, or ambient declaration — i.e. the file produces no
+    runtime JavaScript.
+    """
+    in_block_comment = False
+    brace_context = False  # True when inside type/interface/import/export braces
+    brace_depth = 0
+
+    for line in content.splitlines():
+        stripped = line.strip()
+
+        # ── Block comments ──
+        if in_block_comment:
+            if "*/" in stripped:
+                in_block_comment = False
+            continue
+        if stripped.startswith("/*"):
+            if "*/" not in stripped:
+                in_block_comment = True
+            continue
+
+        # ── Blank / line comments ──
+        if not stripped or stripped.startswith("//"):
+            continue
+
+        # ── Inside a non-testable brace body (type/interface/import/export) ──
+        if brace_context:
+            brace_depth += stripped.count("{") - stripped.count("}")
+            if brace_depth <= 0:
+                brace_context = False
+                brace_depth = 0
+            continue
+
+        # ── Type / interface declarations ──
+        if re.match(r"(?:export\s+)?(?:type|interface)\s+\w+", stripped):
+            opens = stripped.count("{")
+            closes = stripped.count("}")
+            if opens > closes:
+                brace_context = True
+                brace_depth = opens - closes
+            continue
+
+        # ── Import statements ──
+        if re.match(r"import\s+", stripped):
+            if "{" in stripped and "}" not in stripped:
+                brace_context = True
+                brace_depth = stripped.count("{") - stripped.count("}")
+            continue
+
+        # ── Re-exports: export [type] { ... } from / export * from ──
+        if re.match(r"export\s+(?:type\s+)?\{", stripped):
+            if "}" not in stripped:
+                brace_context = True
+                brace_depth = stripped.count("{") - stripped.count("}")
+            continue
+        if re.match(r"export\s+\*\s*(?:as\s+\w+\s+)?from\s+", stripped):
+            continue
+
+        # ── export default type/interface ──
+        if re.match(r"export\s+default\s+(?:type|interface)\s+", stripped):
+            opens = stripped.count("{")
+            closes = stripped.count("}")
+            if opens > closes:
+                brace_context = True
+                brace_depth = opens - closes
+            continue
+
+        # ── Ambient declarations (declare ...) ──
+        if re.match(r"declare\s+", stripped):
+            opens = stripped.count("{")
+            closes = stripped.count("}")
+            if opens > closes:
+                brace_context = True
+                brace_depth = opens - closes
+            continue
+
+        # ── Standalone closing braces from previous constructs ──
+        if re.match(r"^[}\])\s;,]*$", stripped):
+            continue
+
+        # This line has runtime logic
+        return True
+
+    return False
 
 
 def _no_tests_findings(

@@ -141,7 +141,7 @@ def generate_visualization(path: Path, state: dict | None = None,
 def cmd_viz(args):
     """Generate HTML treemap visualization."""
     from .state import load_state
-    from .cli import _resolve_lang
+    from .commands._helpers import _resolve_lang
 
     path = Path(args.path)
     lang = _resolve_lang(args)
@@ -288,7 +288,7 @@ def generate_tree_text(path: Path, state: dict | None = None, *,
 def cmd_tree(args):
     """Print annotated codebase tree to terminal."""
     from .state import load_state
-    from .cli import _resolve_lang
+    from .commands._helpers import _resolve_lang
 
     path = Path(args.path)
     lang = _resolve_lang(args)

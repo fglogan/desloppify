@@ -10,7 +10,7 @@ def cmd_detect(args):
     detector = args.detector
 
     # Resolve language (from --lang flag, default to typescript)
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
 
     if not lang:

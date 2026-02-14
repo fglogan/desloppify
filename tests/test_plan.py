@@ -370,3 +370,48 @@ class TestGetNextItems:
         items = get_next_items(st, count=2)
         assert items[0]["id"] == "aaa"
         assert items[1]["id"] == "zzz"
+
+    def test_scan_path_filters_findings(self):
+        """scan_path limits results to findings within that path."""
+        f1 = _finding("in_scope", file="src/foo.py", tier=1)
+        f2 = _finding("out_scope", file="other/bar.py", tier=1)
+        st = _state([f1, f2])
+        st["scan_path"] = "src"
+        items = get_next_items(st, scan_path="src")
+        assert len(items) == 1
+        assert items[0]["id"] == "in_scope"
+
+    def test_scan_path_none_returns_all(self):
+        """scan_path=None returns all findings."""
+        f1 = _finding("a", file="src/a.py", tier=1)
+        f2 = _finding("b", file="other/b.py", tier=1)
+        st = _state([f1, f2])
+        items = get_next_items(st, scan_path=None, count=10)
+        assert len(items) == 2
+
+    def test_scan_path_dot_returns_all(self):
+        """scan_path='.' returns all findings."""
+        f1 = _finding("a", file="src/a.py", tier=1)
+        f2 = _finding("b", file="other/b.py", tier=1)
+        st = _state([f1, f2])
+        items = get_next_items(st, scan_path=".", count=10)
+        assert len(items) == 2
+
+    def test_get_next_item_with_scan_path(self):
+        """get_next_item respects scan_path."""
+        f1 = _finding("out", file="other/a.py", tier=1)
+        f2 = _finding("in", file="src/b.py", tier=1)
+        st = _state([f1, f2])
+        result = get_next_item(st, scan_path="src")
+        assert result["id"] == "in"
+
+    def test_scan_path_includes_holistic(self):
+        """Holistic findings (file='.') are always included regardless of scan_path."""
+        f1 = _finding("holistic", file=".", tier=4)
+        f2 = _finding("in_scope", file="src/a.py", tier=1)
+        f3 = _finding("out_scope", file="other/b.py", tier=1)
+        st = _state([f1, f2, f3])
+        items = get_next_items(st, scan_path="src", count=10)
+        assert len(items) == 2
+        ids = {i["id"] for i in items}
+        assert ids == {"holistic", "in_scope"}

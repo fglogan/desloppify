@@ -244,16 +244,19 @@ def _compute_strategy_hint(fixer_leverage: dict, lanes: dict,
 
     if rec == "strong" and can_parallelize:
         return (f"Run fixers first — they cover {coverage_pct}% of findings. "
-                f"Then {lane_count} independent workstreams, safe to parallelize.")
+                f"Then {lane_count} independent workstreams, safe to parallelize. "
+                f"Rescan after each phase to verify.")
     if rec == "strong":
-        return f"Run fixers first — they cover {coverage_pct}% of findings."
+        return (f"Run fixers first — they cover {coverage_pct}% of findings. "
+                f"Then rescan to verify.")
     if can_parallelize:
-        return f"{lane_count} independent workstreams, safe to parallelize."
+        return (f"{lane_count} independent workstreams, safe to parallelize. "
+                f"Rescan after each phase to verify.")
     if phase == "maintenance":
         return "Maintenance mode — address new findings as they appear."
     if phase == "stagnation":
         return "Try a different dimension to break the plateau."
-    return "Work through actions in priority order."
+    return "Work through actions in priority order. Rescan after each fix to track progress."
 
 
 def _compute_strategy(findings: dict, by_det: dict[str, int],
@@ -287,6 +290,11 @@ def _compute_strategy(findings: dict, by_det: dict[str, int],
     can_parallelize = len(significant) >= 2
 
     hint = _compute_strategy_hint(fixer_leverage, lanes, can_parallelize, phase)
+
+    # Append review clause if review findings exist
+    review_action = next((a for a in actions if a.get("type") == "issue_queue"), None)
+    if review_action:
+        hint += f" Review: {review_action['count']} finding(s) \u2014 `desloppify issues`."
 
     # Serialize lanes without file sets (only counts)
     serialized_lanes = {

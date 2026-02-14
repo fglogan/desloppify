@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..lang.base import FixResult
 from ..utils import c, rel
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 def cmd_fix(args):
@@ -51,9 +51,9 @@ def cmd_fix(args):
 
 def _cmd_fix_review(args):
     """Prepare structured review data with dimension templates for AI evaluation."""
-    from ..cli import _resolve_lang, _state_path
+    from ._helpers import _resolve_lang, _state_path
     from ..state import load_state
-    from ..review import prepare_review, DIMENSION_PROMPTS, LANG_GUIDANCE
+    from ..review import prepare_review, LANG_GUIDANCE
     from .review_cmd import _setup_lang
 
     lang = _resolve_lang(args)
@@ -109,6 +109,7 @@ def _cmd_fix_review(args):
     print(c("  2. Evaluate each file against the dimensions above", "dim"))
     print(c("  3. Write findings as JSON array to a file (e.g. findings.json)", "dim"))
     print(c("  4. Import: desloppify review --import findings.json", "dim"))
+    print(c("  5. For codebase-wide review: desloppify review --prepare --holistic", "dim"))
     print()
 
 
@@ -117,10 +118,18 @@ _COMMAND_POST_FIX: dict[str, object] = {}  # populated after _cascade_import_cle
 
 def _load_fixer(args, fixer_name: str) -> dict:
     """Resolve fixer from language plugin registry, or exit."""
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
-    if not lang or not lang.fixers or fixer_name not in lang.fixers:
+    if not lang:
+        print(c("Could not detect language. Use --lang to specify.", "red"))
+        sys.exit(1)
+    if not lang.fixers:
+        print(c(f"No auto-fixers available for {lang.name}.", "red"))
+        sys.exit(1)
+    if fixer_name not in lang.fixers:
+        available = ", ".join(sorted(lang.fixers.keys()))
         print(c(f"Unknown fixer: {fixer_name}", "red"))
+        print(c(f"  Available: {available}", "dim"))
         sys.exit(1)
     fc = lang.fixers[fixer_name]
     fixer = {k: getattr(fc, k) for k in
@@ -178,7 +187,7 @@ def _apply_and_report(args, path, fixer, fixer_name, entries, results, total_ite
     if skip_reasons is None:
         skip_reasons = {}
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     fix_lang = _resolve_lang(args)
     fix_lang_name = fix_lang.name if fix_lang else None
     narrative = compute_narrative(state, lang=fix_lang_name, command="fix")
@@ -195,7 +204,7 @@ def _apply_and_report(args, path, fixer, fixer_name, entries, results, total_ite
 def _report_dry_run(args, fixer_name, entries, results, total_items):
     """Write dry-run query and print review prompts."""
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     fix_lang = _resolve_lang(args)
     fix_lang_name = fix_lang.name if fix_lang else None
     state = getattr(args, "_preloaded_state", {})

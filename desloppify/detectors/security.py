@@ -233,7 +233,6 @@ def _make_entry(
     rel_path = rel(filepath)
     return {
         "file": filepath,
-        "line": line,
         "name": f"security::{check_id}::{rel_path}::{line}",
         "tier": 2,
         "confidence": confidence,
@@ -241,6 +240,7 @@ def _make_entry(
         "detail": {
             "kind": check_id,
             "severity": severity,
+            "line": line,
             "content": content[:200],
             "remediation": remediation,
         },

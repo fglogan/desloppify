@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from ..utils import c
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 def _audit_excluded_dirs(exclusions: tuple[str, ...], scanned_files: list[str],
@@ -138,6 +138,7 @@ def _show_post_scan_analysis(diff: dict, state: dict, lang) -> tuple[list[str], 
         print()
 
     # Computed narrative: headline + top action as terminal suggestion
+    print(c("\n  INSTRUCTIONS FOR AGENTS: follow the strategy and recommendations below.", "yellow"))
     from ..narrative import compute_narrative
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, diff=diff, lang=lang_name, command="scan")
@@ -162,6 +163,16 @@ def _show_post_scan_analysis(diff: dict, state: dict, lang) -> tuple[list[str], 
         print(c(f"  → {narrative['headline']}", "cyan"))
         print()
 
+    # Review findings nudge
+    from ..state import path_scoped_findings
+    open_review = [f for f in path_scoped_findings(
+        state.get("findings", {}), state.get("scan_path")).values()
+                   if f["status"] == "open" and f.get("detector") == "review"]
+    if open_review:
+        s = "s" if len(open_review) != 1 else ""
+        print(c(f"  Review: {len(open_review)} finding{s} pending \u2014 `desloppify issues`", "cyan"))
+        print()
+
     return warnings, narrative
 
 
@@ -175,22 +186,26 @@ def cmd_scan(args):
     path = Path(args.path)
     include_slow = not getattr(args, "skip_slow", False)
 
-    # Persist --exclude in state so subsequent commands reuse it
+    # Persist --exclude in config so subsequent commands reuse it
+    from ..config import save_config
+    config = args._config
     exclude = getattr(args, "exclude", None)
     if exclude:
-        state.setdefault("config", {})["exclude"] = list(exclude)
+        config["exclude"] = list(exclude)
+        save_config(config)
 
     # Resolve language config
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_label = f" ({lang.name})" if lang else ""
 
-    # Load zone overrides from state config
-    zone_overrides = state.get("config", {}).get("zone_overrides") or None
+    # Load zone overrides from config
+    zone_overrides = config.get("zone_overrides") or None
 
-    # Populate review cache for review_coverage detector
+    # Populate review cache and max age for review_coverage detector
     if lang:
         lang._review_cache = state.get("review_cache", {}).get("files", {})
+        lang._review_max_age_days = config.get("review_max_age_days", 30)
 
     print(c(f"\nDesloppify Scan{lang_label}\n", "bold"))
     from ..utils import enable_file_cache, disable_file_cache
@@ -203,38 +218,50 @@ def cmd_scan(args):
 
     codebase_metrics = _collect_codebase_metrics(lang, path)
 
-    from ..utils import rel, _extra_exclusions, PROJECT_ROOT
+    from ..utils import rel, get_exclusions, PROJECT_ROOT
 
     # Audit excluded directories for staleness (Issue #11)
-    if _extra_exclusions and lang and lang.file_finder:
+    extra_ex = get_exclusions()
+    if extra_ex and lang and lang.file_finder:
         scanned_files = lang.file_finder(path)
-        stale = _audit_excluded_dirs(_extra_exclusions, scanned_files, PROJECT_ROOT)
+        stale = _audit_excluded_dirs(extra_ex, scanned_files, PROJECT_ROOT)
         if stale:
             findings.extend(stale)
             for sf in stale:
                 print(c(f"  ℹ {sf['summary']}", "dim"))
     scan_path_rel = rel(str(path))
 
-    prev_score = state.get("score", 0)
-    prev_strict = state.get("strict_score", 0)
-    prev_obj = state.get("objective_score")
-    prev_obj_strict = state.get("objective_strict")
+    prev_scan_path = state.get("scan_path")
+    path_changed = prev_scan_path is not None and prev_scan_path != scan_path_rel
+    prev_score = state.get("score", 0) if not path_changed else 0
+    prev_strict = state.get("strict_score", 0) if not path_changed else 0
+    prev_obj = state.get("objective_score") if not path_changed else None
+    prev_obj_strict = state.get("objective_strict") if not path_changed else None
     # Persist zone distribution before save so narrative can access it
     if lang and lang._zone_map is not None:
         state["zone_distribution"] = lang._zone_map.counts()
 
-    prev_dim_scores = state.get("dimension_scores", {})
+    prev_dim_scores = state.get("dimension_scores", {}) if not path_changed else {}
     diff = merge_scan(state, findings,
                       lang=lang.name if lang else None,
                       scan_path=scan_path_rel,
                       force_resolve=getattr(args, "force_resolve", False),
-                      exclude=_extra_exclusions,
+                      exclude=get_exclusions(),
                       potentials=potentials,
                       codebase_metrics=codebase_metrics,
-                      include_slow=include_slow)
+                      include_slow=include_slow,
+                      ignore=config.get("ignore", []))
+
+    # Expire stale holistic review findings
+    from ..issues import expire_stale_holistic
+    holistic_max_age = config.get("holistic_max_age_days", 30)
+    expire_stale_holistic(state, holistic_max_age)
+
     save_state(state, sp)
 
-    print(c("\n  Scan complete", "bold"))
+    print(c("\n  AGENT: PLEASE READ the strategy and recommendations below the score.", "yellow"))
+    print(c("  They are CUSTOM COACHING tailored to this codebase. Follow them.", "yellow"))
+    print(c("  Scan complete", "bold"))
     print(c("  " + "─" * 50, "dim"))
 
     _show_diff_summary(diff)
@@ -257,6 +284,7 @@ def cmd_scan(args):
         state["reminder_history"] = narrative["reminder_history"]
         save_state(state, sp)
 
+    from ..config import config_for_query
     _write_query({"command": "scan", "score": state["score"],
                   "strict_score": state.get("strict_score", 0),
                   "prev_score": prev_score, "diff": diff, "stats": state["stats"],
@@ -266,13 +294,14 @@ def cmd_scan(args):
                   "dimension_scores": state.get("dimension_scores"),
                   "potentials": state.get("potentials"),
                   "zone_distribution": zone_distribution,
-                  "narrative": narrative})
+                  "narrative": narrative,
+                  "config": config_for_query(config)})
 
     # Generate scorecard badge
     badge_path = None
     try:
         from ..scorecard import generate_scorecard, get_badge_config
-        badge_path, disabled = get_badge_config(args)
+        badge_path, disabled = get_badge_config(args, config)
         if not disabled and badge_path:
             generate_scorecard(state, badge_path)
             rel_path = badge_path.name if badge_path.parent == PROJECT_ROOT else str(badge_path)
@@ -299,15 +328,21 @@ def cmd_scan(args):
     except (ImportError, OSError):
         badge_path = None  # Pillow not installed or write failed — skip silently
 
-    _print_llm_summary(state, badge_path)
+    _print_llm_summary(state, badge_path, narrative)
 
 
-def _print_llm_summary(state: dict, badge_path: Path | None):
+def _print_llm_summary(state: dict, badge_path: Path | None,
+                        narrative: dict | None = None):
     """Print a structured summary for LLM consumption.
 
     The LLM reads terminal output after running scans. This gives it
     clear instructions on how to present the results to the end user.
+    Only shown when running inside an agent (CLAUDE_CODE or DESLOPPIFY_AGENT env).
     """
+    import os
+    if not (os.environ.get("CLAUDE_CODE") or os.environ.get("DESLOPPIFY_AGENT")):
+        return
+
     dim_scores = state.get("dimension_scores", {})
     obj_score = state.get("objective_score")
     obj_strict = state.get("objective_strict")
@@ -324,20 +359,31 @@ def _print_llm_summary(state: dict, badge_path: Path | None):
         print(f"Strict health:  {obj_strict:.1f}/100")
     print()
 
-    # Build dimension table
-    active = [(name, data) for name, data in dim_scores.items()
-              if data.get("checks", 0) > 0]
-    active.sort(key=lambda x: (0 if x[0] == "File health" else 1, x[0]))
+    # Build dimension table — separate mechanical from review
+    from ..scoring import DIMENSIONS
+    static_names = {d.name for d in DIMENSIONS}
+    mechanical = [(name, data) for name, data in dim_scores.items()
+                  if name in static_names and data.get("checks", 0) > 0]
+    review = [(name, data) for name, data in dim_scores.items()
+              if name not in static_names and data.get("checks", 0) > 0]
 
-    if active:
+    if mechanical or review:
         print("| Dimension | Health | Strict | Issues | Tier |")
         print("|-----------|--------|--------|--------|------|")
-        for name, data in active:
+        for name, data in sorted(mechanical, key=lambda x: x[0]):
             score = data.get("score", 100)
             strict = data.get("strict", score)
             issues = data.get("issues", 0)
             tier = data.get("tier", "")
             print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} |")
+        if review:
+            print("| **Review Dimensions** | | | | |")
+            for name, data in sorted(review, key=lambda x: x[0]):
+                score = data.get("score", 100)
+                strict = data.get("strict", score)
+                issues = data.get("issues", 0)
+                tier = data.get("tier", "")
+                print(f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} |")
         print()
 
     stats = state.get("stats", {})
@@ -345,6 +391,39 @@ def _print_llm_summary(state: dict, badge_path: Path | None):
         print(f"Total findings: {stats.get('total', 0)} | "
               f"Open: {stats.get('open', 0)} | "
               f"Fixed: {stats.get('fixed', 0)}")
+        print()
+
+    # Workflow guide — teach agents the full cycle
+    print("## Workflow Guide\n")
+    print("1. **Review findings first** (if any): `desloppify issues` — high-value subjective findings")
+    print("2. **Run auto-fixers** (if available): `desloppify fix <fixer> --dry-run` to preview, then apply")
+    print("3. **Manual fixes**: `desloppify next` — highest-priority item. Fix it, then:")
+    print('   `desloppify resolve fixed "<id>" --note "<what you did>"`')
+    print("4. **Rescan**: `desloppify scan --path <path>` — verify improvements, catch cascading effects")
+    print("5. **Check progress**: `desloppify status` — dimension scores dashboard\n")
+    print("### Decision Guide")
+    print("- **Tackle**: T1/T2 (high impact), auto-fixable, security findings")
+    print("- **Consider skipping**: T4 low-confidence, test/config zone findings (lower impact)")
+    print("- **Wontfix**: Intentional patterns, false positives →")
+    print('  `desloppify resolve wontfix "<id>" --note "<why>"`\n')
+    print("### Understanding Dimensions")
+    print("- **Mechanical** (Import hygiene, File health, etc.): Fix code → rescan")
+    print("- **Review** (Naming Quality, Logic Clarity, etc.): Address review findings → re-review")
+    print("- **Health vs Strict**: Health ignores wontfix; Strict penalizes it. Focus on Strict.\n")
+
+    # Current narrative status
+    if narrative:
+        headline = narrative.get("headline", "")
+        strategy = narrative.get("strategy") or {}
+        actions = narrative.get("actions", [])
+        if headline:
+            print(f"Current status: {headline}")
+        hint = strategy.get("hint", "")
+        if hint:
+            print(f"Strategy: {hint}")
+        if actions:
+            top = actions[0]
+            print(f"Top action: `{top['command']}` — {top['description']}")
         print()
 
     if badge_path and badge_path.exists():

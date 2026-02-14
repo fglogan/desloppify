@@ -269,7 +269,7 @@ class TestSelectFilesForReview:
         state = dict(empty_state)
         rpath = str(real_file.relative_to(Path.cwd())) if real_file.is_relative_to(Path.cwd()) else str(real_file)
         # We need to patch rel() to return a stable path
-        with patch("desloppify.review.rel", return_value="cached.ts"):
+        with patch("desloppify.review.selection.rel", return_value="cached.ts"):
             state["review_cache"] = {
                 "files": {
                     "cached.ts": {
@@ -291,7 +291,7 @@ class TestSelectFilesForReview:
 
         mock_lang.file_finder = MagicMock(return_value=[str(real_file)])
         state = dict(empty_state)
-        with patch("desloppify.review.rel", return_value="stale.ts"):
+        with patch("desloppify.review.selection.rel", return_value="stale.ts"):
             state["review_cache"] = {
                 "files": {
                     "stale.ts": {
@@ -312,7 +312,7 @@ class TestSelectFilesForReview:
 
         mock_lang.file_finder = MagicMock(return_value=[str(real_file)])
         state = dict(empty_state)
-        with patch("desloppify.review.rel", return_value="changed.ts"):
+        with patch("desloppify.review.selection.rel", return_value="changed.ts"):
             state["review_cache"] = {
                 "files": {
                     "changed.ts": {
@@ -334,7 +334,7 @@ class TestSelectFilesForReview:
 
         mock_lang.file_finder = MagicMock(return_value=[str(real_file)])
         state = dict(empty_state)
-        with patch("desloppify.review.rel", return_value="cached.ts"):
+        with patch("desloppify.review.selection.rel", return_value="cached.ts"):
             state["review_cache"] = {
                 "files": {
                     "cached.ts": {
@@ -383,6 +383,7 @@ class TestPrepareReview:
             "convention_outlier", "abstraction_fitness",
             "logic_clarity", "contract_coherence", "initialization_coupling",
             "logging_quality", "type_safety", "cross_module_architecture",
+            "ai_generated_debt", "authorization_coherence",
         ]
         assert "system_prompt" in data
         assert len(data["files"]) == 1
@@ -408,7 +409,9 @@ class TestPrepareReview:
             "foo.ts": {"imports": {"bar.ts"}, "importers": {"baz.ts", "qux.ts"}},
         }
 
-        with patch("desloppify.review.rel", return_value="foo.ts"):
+        with patch("desloppify.review.context.rel", return_value="foo.ts"), \
+             patch("desloppify.review.selection.rel", return_value="foo.ts"), \
+             patch("desloppify.review.prepare.rel", return_value="foo.ts"):
             data = prepare_review(tmp_path, mock_lang, empty_state)
         if data["files"]:
             neighbors = data["files"][0]["neighbors"]
@@ -477,7 +480,7 @@ class TestImportReviewFindings:
         from desloppify.review import import_review_findings
         # Create actual files so hashing works
         (tmp_path / "src").mkdir(exist_ok=True)
-        with patch("desloppify.review.PROJECT_ROOT", tmp_path):
+        with patch("desloppify.review.import_findings.PROJECT_ROOT", tmp_path):
             (tmp_path / "src" / "foo.ts").write_text("content")
             (tmp_path / "src" / "bar.ts").write_text("content")
             import_review_findings(sample_findings_data, empty_state, "typescript")
@@ -581,11 +584,15 @@ class TestScoringIntegration:
         from desloppify.scoring import compute_dimension_scores
         import_review_findings(sample_findings_data, empty_state, "typescript")
 
-        potentials = {"review": 2}  # 2 files reviewed
+        # With assessment-based scoring, review findings alone don't create
+        # dimension penalties. Assessments create first-class scoring dimensions.
+        assessments = {"naming_quality": {"score": 75}, "comment_quality": {"score": 85}}
+        potentials = {"review": 2}
         dim_scores = compute_dimension_scores(
-            empty_state["findings"], potentials)
-        assert "Design quality" in dim_scores
-        assert dim_scores["Design quality"]["issues"] > 0
+            empty_state["findings"], potentials,
+            review_assessments=assessments)
+        assert "Naming Quality" in dim_scores
+        assert dim_scores["Naming Quality"]["score"] == 75.0
 
     def test_review_findings_not_auto_resolved_by_scan(self, empty_state, sample_findings_data):
         from desloppify.review import import_review_findings
@@ -609,13 +616,147 @@ class TestScoringIntegration:
         from desloppify.scoring import _FILE_BASED_DETECTORS
         assert "review" in _FILE_BASED_DETECTORS
 
-    def test_design_quality_dimension_exists(self):
+    def test_audit_coverage_dimension_exists(self):
         from desloppify.scoring import DIMENSIONS
         dim_names = [d.name for d in DIMENSIONS]
-        assert "Design quality" in dim_names
-        dq = [d for d in DIMENSIONS if d.name == "Design quality"][0]
-        assert dq.tier == 4
-        assert "review" in dq.detectors
+        assert "Audit coverage" in dim_names
+        rc = [d for d in DIMENSIONS if d.name == "Audit coverage"][0]
+        assert rc.tier == 4
+        assert "subjective_review" in rc.detectors
+        assert "review" not in rc.detectors
+
+
+# ── Assessment import tests ────────────────────────────────────────
+
+class TestAssessmentImport:
+    def test_import_new_format_with_assessments(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "assessments": {"naming_quality": 75, "comment_quality": 85},
+            "findings": [
+                {
+                    "file": "src/foo.ts",
+                    "dimension": "naming_quality",
+                    "identifier": "x",
+                    "summary": "bad name",
+                    "confidence": "high",
+                },
+            ],
+        }
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        assert len(state["findings"]) == 1
+        assessments = state["review_assessments"]
+        assert "naming_quality" in assessments
+        assert assessments["naming_quality"]["score"] == 75
+        assert "comment_quality" in assessments
+        assert assessments["comment_quality"]["score"] == 85
+
+    def test_import_legacy_format_still_works(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = [
+            {
+                "file": "src/foo.ts",
+                "dimension": "naming_quality",
+                "identifier": "x",
+                "summary": "bad name",
+                "confidence": "high",
+            },
+        ]
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        # Legacy format: no assessments stored
+        assert state.get("review_assessments", {}) == {}
+
+    def test_holistic_assessment_overwrites_per_file(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings, import_holistic_findings
+        state = _empty_state()
+        # Import per-file assessments first
+        per_file_data = {
+            "assessments": {"abstraction_fitness": 60},
+            "findings": [],
+        }
+        import_review_findings(per_file_data, state, "typescript")
+        assert state["review_assessments"]["abstraction_fitness"]["score"] == 60
+
+        # Import holistic assessments for the same dimension with a different score
+        holistic_data = {
+            "assessments": {"abstraction_fitness": 40},
+            "findings": [],
+        }
+        import_holistic_findings(holistic_data, state, "typescript")
+        # Holistic wins
+        assert state["review_assessments"]["abstraction_fitness"]["score"] == 40
+        assert state["review_assessments"]["abstraction_fitness"]["source"] == "holistic"
+
+    def test_per_file_does_not_overwrite_holistic(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings, import_holistic_findings
+        state = _empty_state()
+        # Import holistic first
+        holistic_data = {
+            "assessments": {"abstraction_fitness": 40},
+            "findings": [],
+        }
+        import_holistic_findings(holistic_data, state, "typescript")
+        assert state["review_assessments"]["abstraction_fitness"]["score"] == 40
+
+        # Import per-file for the same dimension
+        per_file_data = {
+            "assessments": {"abstraction_fitness": 80},
+            "findings": [],
+        }
+        import_review_findings(per_file_data, state, "typescript")
+        # Holistic score should be preserved
+        assert state["review_assessments"]["abstraction_fitness"]["score"] == 40
+        assert state["review_assessments"]["abstraction_fitness"]["source"] == "holistic"
+
+    def test_assessment_score_clamped(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "assessments": {"naming_quality": 150},
+            "findings": [],
+        }
+        import_review_findings(data, state, "typescript")
+        assert state["review_assessments"]["naming_quality"]["score"] == 100
+
+    def test_assessment_negative_clamped(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "assessments": {"naming_quality": -10},
+            "findings": [],
+        }
+        import_review_findings(data, state, "typescript")
+        assert state["review_assessments"]["naming_quality"]["score"] == 0
+
+    def test_import_dict_without_assessments(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "findings": [
+                {
+                    "file": "src/foo.ts",
+                    "dimension": "naming_quality",
+                    "identifier": "x",
+                    "summary": "bad name",
+                    "confidence": "high",
+                },
+            ],
+        }
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        # No assessments key in import data, so nothing stored
+        assert state.get("review_assessments", {}) == {}
 
 
 # ── Staleness tests ───────────────────────────────────────────────
@@ -782,7 +923,7 @@ class TestNarrativeIntegration:
             open_by_detector={"review": 3},
         )
         assert headline is not None
-        assert "design review" in headline.lower()
+        assert "review finding" in headline.lower()
 
     def test_headline_no_review_in_early_momentum(self):
         from desloppify.narrative.headline import _compute_headline
@@ -803,7 +944,7 @@ class TestRegistry:
         from desloppify.registry import DETECTORS
         assert "review" in DETECTORS
         meta = DETECTORS["review"]
-        assert meta.dimension == "Design quality"
+        assert meta.dimension == "Audit coverage"
         assert meta.action_type == "refactor"
 
     def test_review_in_display_order(self):
@@ -976,6 +1117,46 @@ class TestNewDimensions:
         diff = import_review_findings(data, empty_state, "python")
         assert diff["new"] == 3
 
+    def test_ai_generated_debt_dimension(self):
+        from desloppify.review import DIMENSION_PROMPTS
+        dim = DIMENSION_PROMPTS["ai_generated_debt"]
+        assert "llm" in dim["description"].lower() or "ai" in dim["description"].lower()
+        assert len(dim["look_for"]) >= 3
+        assert len(dim["skip"]) >= 1
+
+    def test_authorization_coherence_dimension(self):
+        from desloppify.review import DIMENSION_PROMPTS
+        dim = DIMENSION_PROMPTS["authorization_coherence"]
+        assert "auth" in dim["description"].lower()
+        assert len(dim["look_for"]) >= 3
+        assert len(dim["skip"]) >= 1
+
+    def test_new_phase2_dimensions_in_default(self):
+        from desloppify.review import DEFAULT_DIMENSIONS
+        assert "ai_generated_debt" in DEFAULT_DIMENSIONS
+        assert "authorization_coherence" in DEFAULT_DIMENSIONS
+
+    def test_import_accepts_new_phase2_dimensions(self, empty_state):
+        from desloppify.review import import_review_findings
+        data = [
+            {
+                "file": "src/service.py",
+                "dimension": "ai_generated_debt",
+                "identifier": "handle_request",
+                "summary": "Restating docstring on trivial function",
+                "confidence": "medium",
+            },
+            {
+                "file": "src/routes.py",
+                "dimension": "authorization_coherence",
+                "identifier": "delete_user",
+                "summary": "Auth on GET/POST but not DELETE handler",
+                "confidence": "high",
+            },
+        ]
+        diff = import_review_findings(data, empty_state, "python")
+        assert diff["new"] == 2
+
     def test_import_accepts_issue57_dimensions(self, empty_state):
         """New dimensions from #57 are accepted by import."""
         from desloppify.review import import_review_findings
@@ -1034,6 +1215,23 @@ class TestLangGuidance:
         assert "lang_guidance" in data
         assert "language" in data
         assert data["language"] == "typescript"
+
+    def test_python_auth_guidance_exists(self):
+        from desloppify.review import LANG_GUIDANCE
+        py = LANG_GUIDANCE["python"]
+        assert "auth" in py
+        assert len(py["auth"]) >= 3
+        auth_text = " ".join(py["auth"]).lower()
+        assert "login_required" in auth_text
+        assert "request.user" in auth_text
+
+    def test_typescript_auth_guidance_exists(self):
+        from desloppify.review import LANG_GUIDANCE
+        ts = LANG_GUIDANCE["typescript"]
+        assert "auth" in ts
+        assert len(ts["auth"]) >= 3
+        auth_text = " ".join(ts["auth"]).lower()
+        assert "useauth" in auth_text or "getserversession" in auth_text
 
     def test_prepare_includes_lang_guidance_python(self, empty_state, tmp_path):
         from desloppify.review import prepare_review
@@ -1157,7 +1355,7 @@ class TestHeadlineBugFix:
             open_by_detector={"review": 3},
         )
         if result is not None:
-            assert "design review" in result.lower()
+            assert "review finding" in result.lower()
             assert "3" in result
 
 
@@ -1188,7 +1386,7 @@ class TestCmdReviewPrepare:
         args.dimensions = None
 
         with patch("desloppify.commands.review_cmd._setup_lang", return_value=file_list), \
-             patch("desloppify.cli._write_query", capture_query):
+             patch("desloppify.commands._helpers._write_query", capture_query):
             _do_prepare(args, empty_state, mock_lang_with_zones, None)
 
         assert query_output["command"] == "review"
@@ -1332,7 +1530,7 @@ class TestSetupLang:
 class TestUpdateReviewCache:
     def test_cache_created_from_scratch(self, empty_state, sample_findings_data, tmp_path):
         from desloppify.review import _update_review_cache
-        with patch("desloppify.review.PROJECT_ROOT", tmp_path):
+        with patch("desloppify.review.import_findings.PROJECT_ROOT", tmp_path):
             (tmp_path / "src").mkdir(exist_ok=True)
             (tmp_path / "src" / "foo.ts").write_text("content")
             (tmp_path / "src" / "bar.ts").write_text("content")
@@ -1344,7 +1542,7 @@ class TestUpdateReviewCache:
         """If review_cache exists without files key, shouldn't crash."""
         from desloppify.review import _update_review_cache
         state = {"review_cache": {}}  # No "files" key
-        with patch("desloppify.review.PROJECT_ROOT", tmp_path):
+        with patch("desloppify.review.import_findings.PROJECT_ROOT", tmp_path):
             (tmp_path / "src").mkdir(exist_ok=True)
             (tmp_path / "src" / "foo.ts").write_text("content")
             (tmp_path / "src" / "bar.ts").write_text("content")
@@ -1361,3 +1559,177 @@ class TestUpdateReviewCache:
         prepare_review(tmp_path, mock_lang, empty_state)
         # file_finder should be called exactly once (by prepare_review itself)
         assert mock_lang.file_finder.call_count == 1
+
+
+# ── Skipped findings tests ────────────────────────────────────────
+
+class TestSkippedFindings:
+    """Findings missing required fields are tracked and reported."""
+
+    def test_per_file_skipped_missing_fields(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "findings": [
+                # Valid finding
+                {"file": "src/a.ts", "dimension": "naming_quality",
+                 "identifier": "x", "summary": "bad", "confidence": "high"},
+                # Missing 'identifier'
+                {"file": "src/b.ts", "dimension": "naming_quality",
+                 "summary": "bad", "confidence": "high"},
+                # Missing 'confidence'
+                {"file": "src/c.ts", "dimension": "naming_quality",
+                 "identifier": "y", "summary": "bad"},
+            ],
+        }
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        assert diff["skipped"] == 2
+        assert len(diff["skipped_details"]) == 2
+        assert "identifier" in diff["skipped_details"][0]["missing"]
+        assert "confidence" in diff["skipped_details"][1]["missing"]
+
+    def test_per_file_invalid_dimension_skipped(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "findings": [
+                {"file": "src/a.ts", "dimension": "bogus_dimension",
+                 "identifier": "x", "summary": "bad", "confidence": "high"},
+            ],
+        }
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 0
+        assert diff["skipped"] == 1
+        assert "invalid dimension" in diff["skipped_details"][0]["missing"][0]
+
+    def test_holistic_skipped_missing_fields(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_holistic_findings
+        state = _empty_state()
+        data = {
+            "findings": [
+                # Valid
+                {"dimension": "cross_module_architecture", "identifier": "god_mod",
+                 "summary": "too central", "confidence": "high"},
+                # Missing 'summary'
+                {"dimension": "cross_module_architecture", "identifier": "god_mod2",
+                 "confidence": "high"},
+            ],
+        }
+        diff = import_holistic_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        assert diff["skipped"] == 1
+        assert "summary" in diff["skipped_details"][0]["missing"]
+
+    def test_no_skipped_when_all_valid(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+        data = {
+            "findings": [
+                {"file": "src/a.ts", "dimension": "naming_quality",
+                 "identifier": "x", "summary": "bad", "confidence": "high"},
+            ],
+        }
+        diff = import_review_findings(data, state, "typescript")
+        assert diff["new"] == 1
+        assert "skipped" not in diff
+
+
+# ── Auto-resolve on re-import tests ──────────────────────────────
+
+class TestAutoResolveOnReImport:
+    """Old findings should auto-resolve when re-imported without them."""
+
+    def test_holistic_auto_resolve_on_reimport(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_holistic_findings
+        state = _empty_state()
+
+        # First import: 2 holistic findings
+        data1 = {
+            "findings": [
+                {"dimension": "cross_module_architecture", "identifier": "god_mod",
+                 "summary": "too central", "confidence": "high"},
+                {"dimension": "abstraction_fitness", "identifier": "util_dump",
+                 "summary": "dumping ground", "confidence": "medium"},
+            ],
+        }
+        diff1 = import_holistic_findings(data1, state, "typescript")
+        assert diff1["new"] == 2
+        open_ids = [fid for fid, f in state["findings"].items()
+                    if f["status"] == "open"]
+        assert len(open_ids) == 2
+
+        # Second import: only 1 finding (different from first)
+        data2 = {
+            "findings": [
+                {"dimension": "error_consistency", "identifier": "mixed_errors",
+                 "summary": "mixed strategies", "confidence": "high"},
+            ],
+        }
+        diff2 = import_holistic_findings(data2, state, "typescript")
+        assert diff2["new"] == 1
+        # The 2 old findings should be auto-resolved
+        assert diff2["auto_resolved"] >= 2
+        still_open = [fid for fid, f in state["findings"].items()
+                      if f["status"] == "open"]
+        assert len(still_open) == 1
+
+    def test_per_file_auto_resolve_on_reimport(self):
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings
+        state = _empty_state()
+
+        # First import: findings for src/a.ts
+        data1 = {
+            "findings": [
+                {"file": "src/a.ts", "dimension": "naming_quality",
+                 "identifier": "x", "summary": "bad name", "confidence": "high"},
+                {"file": "src/a.ts", "dimension": "comment_quality",
+                 "identifier": "y", "summary": "stale comment", "confidence": "medium"},
+            ],
+        }
+        diff1 = import_review_findings(data1, state, "typescript")
+        assert diff1["new"] == 2
+
+        # Second import: re-review src/a.ts but only 1 finding remains
+        data2 = {
+            "findings": [
+                {"file": "src/a.ts", "dimension": "naming_quality",
+                 "identifier": "x", "summary": "bad name", "confidence": "high"},
+            ],
+        }
+        diff2 = import_review_findings(data2, state, "typescript")
+        # The comment_quality finding should be auto-resolved
+        resolved = [f for f in state["findings"].values()
+                    if f["status"] == "auto_resolved"
+                    and "not reported in latest per-file" in (f.get("note") or "")]
+        assert len(resolved) >= 1
+
+    def test_holistic_does_not_resolve_per_file(self):
+        """Holistic re-import should not touch per-file review findings."""
+        from desloppify.state import _empty_state
+        from desloppify.review import import_review_findings, import_holistic_findings
+        state = _empty_state()
+
+        # Import per-file findings
+        per_file = {
+            "findings": [
+                {"file": "src/a.ts", "dimension": "naming_quality",
+                 "identifier": "x", "summary": "bad name", "confidence": "high"},
+            ],
+        }
+        import_review_findings(per_file, state, "typescript")
+        per_file_ids = [fid for fid, f in state["findings"].items()
+                        if f["status"] == "open"]
+        assert len(per_file_ids) == 1
+
+        # Import holistic findings (empty) — should NOT resolve per-file
+        holistic = {"findings": []}
+        import_holistic_findings(holistic, state, "typescript")
+        # Per-file finding should still be open
+        assert state["findings"][per_file_ids[0]]["status"] == "open"

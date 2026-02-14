@@ -45,7 +45,7 @@ class TestCmdNextOutput:
             return {"findings": {}, "score": 100, "stats": {}}
 
         # Mock get_next_items to return empty list
-        def mock_get_next_items(state, tier, count):
+        def mock_get_next_items(state, tier, count, scan_path=None):
             return []
 
         # Mock _state_path

@@ -9,6 +9,7 @@ import pytest
 from desloppify.detectors.test_coverage import (
     _analyze_test_quality,
     _file_loc,
+    _has_testable_logic,
     _import_based_mapping,
     _map_test_to_source,
     _naming_based_mapping,
@@ -18,6 +19,7 @@ from desloppify.detectors.test_coverage import (
     _strip_py_comment,
     _strip_test_markers,
     _transitive_coverage,
+    _ts_has_testable_logic,
     detect_test_coverage,
 )
 from desloppify.zones import FileZoneMap, Zone, ZoneRule
@@ -437,7 +439,7 @@ class TestDetectTestCoverage:
 
     def test_zero_test_files_with_production(self, tmp_path):
         """Production files but no tests → untested_module findings."""
-        prod_f = _write_file(tmp_path, "app.py", "# code\n" * 15)
+        prod_f = _write_file(tmp_path, "app.py", "def main():\n    pass\n" + "# code\n" * 13)
         zone_map = _make_zone_map([prod_f])
         graph = {prod_f: {"imports": set(), "importer_count": 0}}
         entries, potential = detect_test_coverage(graph, zone_map, "python")
@@ -468,8 +470,8 @@ class TestDetectTestCoverage:
 
     def test_transitive_only_finding(self, tmp_path):
         """Production file covered only transitively → transitive_only finding."""
-        prod_a = _write_file(tmp_path, "a.py", "import b\n" + "# code\n" * 15)
-        prod_b = _write_file(tmp_path, "b.py", "# code\n" * 15)
+        prod_a = _write_file(tmp_path, "a.py", "import b\ndef run():\n    pass\n" + "# code\n" * 13)
+        prod_b = _write_file(tmp_path, "b.py", "def helper():\n    pass\n" + "# code\n" * 13)
         test_a = _write_file(
             tmp_path, "test_a.py",
             "def test_a():\n    assert True\n    assert True\n    assert True\n",
@@ -494,8 +496,8 @@ class TestDetectTestCoverage:
         Must have at least one test file to enter _generate_findings path
         (otherwise _no_tests_findings is used, which always emits untested_module).
         """
-        prod_f = _write_file(tmp_path, "core.py", "# critical code\n" * 15)
-        other_prod = _write_file(tmp_path, "other.py", "# other\n" * 15)
+        prod_f = _write_file(tmp_path, "core.py", "def process():\n    pass\n" + "# critical code\n" * 13)
+        other_prod = _write_file(tmp_path, "other.py", "def run():\n    pass\n" + "# other\n" * 13)
         test_other = _write_file(
             tmp_path, "test_other.py",
             "def test_other():\n    assert True\n    assert True\n    assert True\n",
@@ -517,7 +519,7 @@ class TestDetectTestCoverage:
 
     def test_untested_module_low_importers(self, tmp_path):
         """Untested file with low importer count → untested_module (tier 3)."""
-        prod_f = _write_file(tmp_path, "helper.py", "# helper code\n" * 15)
+        prod_f = _write_file(tmp_path, "helper.py", "def helper():\n    pass\n" + "# helper code\n" * 13)
         zone_map = _make_zone_map([prod_f])
         graph = {prod_f: {"imports": set(), "importer_count": 2}}
         entries, potential = detect_test_coverage(graph, zone_map, "python")
@@ -552,9 +554,9 @@ class TestDetectTestCoverage:
         """Potential is LOC-weighted: sum of sqrt(loc) capped at 50."""
         import math
         # 100-LOC file: sqrt(100) = 10
-        prod_big = _write_file(tmp_path, "big.py", "x = 1\n" * 100)
+        prod_big = _write_file(tmp_path, "big.py", "def run():\n    pass\n" + "x = 1\n" * 98)
         # 25-LOC file: sqrt(25) = 5
-        prod_small = _write_file(tmp_path, "small.py", "x = 1\n" * 25)
+        prod_small = _write_file(tmp_path, "small.py", "def run():\n    pass\n" + "x = 1\n" * 23)
         zone_map = _make_zone_map([prod_big, prod_small])
         graph = {
             prod_big: {"imports": set(), "importer_count": 0},
@@ -919,8 +921,8 @@ class TestRTLPatterns:
 class TestTransitiveSemantics:
     def test_transitive_high_importers_tier_2(self, tmp_path):
         """Transitive-only file with >=10 importers gets tier 2."""
-        prod_a = _write_file(tmp_path, "a.py", "import b\n" + "# code\n" * 15)
-        prod_b = _write_file(tmp_path, "b.py", "# code\n" * 15)
+        prod_a = _write_file(tmp_path, "a.py", "import b\ndef run():\n    pass\n" + "# code\n" * 13)
+        prod_b = _write_file(tmp_path, "b.py", "def helper():\n    pass\n" + "# code\n" * 13)
         test_a = _write_file(
             tmp_path, "test_a.py",
             "def test_a():\n    assert True\n    assert True\n    assert True\n",
@@ -940,8 +942,8 @@ class TestTransitiveSemantics:
 
     def test_transitive_low_importers_tier_3(self, tmp_path):
         """Transitive-only file with <10 importers stays at tier 3."""
-        prod_a = _write_file(tmp_path, "a.py", "import b\n" + "# code\n" * 15)
-        prod_b = _write_file(tmp_path, "b.py", "# code\n" * 15)
+        prod_a = _write_file(tmp_path, "a.py", "import b\ndef run():\n    pass\n" + "# code\n" * 13)
+        prod_b = _write_file(tmp_path, "b.py", "def helper():\n    pass\n" + "# code\n" * 13)
         test_a = _write_file(
             tmp_path, "test_a.py",
             "def test_a():\n    assert True\n    assert True\n    assert True\n",
@@ -960,8 +962,8 @@ class TestTransitiveSemantics:
 
     def test_transitive_summary_text(self, tmp_path):
         """Transitive finding summary has clarified text."""
-        prod_a = _write_file(tmp_path, "a.py", "import b\n" + "# code\n" * 15)
-        prod_b = _write_file(tmp_path, "b.py", "# code\n" * 15)
+        prod_a = _write_file(tmp_path, "a.py", "import b\ndef run():\n    pass\n" + "# code\n" * 13)
+        prod_b = _write_file(tmp_path, "b.py", "def helper():\n    pass\n" + "# code\n" * 13)
         test_a = _write_file(
             tmp_path, "test_a.py",
             "def test_a():\n    assert True\n    assert True\n    assert True\n",
@@ -986,7 +988,7 @@ class TestTransitiveSemantics:
 class TestComplexityTierUpgrade:
     def test_untested_complex_file_tier_2(self, tmp_path):
         """Untested file with high complexity score → tier 2 (critical)."""
-        prod = _write_file(tmp_path, "complex.py", "# code\n" * 20)
+        prod = _write_file(tmp_path, "complex.py", "def process():\n    pass\n" + "# code\n" * 18)
         all_files = [prod]
         zone_map = _make_zone_map(all_files)
         graph = {prod: {"imports": set(), "importer_count": 1}}
@@ -1000,7 +1002,7 @@ class TestComplexityTierUpgrade:
 
     def test_untested_simple_file_stays_tier_3(self, tmp_path):
         """Untested file without high complexity stays at tier 3."""
-        prod = _write_file(tmp_path, "simple.py", "# code\n" * 20)
+        prod = _write_file(tmp_path, "simple.py", "def run():\n    pass\n" + "# code\n" * 18)
         all_files = [prod]
         zone_map = _make_zone_map(all_files)
         graph = {prod: {"imports": set(), "importer_count": 1}}
@@ -1014,8 +1016,8 @@ class TestComplexityTierUpgrade:
 
     def test_transitive_complex_file_tier_2(self, tmp_path):
         """Transitive-only file with high complexity → tier 2."""
-        prod_a = _write_file(tmp_path, "a.py", "import b\n" + "# code\n" * 15)
-        prod_b = _write_file(tmp_path, "b.py", "# code\n" * 20)
+        prod_a = _write_file(tmp_path, "a.py", "import b\ndef run():\n    pass\n" + "# code\n" * 13)
+        prod_b = _write_file(tmp_path, "b.py", "def helper():\n    pass\n" + "# code\n" * 18)
         test_a = _write_file(
             tmp_path, "test_a.py",
             "def test_a():\n    assert True\n    assert True\n    assert True\n",
@@ -1036,7 +1038,7 @@ class TestComplexityTierUpgrade:
 
     def test_no_complexity_map_no_upgrade(self, tmp_path):
         """Without complexity_map, no tier upgrade for untested files."""
-        prod = _write_file(tmp_path, "mod.py", "# code\n" * 20)
+        prod = _write_file(tmp_path, "mod.py", "def run():\n    pass\n" + "# code\n" * 18)
         all_files = [prod]
         zone_map = _make_zone_map(all_files)
         graph = {prod: {"imports": set(), "importer_count": 2}}
@@ -1046,7 +1048,7 @@ class TestComplexityTierUpgrade:
 
     def test_complexity_at_threshold_upgrades(self, tmp_path):
         """Complexity exactly at threshold (20) should upgrade."""
-        prod = _write_file(tmp_path, "edge.py", "# code\n" * 20)
+        prod = _write_file(tmp_path, "edge.py", "def run():\n    pass\n" + "# code\n" * 18)
         all_files = [prod]
         zone_map = _make_zone_map(all_files)
         graph = {prod: {"imports": set(), "importer_count": 1}}
@@ -1054,3 +1056,343 @@ class TestComplexityTierUpgrade:
         entries, _ = detect_test_coverage(graph, zone_map, "python", complexity_map=cmap)
         assert len(entries) == 1
         assert entries[0]["tier"] == 2
+
+
+# ── _has_testable_logic ──────────────────────────────────
+
+
+class TestHasTestableLogic:
+    """Test the non-testable file filter."""
+
+    # ── .d.ts files ──
+
+    def test_dts_file_excluded(self, tmp_path):
+        """TypeScript .d.ts type definition files have no runtime behavior."""
+        f = _write_file(tmp_path, "types.d.ts", "export interface Foo { bar: string; }\n")
+        assert _has_testable_logic(f, "typescript") is False
+
+    # ── TypeScript type-only files ──
+
+    def test_ts_type_only_file(self, tmp_path):
+        """File with only type/interface declarations and imports."""
+        content = (
+            "import { BaseType } from './base';\n"
+            "\n"
+            "export interface Foo {\n"
+            "  bar: string;\n"
+            "  baz: number;\n"
+            "}\n"
+            "\n"
+            "export type FooId = string;\n"
+            "\n"
+            "type Internal = {\n"
+            "  x: number;\n"
+            "  y: number;\n"
+            "};\n"
+        )
+        f = _write_file(tmp_path, "types.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    def test_ts_type_with_runtime_export(self, tmp_path):
+        """File with types AND a runtime export has testable logic."""
+        content = (
+            "export interface Foo { bar: string; }\n"
+            "export const DEFAULT_FOO: Foo = { bar: 'hello' };\n"
+        )
+        f = _write_file(tmp_path, "types.ts", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    def test_ts_type_alias_only(self, tmp_path):
+        """File with only type aliases (no braces)."""
+        content = (
+            "export type Id = string;\n"
+            "export type Name = string;\n"
+            "type Internal = number | null;\n"
+        )
+        f = _write_file(tmp_path, "aliases.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    # ── TypeScript barrel/re-export files ──
+
+    def test_ts_barrel_file(self, tmp_path):
+        """Barrel file with only re-exports."""
+        content = (
+            "export { Foo, Bar } from './foo';\n"
+            "export { Baz } from './baz';\n"
+            "export * from './utils';\n"
+        )
+        f = _write_file(tmp_path, "index.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    def test_ts_barrel_with_type_reexports(self, tmp_path):
+        """Barrel file with type-only re-exports."""
+        content = (
+            "export type { Foo } from './foo';\n"
+            "export { Bar } from './bar';\n"
+        )
+        f = _write_file(tmp_path, "index.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    def test_ts_barrel_multiline_reexport(self, tmp_path):
+        """Barrel file with multi-line re-export."""
+        content = (
+            "export {\n"
+            "  Foo,\n"
+            "  Bar,\n"
+            "  Baz,\n"
+            "} from './module';\n"
+        )
+        f = _write_file(tmp_path, "index.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    def test_ts_barrel_with_runtime_code(self, tmp_path):
+        """Barrel file that also has runtime code is testable."""
+        content = (
+            "export { Foo } from './foo';\n"
+            "export const VERSION = '1.0.0';\n"
+        )
+        f = _write_file(tmp_path, "index.ts", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    # ── TypeScript files with runtime logic ──
+
+    def test_ts_function_file(self, tmp_path):
+        """File with a function definition is testable."""
+        content = (
+            "export function add(a: number, b: number): number {\n"
+            "  return a + b;\n"
+            "}\n"
+        )
+        f = _write_file(tmp_path, "math.ts", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    def test_ts_const_arrow_function(self, tmp_path):
+        """File with a const arrow function is testable."""
+        content = "export const add = (a: number, b: number) => a + b;\n"
+        f = _write_file(tmp_path, "math.ts", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    def test_ts_class_file(self, tmp_path):
+        """File with a class is testable."""
+        content = (
+            "export class Service {\n"
+            "  getValue() { return 42; }\n"
+            "}\n"
+        )
+        f = _write_file(tmp_path, "service.ts", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    def test_ts_react_component(self, tmp_path):
+        """React component file is testable (has runtime JSX)."""
+        content = (
+            "import React from 'react';\n"
+            "\n"
+            "export function Badge({ label }: { label: string }) {\n"
+            "  return <span>{label}</span>;\n"
+            "}\n"
+        )
+        f = _write_file(tmp_path, "Badge.tsx", content)
+        assert _has_testable_logic(f, "typescript") is True
+
+    # ── TypeScript ambient declarations ──
+
+    def test_ts_declare_only(self, tmp_path):
+        """File with only ambient declarations (declare module, etc.)."""
+        content = (
+            "declare module '*.svg' {\n"
+            "  const content: string;\n"
+            "  export default content;\n"
+            "}\n"
+            "\n"
+            "declare module '*.css' {\n"
+            "  const classes: Record<string, string>;\n"
+            "  export default classes;\n"
+            "}\n"
+        )
+        f = _write_file(tmp_path, "declarations.d.ts", content)
+        # .d.ts extension catches this, but also test the content parser
+        assert _ts_has_testable_logic(content) is False
+
+    # ── TypeScript multiline imports ──
+
+    def test_ts_multiline_import_not_testable(self, tmp_path):
+        """Multiline import followed by type declarations."""
+        content = (
+            "import {\n"
+            "  TypeA,\n"
+            "  TypeB,\n"
+            "  TypeC,\n"
+            "} from './types';\n"
+            "\n"
+            "export interface Combined {\n"
+            "  a: TypeA;\n"
+            "  b: TypeB;\n"
+            "}\n"
+        )
+        f = _write_file(tmp_path, "combined.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    # ── TypeScript block comments ──
+
+    def test_ts_block_comment_ignored(self, tmp_path):
+        """Block comments don't count as testable logic."""
+        content = (
+            "/**\n"
+            " * This module defines types.\n"
+            " */\n"
+            "export type Id = string;\n"
+        )
+        f = _write_file(tmp_path, "types.ts", content)
+        assert _has_testable_logic(f, "typescript") is False
+
+    # ── Python files ──
+
+    def test_py_file_with_def(self, tmp_path):
+        """Python file with function definition is testable."""
+        content = (
+            "import os\n"
+            "\n"
+            "def compute(x):\n"
+            "    return x * 2\n"
+        )
+        f = _write_file(tmp_path, "utils.py", content)
+        assert _has_testable_logic(f, "python") is True
+
+    def test_py_file_with_async_def(self, tmp_path):
+        """Python file with async function is testable."""
+        content = (
+            "import asyncio\n"
+            "\n"
+            "async def fetch():\n"
+            "    pass\n"
+        )
+        f = _write_file(tmp_path, "async_utils.py", content)
+        assert _has_testable_logic(f, "python") is True
+
+    def test_py_file_constants_only(self, tmp_path):
+        """Python file with only imports and constants — not testable."""
+        content = (
+            "from enum import Enum\n"
+            "\n"
+            "MAX_RETRIES = 3\n"
+            "TIMEOUT = 30\n"
+            "API_URL = 'https://example.com'\n"
+            "\n"
+            "# Status codes\n"
+            "SUCCESS = 200\n"
+            "NOT_FOUND = 404\n"
+            "SERVER_ERROR = 500\n"
+            "EXTRA_LINE = 'padding'\n"
+        )
+        f = _write_file(tmp_path, "constants.py", content)
+        assert _has_testable_logic(f, "python") is False
+
+    def test_py_init_barrel(self, tmp_path):
+        """Python __init__.py barrel with only imports — not testable."""
+        content = (
+            "from .foo import Foo\n"
+            "from .bar import Bar, Baz\n"
+            "from .utils import helper\n"
+            "\n"
+            "__all__ = ['Foo', 'Bar', 'Baz', 'helper']\n"
+            "\n"
+            "# Re-exports\n"
+            "# More padding lines\n"
+            "# Even more padding\n"
+            "# And more\n"
+        )
+        f = _write_file(tmp_path, "__init__.py", content)
+        assert _has_testable_logic(f, "python") is False
+
+    def test_py_class_with_methods(self, tmp_path):
+        """Python file with a class that has methods is testable."""
+        content = (
+            "class Processor:\n"
+            "    def process(self, data):\n"
+            "        return data\n"
+        )
+        f = _write_file(tmp_path, "processor.py", content)
+        assert _has_testable_logic(f, "python") is True
+
+    def test_py_method_inside_class(self, tmp_path):
+        """Indented def inside a class counts as testable."""
+        content = (
+            "import os\n"
+            "\n"
+            "class Config:\n"
+            "    x = 1\n"
+            "    y = 2\n"
+            "\n"
+            "    def validate(self):\n"
+            "        return self.x > 0\n"
+            "\n"
+            "# padding\n"
+            "# more padding\n"
+        )
+        f = _write_file(tmp_path, "config.py", content)
+        assert _has_testable_logic(f, "python") is True
+
+    def test_nonexistent_file_assumed_testable(self):
+        """Unreadable file is assumed testable (conservative)."""
+        assert _has_testable_logic("/no/such/file.py", "python") is True
+
+    # ── Integration: non-testable files excluded from scorable set ──
+
+    def test_type_only_ts_excluded_from_findings(self, tmp_path):
+        """Type-only TS file produces no test_coverage findings."""
+        type_file = _write_file(
+            tmp_path, "types.ts",
+            "export interface Foo {\n  bar: string;\n  baz: number;\n}\n"
+            "export type Id = string;\n"
+            "export type Name = string;\n"
+            "// padding\n" * 5,
+        )
+        zone_map = _make_zone_map([type_file])
+        graph = {type_file: {"imports": set(), "importer_count": 0}}
+        entries, potential = detect_test_coverage(graph, zone_map, "typescript")
+        assert entries == []
+        assert potential == 0
+
+    def test_barrel_ts_excluded_from_findings(self, tmp_path):
+        """Barrel TS file produces no test_coverage findings."""
+        barrel = _write_file(
+            tmp_path, "index.ts",
+            "export { Foo } from './foo';\n"
+            "export { Bar } from './bar';\n"
+            "export * from './utils';\n"
+            "// padding\n" * 8,
+        )
+        zone_map = _make_zone_map([barrel])
+        graph = {barrel: {"imports": set(), "importer_count": 0}}
+        entries, potential = detect_test_coverage(graph, zone_map, "typescript")
+        assert entries == []
+        assert potential == 0
+
+    def test_py_constants_excluded_from_findings(self, tmp_path):
+        """Python constants-only file produces no test_coverage findings."""
+        const_file = _write_file(
+            tmp_path, "constants.py",
+            "MAX_RETRIES = 3\nTIMEOUT = 30\nAPI_URL = 'https://example.com'\n"
+            "SUCCESS = 200\nNOT_FOUND = 404\nSERVER_ERROR = 500\n"
+            "EXTRA_1 = 'a'\nEXTRA_2 = 'b'\nEXTRA_3 = 'c'\nEXTRA_4 = 'd'\n",
+        )
+        zone_map = _make_zone_map([const_file])
+        graph = {const_file: {"imports": set(), "importer_count": 0}}
+        entries, potential = detect_test_coverage(graph, zone_map, "python")
+        assert entries == []
+        assert potential == 0
+
+    def test_runtime_file_still_produces_findings(self, tmp_path):
+        """File with runtime logic still produces findings (not excluded)."""
+        prod = _write_file(
+            tmp_path, "utils.ts",
+            "export function add(a: number, b: number) {\n"
+            "  return a + b;\n"
+            "}\n"
+            "// padding\n" * 8,
+        )
+        zone_map = _make_zone_map([prod])
+        graph = {prod: {"imports": set(), "importer_count": 0}}
+        entries, potential = detect_test_coverage(graph, zone_map, "typescript")
+        assert potential > 0
+        assert len(entries) >= 1

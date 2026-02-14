@@ -45,7 +45,8 @@ def _compute_actions(by_det: dict[str, int], dim_scores: dict, state: dict,
                 "type": "manual_fix",
                 "detector": det,
                 "count": count,
-                "description": f"{count} {det} findings — fix manually",
+                "description": (f"{count} {det} findings — use "
+                                f"`desloppify next` to get the highest-priority item"),
                 "command": f"desloppify show {det} --status open",
                 "impact": round(impact, 1),
                 "dimension": _dim_name_for(det),
@@ -59,7 +60,8 @@ def _compute_actions(by_det: dict[str, int], dim_scores: dict, state: dict,
                 "type": "auto_fix",
                 "detector": det,
                 "count": count,
-                "description": f"{count} {det} findings — auto-fixable",
+                "description": (f"{count} {det} findings — run "
+                                f"`desloppify fix {fixer} --dry-run` to preview, then apply"),
                 "command": f"desloppify fix {fixer} --dry-run",
                 "impact": round(impact, 1),
                 "dimension": _dim_name_for(det),
@@ -82,7 +84,7 @@ def _compute_actions(by_det: dict[str, int], dim_scores: dict, state: dict,
             "type": "reorganize",
             "detector": det,
             "count": count,
-            "description": f"{count} {det} findings — {guidance}",
+            "description": f"{count} {det} findings — {guidance}. Use `desloppify next` to start",
             "command": f"desloppify show {det} --status open",
             "impact": round(impact, 1),
             "dimension": _dim_name_for(det),
@@ -103,6 +105,12 @@ def _compute_actions(by_det: dict[str, int], dim_scores: dict, state: dict,
         if det == "subjective_review":
             command = "desloppify fix review"
             description = f"{count} files need design review — run design review with dimension templates"
+        elif det == "review":
+            command = "desloppify issues"
+            s = "s" if count != 1 else ""
+            description = (f"{count} review finding{s} need investigation — "
+                          f"run `desloppify issues` to see the work queue")
+            tool_info = {**tool_info, "action_type": "issue_queue"}
         else:
             command = f"desloppify show {det} --status open"
             description = f"{count} {det} findings — {tool_info.get('guidance', 'manual fix')}"
@@ -130,8 +138,8 @@ def _compute_actions(by_det: dict[str, int], dim_scores: dict, state: dict,
             "gap": debt["overall_gap"],
         })
 
-    # Sort by impact descending, auto_fix first
-    type_order = {"auto_fix": 0, "reorganize": 1, "refactor": 2, "manual_fix": 3, "debt_review": 4}
+    # Sort by impact descending, issue_queue and auto_fix first
+    type_order = {"issue_queue": 0, "auto_fix": 1, "reorganize": 2, "refactor": 3, "manual_fix": 4, "debt_review": 5}
     actions.sort(key=lambda a: (type_order.get(a["type"], 9), -a.get("impact", 0)))
     for i, a in enumerate(actions):
         a["priority"] = i + 1

@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 
 from desloppify.scoring import (
+    ASSESSMENT_CHECKS,
     CONFIDENCE_WEIGHTS,
     DIMENSIONS,
+    MIN_SAMPLE,
     TIER_WEIGHTS,
     Dimension,
     _detector_pass_rate,
@@ -365,9 +367,24 @@ class TestComputeDimensionScores:
         # Debug cleanliness requires "logs" which has no potential
         assert "Debug cleanliness" not in result
 
-    def test_skips_dimensions_with_all_missing_potentials(self):
+    def test_no_potentials_unassessed_dims_excluded(self):
+        """Unassessed dimensions with no findings are excluded."""
         result = compute_dimension_scores({}, {})
-        assert result == {}
+        # No mechanical dimensions
+        assert "Import hygiene" not in result
+        # Unassessed review dimensions with no open findings are excluded
+        assert "Naming Quality" not in result
+
+    def test_unassessed_dim_with_review_findings_included(self):
+        """Unassessed dimension with open review findings is still included."""
+        f = _finding("review", status="open", file="a.py")
+        f["detail"] = {"dimension": "naming_quality"}
+        findings = _findings_dict(f)
+        result = compute_dimension_scores(findings, {})
+        # Has an open review finding → included even without assessment
+        assert "Naming Quality" in result
+        assert result["Naming Quality"]["score"] == 0.0
+        assert result["Naming Quality"]["issues"] == 1
 
     def test_with_some_findings(self):
         findings = _findings_dict(
@@ -660,6 +677,219 @@ class TestComputeScoreImpact:
 # Module-level constants sanity checks
 # ===================================================================
 
+class TestHolisticMultiplier:
+    """Holistic findings get HOLISTIC_MULTIPLIER weight and bypass per-file cap."""
+
+    def test_multiplier_constant_defined(self):
+        from desloppify.scoring import HOLISTIC_MULTIPLIER, HOLISTIC_POTENTIAL
+        assert HOLISTIC_MULTIPLIER == 10.0
+        assert HOLISTIC_POTENTIAL == 10
+
+    def test_holistic_finding_weighted(self):
+        """Single holistic finding contributes confidence * HOLISTIC_MULTIPLIER."""
+        from desloppify.scoring import HOLISTIC_MULTIPLIER
+        f = _finding("review", confidence="high", file=".")
+        f["detail"] = {"holistic": True}
+        findings = _findings_dict(f)
+        rate, issues, weighted = _detector_pass_rate("review", findings, 60)
+        assert issues == 1
+        assert weighted == pytest.approx(1.0 * HOLISTIC_MULTIPLIER)
+
+    def test_holistic_medium_confidence(self):
+        from desloppify.scoring import HOLISTIC_MULTIPLIER
+        f = _finding("review", confidence="medium", file=".")
+        f["detail"] = {"holistic": True}
+        findings = _findings_dict(f)
+        _, _, weighted = _detector_pass_rate("review", findings, 60)
+        assert weighted == pytest.approx(0.7 * HOLISTIC_MULTIPLIER)
+
+    def test_holistic_no_cap(self):
+        """Multiple holistic findings are NOT capped per file."""
+        from desloppify.scoring import HOLISTIC_MULTIPLIER
+        f1 = _finding("review", confidence="high", file=".")
+        f1["detail"] = {"holistic": True}
+        f2 = _finding("review", confidence="high", file=".")
+        f2["detail"] = {"holistic": True}
+        findings = _findings_dict(f1, f2)
+        _, issues, weighted = _detector_pass_rate("review", findings, 60)
+        assert issues == 2
+        assert weighted == pytest.approx(2.0 * HOLISTIC_MULTIPLIER)
+
+    def test_file_dot_without_holistic_detail_is_file_based(self):
+        """file="." WITHOUT detail.holistic should be treated as regular file-based."""
+        f = _finding("review", confidence="high", file=".")
+        f["detail"] = {}  # no holistic flag
+        findings = _findings_dict(f)
+        _, issues, weighted = _detector_pass_rate("review", findings, 60)
+        assert issues == 1
+        # Regular per-file: capped at 1.0
+        assert weighted == pytest.approx(1.0)
+
+    def test_mixed_holistic_and_regular(self):
+        """Holistic + regular file findings combine correctly."""
+        from desloppify.scoring import HOLISTIC_MULTIPLIER
+        h = _finding("review", confidence="high", file=".")
+        h["detail"] = {"holistic": True}
+        r1 = _finding("review", confidence="high", file="src/a.py")
+        r2 = _finding("review", confidence="high", file="src/a.py")
+        findings = _findings_dict(h, r1, r2)
+        _, issues, weighted = _detector_pass_rate("review", findings, 60)
+        assert issues == 3
+        # Holistic: 1.0*10=10.0, file: 2 findings same file capped at 1.0
+        assert weighted == pytest.approx(10.0 + 1.0)
+
+
+# ===================================================================
+# Assessment-based review scoring
+# ===================================================================
+
+class TestAssessmentScoring:
+    """Tests for the review_assessments kwarg on compute_dimension_scores."""
+
+    def test_no_assessments_no_change(self):
+        """Calling with review_assessments=None produces the same result as before."""
+        potentials = {"unused": 100}
+        findings = _findings_dict(
+            _finding("unused", status="open", confidence="high"),
+        )
+        without = compute_dimension_scores(findings, potentials)
+        with_none = compute_dimension_scores(findings, potentials, review_assessments=None)
+        assert without == with_none
+
+    def test_single_assessment_dimension(self):
+        """One assessment adds a dimension with the right shape."""
+        assessments = {"naming_quality": {"score": 75}}
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        assert "Naming Quality" in result
+        dim = result["Naming Quality"]
+        assert dim["score"] == 75.0
+        assert dim["tier"] == 4
+        assert dim["checks"] == ASSESSMENT_CHECKS
+        assert dim["issues"] == 0
+        assert "review_assessment" in dim["detectors"]
+        det = dim["detectors"]["review_assessment"]
+        assert det["potential"] == ASSESSMENT_CHECKS
+        assert det["pass_rate"] == 0.75
+        assert det["weighted_failures"] == pytest.approx(ASSESSMENT_CHECKS * 0.25)
+
+    def test_multiple_assessment_dimensions(self):
+        """Two assessments show up independently."""
+        assessments = {
+            "naming_quality": {"score": 80},
+            "error_handling": {"score": 60},
+        }
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        assert "Naming Quality" in result
+        assert "Error Handling" in result
+        assert result["Naming Quality"]["score"] == 80.0
+        assert result["Error Handling"]["score"] == 60.0
+
+    def test_assessment_perfect_score(self):
+        """score=100 yields pass_rate=1.0 and weighted_failures=0."""
+        assessments = {"perfection": {"score": 100}}
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        det = result["Perfection"]["detectors"]["review_assessment"]
+        assert det["pass_rate"] == 1.0
+        assert det["weighted_failures"] == 0.0
+
+    def test_assessment_zero_score(self):
+        """score=0 yields pass_rate=0.0 and weighted_failures=ASSESSMENT_CHECKS."""
+        assessments = {"disaster": {"score": 0}}
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        dim = result["Disaster"]
+        assert dim["score"] == 0.0
+        det = dim["detectors"]["review_assessment"]
+        assert det["pass_rate"] == 0.0
+        assert det["weighted_failures"] == pytest.approx(float(ASSESSMENT_CHECKS))
+
+    def test_assessment_score_clamped(self):
+        """Scores outside 0-100 are clamped."""
+        assessments = {
+            "too_high": {"score": 150},
+            "too_low": {"score": -10},
+        }
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        assert result["Too High"]["score"] == 100.0
+        assert result["Too Low"]["score"] == 0.0
+        # Verify pass_rate is also clamped
+        assert result["Too High"]["detectors"]["review_assessment"]["pass_rate"] == 1.0
+        assert result["Too Low"]["detectors"]["review_assessment"]["pass_rate"] == 0.0
+
+    def test_assessment_in_objective_score(self):
+        """Assessment dimensions feed into compute_objective_score correctly."""
+        # Only assessed dimensions appear (unassessed with no findings excluded)
+        assessments = {"naming_quality": {"score": 50}}
+        result = compute_dimension_scores({}, {}, review_assessments=assessments)
+        score = compute_objective_score(result)
+        # Only 1 dimension present (naming_quality at 50%) → score = 50
+        assert score == pytest.approx(50.0, abs=0.2)
+
+    def test_assessment_dampened_weight(self):
+        """Assessment dimensions are dampened: effective_weight = tier * (checks / MIN_SAMPLE)."""
+        # Build a full-weight dimension alongside assessments
+        potentials = {"unused": MIN_SAMPLE}  # full weight: tier 1, sample_factor 1.0
+        # Set ALL default dimensions to 0 so we can predict the outcome
+        from desloppify.review import DEFAULT_DIMENSIONS
+        assessments = {d: {"score": 0} for d in DEFAULT_DIMENSIONS}
+        result = compute_dimension_scores({}, potentials, review_assessments=assessments)
+
+        # Import hygiene: tier=1, full weight -> effective_weight = 1.0
+        # Each assessment dim: tier=4, checks=10 -> effective_weight = 4 * (10/200) = 0.2
+        score = compute_objective_score(result)
+        expected_weight_import = 1.0 * min(1.0, MIN_SAMPLE / MIN_SAMPLE)
+        n = len(DEFAULT_DIMENSIONS)
+        expected_weight_assess = n * 4.0 * (ASSESSMENT_CHECKS / MIN_SAMPLE)
+        expected_score = (100.0 * expected_weight_import + 0.0 * expected_weight_assess) / (
+            expected_weight_import + expected_weight_assess
+        )
+        assert score == pytest.approx(round(expected_score, 1), abs=0.2)
+
+    def test_assessment_counts_open_review_findings(self):
+        """Open review findings with matching dimension are counted as issues."""
+        f1 = _finding("review", status="open", file="a.py")
+        f1["detail"] = {"dimension": "naming_quality"}
+        f2 = _finding("review", status="open", file="b.py")
+        f2["detail"] = {"dimension": "naming_quality"}
+        f3 = _finding("review", status="resolved", file="c.py")
+        f3["detail"] = {"dimension": "naming_quality"}
+        findings = _findings_dict(f1, f2, f3)
+        assessments = {"naming_quality": {"score": 70}}
+        result = compute_dimension_scores(findings, {}, review_assessments=assessments)
+        dim = result["Naming Quality"]
+        assert dim["issues"] == 2  # only the 2 open ones
+        assert dim["detectors"]["review_assessment"]["issues"] == 2
+
+    def test_assessment_ignores_non_review_findings(self):
+        """Smells findings with a dimension field do not count as assessment issues."""
+        f = _finding("smells", status="open", file="a.py")
+        f["detail"] = {"dimension": "naming_quality"}
+        findings = _findings_dict(f)
+        assessments = {"naming_quality": {"score": 80}}
+        result = compute_dimension_scores(findings, {}, review_assessments=assessments)
+        dim = result["Naming Quality"]
+        assert dim["issues"] == 0  # smells detector, not "review"
+
+    def test_compute_score_impact_returns_zero_for_assessment(self):
+        """compute_score_impact returns 0.0 for assessment-based dimensions."""
+        assessments = {"naming_quality": {"score": 50}}
+        dim_scores = compute_dimension_scores({}, {}, review_assessments=assessments)
+        potentials = {}
+        # "review_assessment" is not a detector in static DIMENSIONS
+        impact = compute_score_impact(dim_scores, potentials, "review_assessment", 5)
+        assert impact == 0.0
+
+    def test_audit_coverage_dimension_exists(self):
+        """Verify 'Audit coverage' dimension exists with correct detectors and tier."""
+        audit_dim = None
+        for dim in DIMENSIONS:
+            if dim.name == "Audit coverage":
+                audit_dim = dim
+                break
+        assert audit_dim is not None, "Audit coverage dimension not found"
+        assert audit_dim.detectors == ["subjective_review"]
+        assert audit_dim.tier == 4
+
+
 class TestConstants:
     def test_confidence_weights_keys(self):
         assert set(CONFIDENCE_WEIGHTS.keys()) == {"high", "medium", "low"}
@@ -677,3 +907,57 @@ class TestConstants:
             for det in dim.detectors:
                 assert det not in seen, f"Detector {det} appears in multiple dimensions"
                 seen.add(det)
+
+
+# ===================================================================
+# Assessment dimension name collision
+# ===================================================================
+
+class TestAssessmentDimensionCollision:
+    """Ensure assessment dimensions don't overwrite mechanical dimensions."""
+
+    def test_dependency_health_collision_suffixed(self):
+        """Assessment 'dependency_health' → 'Dependency Health' collides with
+        mechanical 'Dependency health'. Should be suffixed with (review)."""
+        findings = _findings_dict(
+            _finding("cycles", status="open", confidence="high"),
+        )
+        potentials = {"cycles": 10}
+        assessments = {"dependency_health": {"score": 60}}
+        result = compute_dimension_scores(findings, potentials,
+                                          review_assessments=assessments)
+        # Mechanical dimension should exist
+        assert "Dependency health" in result
+        # Assessment should get the (review) suffix
+        assert "Dependency Health (review)" in result
+        # Both should have different data
+        assert result["Dependency health"]["detectors"].get("cycles")
+        assert result["Dependency Health (review)"]["detectors"].get("review_assessment")
+
+    def test_no_collision_no_suffix(self):
+        """When there's no collision, no suffix should be added."""
+        findings = {}
+        potentials = {}
+        assessments = {"naming_quality": {"score": 80}}
+        result = compute_dimension_scores(findings, potentials,
+                                          review_assessments=assessments)
+        assert "Naming Quality" in result
+        assert "Naming Quality (review)" not in result
+
+    def test_multiple_collisions(self):
+        """Multiple assessment dims that collide get suffixed independently."""
+        findings = _findings_dict(
+            _finding("cycles", status="open"),
+            _finding("test_coverage", status="open"),
+        )
+        potentials = {"cycles": 10, "test_coverage": 10}
+        assessments = {
+            "dependency_health": {"score": 50},
+            "test_health": {"score": 70},
+        }
+        result = compute_dimension_scores(findings, potentials,
+                                          review_assessments=assessments)
+        assert "Dependency health" in result
+        assert "Dependency Health (review)" in result
+        assert "Test health" in result
+        assert "Test Health (review)" in result

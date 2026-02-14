@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 
 from ..utils import c
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 # Detail keys to display, in order. Each entry is (key, label, formatter).
@@ -26,6 +26,7 @@ _DETAIL_DISPLAY = [
     ("direction", "direction", None),
     ("family", "family", None),
     ("patterns_used", "patterns", lambda v: ", ".join(v)),
+    ("related_files", "related files", lambda v: ", ".join(v[:5]) + (f" +{len(v)-5}" if len(v) > 5 else "")),
     ("review", "review", lambda v: v[:80]),
     ("majority", "majority", None),
     ("minority", "minority", None),
@@ -73,7 +74,9 @@ def cmd_show(args):
     pattern = args.pattern
 
     if chronic:
-        matches = [f for f in state["findings"].values()
+        from ..state import path_scoped_findings
+        scoped = path_scoped_findings(state["findings"], state.get("scan_path"))
+        matches = [f for f in scoped.values()
                    if f.get("reopen_count", 0) >= 2 and f["status"] == "open"]
         status_filter = "open"
         pattern = pattern or "<chronic>"
@@ -83,6 +86,10 @@ def cmd_show(args):
             return
         status_filter = getattr(args, "status", "open")
         matches = match_findings(state, pattern, status_filter)
+        # Filter to scan path scope
+        from ..state import path_scoped_findings
+        scoped_ids = set(path_scoped_findings(state["findings"], state.get("scan_path")).keys())
+        matches = [f for f in matches if f["id"] in scoped_ids]
 
     if not matches:
         print(c(f"No {status_filter} findings matching: {pattern}", "yellow"))
@@ -92,7 +99,7 @@ def cmd_show(args):
 
     # Always write structured query file
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, lang=lang_name, command="show")
@@ -126,7 +133,8 @@ def cmd_show(args):
 
     for filepath, findings in shown_files:
         findings.sort(key=lambda f: (f["tier"], CONFIDENCE_ORDER.get(f["confidence"], 9)))
-        print(c(f"  {filepath}", "cyan") + c(f"  ({len(findings)} findings)", "dim"))
+        display_path = "Codebase-wide" if filepath == "." else filepath
+        print(c(f"  {display_path}", "cyan") + c(f"  ({len(findings)} findings)", "dim"))
 
         for f in findings:
             status_icon = {"open": "○", "fixed": "✓", "wontfix": "—", "false_positive": "✗",

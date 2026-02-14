@@ -50,7 +50,7 @@ def _resolve_lang_for_move(source_abs: str, args) -> str | None:
     """Resolve language for a move operation, from extension or --lang flag."""
     lang_name = _detect_lang_from_ext(source_abs)
     if not lang_name:
-        from ..cli import _resolve_lang
+        from ._helpers import _resolve_lang
         lang = _resolve_lang(args)
         if lang:
             lang_name = lang.name
@@ -279,7 +279,7 @@ def _cmd_move_dir(args, source_abs: str):
     # Detect language from directory contents or --lang
     lang_name = _detect_lang_from_dir(source_abs)
     if not lang_name:
-        from ..cli import _resolve_lang
+        from ._helpers import _resolve_lang
         lang = _resolve_lang(args)
         if lang:
             lang_name = lang.name

@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 
 from ..utils import LOC_COMPACT_THRESHOLD, c, get_area, print_table
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 def cmd_status(args):
@@ -98,6 +98,7 @@ def cmd_status(args):
                     [40, 22, 5, 6, 6, 6])
 
     _show_structural_areas(state)
+    _show_review_summary(state)
 
     # Focus suggestion (lowest-scoring dimension)
     if dim_scores:
@@ -105,7 +106,7 @@ def cmd_status(args):
 
     # Computed narrative headline
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, lang=lang_name, command="status")
@@ -113,11 +114,16 @@ def cmd_status(args):
         print(c(f"  → {narrative['headline']}", "cyan"))
         print()
 
-    ignores = state.get("config", {}).get("ignore", [])
+    ignores = args._config.get("ignore", [])
     if ignores:
         print(c(f"\n  Ignore list ({len(ignores)}):", "dim"))
         for p in ignores[:10]:
             print(c(f"    {p}", "dim"))
+
+    review_age = args._config.get("review_max_age_days", 30)
+    if review_age != 30:
+        label = "never" if review_age == 0 else f"{review_age} days"
+        print(c(f"  Review staleness: {label}", "dim"))
     print()
 
     _write_query({"command": "status", "score": score, "strict_score": strict_score,
@@ -141,14 +147,13 @@ def _show_dimension_table(dim_scores: dict):
     print(c(f"  {'Dimension':<22} {'Checks':>7}  {'Health':>6}  {'Strict':>6}  {'Bar':<{bar_len+2}} {'Tier'}", "dim"))
     print(c("  " + "─" * 76, "dim"))
 
-    # Find lowest score for focus arrow
+    # Find lowest score for focus arrow (includes assessment dimensions)
     lowest_name = None
     lowest_score = 101
-    for dim in DIMENSIONS:
-        ds = dim_scores.get(dim.name)
-        if ds and ds["score"] < lowest_score:
+    for name, ds in dim_scores.items():
+        if ds["score"] < lowest_score:
             lowest_score = ds["score"]
-            lowest_name = dim.name
+            lowest_name = name
 
     for dim in DIMENSIONS:
         ds = dim_scores.get(dim.name)
@@ -170,6 +175,30 @@ def _show_dimension_table(dim_scores: dict):
         checks_str = f"{checks:>7,}"
         print(f"  {dim.name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{dim.tier}{focus}")
 
+
+    # Assessment dimensions (not in DIMENSIONS list)
+    static_names = {d.name for d in DIMENSIONS}
+    assessment_dims = [(name, ds) for name, ds in sorted(dim_scores.items())
+                       if name not in static_names]
+    if assessment_dims:
+        print(c("  ── Review Dimensions ─────────────────────────────────────────", "dim"))
+        for name, ds in assessment_dims:
+            score_val = ds["score"]
+            strict_val = ds.get("strict", score_val)
+            tier = ds.get("tier", 4)
+
+            filled = round(score_val / 100 * bar_len)
+            if score_val >= 98:
+                bar = c("█" * filled + "░" * (bar_len - filled), "green")
+            elif score_val >= 93:
+                bar = c("█" * filled, "green") + c("░" * (bar_len - filled), "dim")
+            else:
+                bar = c("█" * filled, "yellow") + c("░" * (bar_len - filled), "dim")
+
+            focus = c(" ←", "yellow") if name == lowest_name else "  "
+            checks_str = f"{'—':>7}"
+            print(f"  {name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{tier}{focus}")
+    print(c("  Health = open penalized | Strict = open + wontfix penalized", "dim"))
     print()
 
 
@@ -185,16 +214,26 @@ def _show_focus_suggestion(dim_scores: dict, state: dict):
             lowest_issues = ds["issues"]
 
     if lowest_name and lowest_score < 100:
-        # Estimate impact
+        ds = dim_scores[lowest_name]
+        # Assessment dimensions have "review_assessment" as their only detector
+        is_assessment = "review_assessment" in ds.get("detectors", {})
+        if is_assessment:
+            suffix = ""
+            if lowest_issues:
+                suffix = f", {lowest_issues} review finding{'s' if lowest_issues != 1 else ''}"
+            print(c(f"  Focus: {lowest_name} ({lowest_score:.1f}%) — "
+                    f"re-review to improve{suffix}", "cyan"))
+            print()
+            return
+
+        # Mechanical dimension — estimate impact
         from ..scoring import merge_potentials, compute_score_impact
         potentials = merge_potentials(state.get("potentials", {}))
-        # Find the detector with most issues in this dimension
         from ..scoring import DIMENSIONS
         target_dim = next((d for d in DIMENSIONS if d.name == lowest_name), None)
         if target_dim:
             impact = 0.0
             for det in target_dim.detectors:
-                # Use the score impact calculation
                 impact = compute_score_impact(
                     {k: {"score": v["score"], "tier": v.get("tier", 3),
                           "detectors": v.get("detectors", {})}
@@ -256,4 +295,24 @@ def _show_structural_areas(state: dict):
     print(c("    1. desloppify show <area> --status wontfix --top 50", "dim"))
     print(c("    2. Create tasks/<date>-<area-name>.md with decomposition plan", "dim"))
     print(c("    3. Farm each task doc to a sub-agent for implementation", "dim"))
+    print()
+
+
+def _show_review_summary(state: dict):
+    """Show review findings summary if any exist."""
+    findings = state.get("findings", {})
+    review_open = [f for f in findings.values()
+                   if f.get("status") == "open" and f.get("detector") == "review"]
+    if not review_open:
+        return
+    uninvestigated = sum(1 for f in review_open
+                         if not f.get("detail", {}).get("investigation"))
+    parts = [f"{len(review_open)} finding{'s' if len(review_open) != 1 else ''} open"]
+    if uninvestigated:
+        parts.append(f"{uninvestigated} uninvestigated")
+    print(c(f"  Review: {', '.join(parts)} — `desloppify issues`", "cyan"))
+    # Explain relationship between audit coverage dimension and review findings
+    dim_scores = state.get("dimension_scores", {})
+    if "Audit coverage" in dim_scores:
+        print(c("  Audit coverage tracks % of files reviewed; review findings track issues found.", "dim"))
     print()

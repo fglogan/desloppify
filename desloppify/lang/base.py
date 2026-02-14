@@ -101,6 +101,7 @@ class LangConfig:
     _zone_map: object = field(default=None, repr=False)  # FileZoneMap, set at scan time
     _dep_graph: object = field(default=None, repr=False)  # dep graph, set at scan time
     _review_cache: dict = field(default_factory=dict, repr=False)  # review cache, set before scan
+    _review_max_age_days: int = field(default=30, repr=False)  # from config, set before scan
     _complexity_map: dict = field(default_factory=dict, repr=False)  # file→score, set at scan time
 
 
@@ -502,11 +503,18 @@ def phase_test_coverage(path: Path, lang: LangConfig) -> tuple[list[Finding], di
 
 def phase_subjective_review(path: Path, lang: LangConfig) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect files missing subjective design review."""
-    from ..detectors.review_coverage import detect_review_coverage
+    from ..detectors.review_coverage import detect_review_coverage, detect_holistic_review_staleness
 
     zm = lang._zone_map
+    max_age = lang._review_max_age_days
     files = lang.file_finder(path) if lang.file_finder else []
-    entries, potential = detect_review_coverage(files, zm, lang._review_cache, lang.name)
+    entries, potential = detect_review_coverage(files, zm, lang._review_cache, lang.name,
+                                                max_age_days=max_age)
+
+    # Also check holistic review staleness
+    holistic_entries = detect_holistic_review_staleness(
+        lang._review_cache, total_files=len(files), max_age_days=max_age)
+    entries.extend(holistic_entries)
 
     results = []
     for e in entries:

@@ -34,7 +34,7 @@ DIMENSIONS = [
     Dimension("Dependency health",   4, ["cycles"]),
     Dimension("Test health",         4, ["test_coverage"]),
     Dimension("Security",            4, ["security"]),
-    Dimension("Design quality",      4, ["review", "subjective_review"]),
+    Dimension("Audit coverage",        4, ["subjective_review"]),
 ]
 
 TIER_WEIGHTS = {Tier.AUTO_FIX: 1, Tier.QUICK_FIX: 2, Tier.JUDGMENT: 3, Tier.MAJOR_REFACTOR: 4}
@@ -53,6 +53,19 @@ _EXCLUDED_ZONES = EXCLUDED_ZONE_VALUES
 
 # Security findings are only excluded in generated/vendor zones (secrets in tests are real risks)
 _SECURITY_EXCLUDED_ZONES = {"generated", "vendor"}
+
+# Holistic review scoring: findings with file="." and detail.holistic=True
+# bypass per-file caps and get a 10x weight multiplier.
+HOLISTIC_MULTIPLIER = 10.0
+HOLISTIC_POTENTIAL = 10
+
+# Number of checks per assessed review dimension (controls sample dampening).
+# Each assessment dimension gets this many checks, making:
+#   sample_factor = ASSESSMENT_CHECKS / MIN_SAMPLE
+#   effective_weight = tier_weight * sample_factor
+# This keeps individual assessment dimensions lightweight, but assessing more
+# dimensions increases total assessment weight proportionally.
+ASSESSMENT_CHECKS = 10
 
 # Statuses that count as failures
 _LENIENT_FAILURES = {"open"}
@@ -94,15 +107,24 @@ def _detector_pass_rate(
         # Group by file, cap per-file weight at 1.0
         # For test_coverage: use loc_weight from finding detail instead of confidence
         # so large untested files impact the score more than small ones.
+        # Holistic findings (file="." + detail.holistic=True) bypass per-file caps
+        # and get HOLISTIC_MULTIPLIER weight.
         use_loc_weight = (detector == "test_coverage")
         by_file: dict[str, float] = {}
         file_cap: dict[str, float] = {}  # per-file cap for loc_weight mode
+        holistic_sum = 0.0
         for f in findings.values():
             if f.get("detector") != detector:
                 continue
             if f.get("zone", "production") in excluded_zones:
                 continue
             if f["status"] in failure_set:
+                # Holistic findings: no per-file cap, 10x multiplier
+                if f.get("file") == "." and f.get("detail", {}).get("holistic"):
+                    weight = CONFIDENCE_WEIGHTS.get(f.get("confidence", "medium"), 0.7)
+                    holistic_sum += weight * HOLISTIC_MULTIPLIER
+                    issue_count += 1
+                    continue
                 if use_loc_weight:
                     weight = f.get("detail", {}).get("loc_weight", 1.0)
                 else:
@@ -122,6 +144,7 @@ def _detector_pass_rate(
                 min(w, file_cap.get(fk, w)) for fk, w in by_file.items())
         else:
             weighted_failures = sum(min(1.0, w) for w in by_file.values())
+        weighted_failures += holistic_sum
     else:
         weighted_failures = 0.0
         for f in findings.values():
@@ -143,13 +166,19 @@ def compute_dimension_scores(
     potentials: dict[str, int],
     *,
     strict: bool = False,
+    review_assessments: dict | None = None,
 ) -> dict[str, dict]:
     """Compute per-dimension scores from findings and potentials.
 
     Returns {dimension_name: {"score": float, "checks": int, "issues": int, "detectors": dict}}.
     Dimensions with no active detectors (all potentials = 0 or missing) are excluded.
+
+    If *review_assessments* is provided, each assessed dimension becomes a
+    first-class scoring dimension (tier 4) with score driven by the assessment,
+    not by findings.
     """
     results: dict[str, dict] = {}
+    failure_set = _STRICT_FAILURES if strict else _LENIENT_FAILURES
 
     for dim in DIMENSIONS:
         total_checks = 0
@@ -183,6 +212,78 @@ def compute_dimension_scores(
             "checks": total_checks,
             "issues": total_issues,
             "detectors": detector_detail,
+        }
+
+    # Append assessment dimensions — each one a first-class scoring dimension.
+    # Unassessed dimensions default to 0% (same as test coverage when no tests exist).
+    from .review import DEFAULT_DIMENSIONS
+    assessed = review_assessments or {}
+    existing_lower = {k.lower() for k in results}
+
+    for dim_name in DEFAULT_DIMENSIONS:
+        display = dim_name.replace("_", " ").title()
+        if display.lower() in existing_lower:
+            display = f"{display} (review)"
+
+        assessment = assessed.get(dim_name)
+
+        # Count open review findings for this dimension
+        issue_count = sum(
+            1 for f in findings.values()
+            if f.get("detector") == "review"
+            and f["status"] in failure_set
+            and f.get("detail", {}).get("dimension") == dim_name
+        )
+
+        # Skip unassessed dimensions with no open findings
+        if assessment is None and issue_count == 0:
+            continue
+
+        score = max(0, min(100, assessment.get("score", 0))) if assessment else 0.0
+        pass_rate = score / 100.0
+
+        results[display] = {
+            "score": round(float(score), 1),
+            "tier": 4,
+            "checks": ASSESSMENT_CHECKS,
+            "issues": issue_count,
+            "detectors": {"review_assessment": {
+                "potential": ASSESSMENT_CHECKS,
+                "pass_rate": round(pass_rate, 4),
+                "issues": issue_count,
+                "weighted_failures": round(ASSESSMENT_CHECKS * (1 - pass_rate), 4),
+            }},
+        }
+
+    # Also include any extra assessed dimensions not in DEFAULT_DIMENSIONS
+    for dim_name, assessment in assessed.items():
+        if dim_name in DEFAULT_DIMENSIONS:
+            continue
+        display = dim_name.replace("_", " ").title()
+        if display.lower() in existing_lower:
+            display = f"{display} (review)"
+        issue_count = sum(
+            1 for f in findings.values()
+            if f.get("detector") == "review"
+            and f["status"] in failure_set
+            and f.get("detail", {}).get("dimension") == dim_name
+        )
+        # Skip unassessed extras with no open findings (shouldn't happen but guard)
+        if issue_count == 0 and not assessment:
+            continue
+        score = max(0, min(100, assessment.get("score", 0)))
+        pass_rate = score / 100.0
+        results[display] = {
+            "score": round(float(score), 1),
+            "tier": 4,
+            "checks": ASSESSMENT_CHECKS,
+            "issues": issue_count,
+            "detectors": {"review_assessment": {
+                "potential": ASSESSMENT_CHECKS,
+                "pass_rate": round(pass_rate, 4),
+                "issues": issue_count,
+                "weighted_failures": round(ASSESSMENT_CHECKS * (1 - pass_rate), 4),
+            }},
         }
 
     return results
@@ -223,7 +324,9 @@ def compute_score_impact(
 
     Returns estimated point increase in the objective score.
     """
-    # Find which dimension this detector belongs to
+    # Find which dimension this detector belongs to.
+    # Assessment-based dimensions (detector="review_assessment") have no entry
+    # in DIMENSIONS — score changes only via re-review, so impact is 0.
     target_dim = None
     for dim in DIMENSIONS:
         if detector in dim.detectors:

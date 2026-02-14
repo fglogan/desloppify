@@ -13,7 +13,11 @@ from .strategy import _compute_strategy
 
 
 def _count_open_by_detector(findings: dict) -> dict[str, int]:
-    """Count open findings by detector, merging structural sub-detectors."""
+    """Count open findings by detector, merging structural sub-detectors.
+
+    When detector is "review" and detail.holistic is True, also increments
+    "review_holistic" for separate holistic counting.
+    """
     by_det: dict[str, int] = {}
     for f in findings.values():
         if f["status"] != "open":
@@ -22,6 +26,16 @@ def _count_open_by_detector(findings: dict) -> dict[str, int]:
         if det in STRUCTURAL_MERGE:
             det = "structural"
         by_det[det] = by_det.get(det, 0) + 1
+        # Track holistic review findings separately
+        if det == "review" and f.get("detail", {}).get("holistic"):
+            by_det["review_holistic"] = by_det.get("review_holistic", 0) + 1
+    # Track uninvestigated review findings (only when review findings exist)
+    if by_det.get("review", 0) > 0:
+        by_det["review_uninvestigated"] = sum(
+            1 for f in findings.values()
+            if f.get("status") == "open" and f.get("detector") == "review"
+            and not f.get("detail", {}).get("investigation")
+        )
     return by_det
 
 
@@ -57,7 +71,8 @@ def _compute_badge_status() -> dict:
 
 def compute_narrative(state: dict, *, diff: dict | None = None,
                       lang: str | None = None,
-                      command: str | None = None) -> dict:
+                      command: str | None = None,
+                      config: dict | None = None) -> dict:
     """Compute structured narrative context from state data.
 
     Returns a dict with: phase, headline, dimensions, actions, tools, debt, milestone.
@@ -67,6 +82,7 @@ def compute_narrative(state: dict, *, diff: dict | None = None,
         diff: Scan diff (only present after a scan).
         lang: Language name (e.g. "python", "typescript").
         command: The command that triggered this (e.g. "scan", "fix", "resolve").
+        config: Project config dict (optional; loaded from disk if not provided).
     """
     raw_history = state.get("scan_history", [])
     # Filter history to current language to avoid mixing trajectories.
@@ -77,7 +93,8 @@ def compute_narrative(state: dict, *, diff: dict | None = None,
     stats = state.get("stats", {})
     obj_strict = state.get("objective_strict")
     obj_score = state.get("objective_score")
-    findings = state.get("findings", {})
+    from ..state import path_scoped_findings
+    findings = path_scoped_findings(state.get("findings", {}), state.get("scan_path"))
 
     by_det = _count_open_by_detector(findings)
     badge = _compute_badge_status()
@@ -93,7 +110,8 @@ def compute_narrative(state: dict, *, diff: dict | None = None,
                                  obj_strict, obj_score, stats, history,
                                  open_by_detector=by_det)
     reminders, updated_reminder_history = _compute_reminders(
-        state, lang, phase, debt, actions, dimensions, badge, command)
+        state, lang, phase, debt, actions, dimensions, badge, command,
+        config=config)
 
     return {
         "phase": phase,

@@ -3,7 +3,7 @@
 import sys
 
 from ..utils import c
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 def cmd_resolve(args):
@@ -17,6 +17,7 @@ def cmd_resolve(args):
     sp = _state_path(args)
     state = load_state(sp)
     prev_score = state.get("score", 0)
+    prev_obj = state.get("objective_score")
 
     all_resolved = []
     for pattern in args.patterns:
@@ -28,40 +29,71 @@ def cmd_resolve(args):
         return
 
     save_state(state, sp)
+
     print(c(f"\nResolved {len(all_resolved)} finding(s) as {args.status}:", "green"))
     for fid in all_resolved[:20]:
         print(f"  {fid}")
     if len(all_resolved) > 20:
         print(f"  ... and {len(all_resolved) - 20} more")
-    delta = state["score"] - prev_score
-    delta_str = f" ({'+' if delta > 0 else ''}{delta})" if delta else ""
-    print(f"\n  Score: {state['score']}/100{delta_str}" +
-          c(f"  (strict: {state.get('strict_score', 0)}/100)", "dim"))
+
+    new_obj = state.get("objective_score")
+    new_obj_strict = state.get("objective_strict")
+    if new_obj is not None:
+        delta = new_obj - (prev_obj or 0)
+        delta_str = f" ({'+' if delta > 0 else ''}{delta:.1f})" if abs(delta) >= 0.05 else ""
+        print(f"\n  Health: {new_obj:.1f}/100{delta_str}" +
+              c(f"  (strict: {new_obj_strict:.1f}/100)", "dim"))
+    else:
+        delta = state["score"] - prev_score
+        delta_str = f" ({'+' if delta > 0 else ''}{delta:.1f})" if abs(delta) >= 0.05 else ""
+        print(f"\n  Score: {state['score']:.1f}/100{delta_str}" +
+              c(f"  (strict: {state.get('strict_score', 0):.1f}/100)", "dim"))
+
+    # When resolving review findings with active assessments, the score
+    # is driven by assessments, not finding status — nudge re-review.
+    has_review = any(state["findings"].get(fid, {}).get("detector") == "review"
+                     for fid in all_resolved)
+    if has_review and state.get("review_assessments"):
+        print(c("  Score unchanged — re-run `desloppify review` to update assessment scores.", "yellow"))
 
     # Computed narrative: milestone + context for LLM
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, lang=lang_name, command="resolve")
     if narrative.get("milestone"):
         print(c(f"  → {narrative['milestone']}", "green"))
+
+    remaining = sum(1 for f in state["findings"].values()
+                    if f["status"] == "open" and f.get("detector") == "review")
+    if remaining > 0:
+        s = "s" if remaining != 1 else ""
+        print(c(f"\n  {remaining} review finding{s} remaining — run `desloppify issues`", "dim"))
     print()
 
     _write_query({"command": "resolve", "patterns": args.patterns, "status": args.status,
                   "resolved": all_resolved, "count": len(all_resolved),
                   "score": state["score"], "strict_score": state.get("strict_score", 0),
-                  "prev_score": prev_score,
+                  "objective_score": state.get("objective_score"),
+                  "objective_strict": state.get("objective_strict"),
+                  "prev_score": prev_score, "prev_objective": prev_obj,
                   "narrative": narrative})
 
 
 def cmd_ignore_pattern(args):
     """Add a pattern to the ignore list."""
-    from ..state import load_state, save_state, add_ignore
+    from ..config import add_ignore_pattern, save_config
+    from ..state import load_state, save_state, remove_ignored_findings
 
     sp = _state_path(args)
     state = load_state(sp)
-    removed = add_ignore(state, args.pattern)
+
+    config = args._config
+    add_ignore_pattern(config, args.pattern)
+    save_config(config)
+
+    removed = remove_ignored_findings(state, args.pattern)
     save_state(state, sp)
 
     print(c(f"Added ignore pattern: {args.pattern}", "green"))
@@ -72,7 +104,7 @@ def cmd_ignore_pattern(args):
     print()
 
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, lang=lang_name, command="ignore")

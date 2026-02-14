@@ -422,15 +422,15 @@ class TestRegistryIntegration:
     def test_subjective_review_in_registry(self):
         assert "subjective_review" in DETECTORS
         meta = DETECTORS["subjective_review"]
-        assert meta.dimension == "Design quality"
+        assert meta.dimension == "Audit coverage"
         assert meta.action_type == "manual_fix"
 
     def test_subjective_review_in_display_order(self):
         assert "subjective_review" in _DISPLAY_ORDER
 
     def test_subjective_review_in_scoring_dimensions(self):
-        design_dim = next(d for d in DIMENSIONS if d.name == "Design quality")
-        assert "subjective_review" in design_dim.detectors
+        review_dim = next(d for d in DIMENSIONS if d.name == "Audit coverage")
+        assert "subjective_review" in review_dim.detectors
 
     def test_subjective_review_is_file_based(self):
         assert "subjective_review" in _FILE_BASED_DETECTORS
@@ -459,3 +459,83 @@ class TestPhaseIntegration:
         cfg = PythonConfig()
         assert hasattr(cfg, "_review_cache")
         assert isinstance(cfg._review_cache, dict)
+
+
+# ── Part E: Holistic review staleness ─────────────────────────────
+
+
+class TestHolisticStalenessInCoverage:
+    """Holistic staleness entries emitted by detect_holistic_review_staleness."""
+
+    def test_no_holistic_cache_emits_unreviewed(self):
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        entries = detect_holistic_review_staleness({}, total_files=50)
+        assert len(entries) == 1
+        assert entries[0]["name"] == "holistic_unreviewed"
+        assert entries[0]["file"] == ""
+        assert entries[0]["tier"] == 4
+
+    def test_fresh_holistic_emits_nothing(self):
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cache = {"holistic": {"reviewed_at": now, "file_count_at_review": 50, "finding_count": 1}}
+        entries = detect_holistic_review_staleness(cache, total_files=50)
+        assert len(entries) == 0
+
+    def test_stale_holistic_emits_stale(self):
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat(timespec="seconds")
+        cache = {"holistic": {"reviewed_at": old, "file_count_at_review": 50, "finding_count": 1}}
+        entries = detect_holistic_review_staleness(cache, total_files=50)
+        assert len(entries) == 1
+        assert entries[0]["name"] == "holistic_stale"
+
+    def test_drifted_file_count_emits_stale(self):
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cache = {"holistic": {"reviewed_at": now, "file_count_at_review": 50, "finding_count": 1}}
+        entries = detect_holistic_review_staleness(cache, total_files=100)  # 100% drift
+        assert len(entries) == 1
+        assert entries[0]["name"] == "holistic_stale"
+        assert entries[0]["detail"]["reason"] == "drift"
+
+
+# ===========================================================================
+# max_age_days=0 ("never") behavior
+# ===========================================================================
+
+class TestReviewNeverExpires:
+    """When max_age_days=0, reviews should never be considered stale."""
+
+    def test_per_file_stale_skipped_with_zero(self):
+        """Old review with unchanged content should NOT be flagged when max_age_days=0."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fp = _make_file(tmpdir, "src/widget.ts", lines=40)
+            content = open(fp).read()
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+            # rel_path key must match what rel() returns for this filepath
+            rpath = os.path.relpath(fp, os.getcwd())
+            old_date = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat(timespec="seconds")
+            cache = {rpath: {"content_hash": content_hash, "reviewed_at": old_date}}
+
+            entries, _pot = detect_review_coverage(
+                [fp], FakeZoneMap(), cache, "typescript", max_age_days=0)
+
+            # Should have no stale entry
+            stale = [e for e in entries if e["name"] == "stale"]
+            assert len(stale) == 0
+
+    def test_holistic_never_expires_with_zero(self):
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        old = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat(timespec="seconds")
+        cache = {"holistic": {"reviewed_at": old, "file_count_at_review": 50, "finding_count": 1}}
+        entries = detect_holistic_review_staleness(cache, total_files=50, max_age_days=0)
+        assert len(entries) == 0
+
+    def test_holistic_unreviewed_still_flagged_with_zero(self):
+        """Even with max_age_days=0, missing holistic review should still be flagged."""
+        from desloppify.detectors.review_coverage import detect_holistic_review_staleness
+        entries = detect_holistic_review_staleness({}, total_files=50, max_age_days=0)
+        assert len(entries) == 1
+        assert entries[0]["name"] == "holistic_unreviewed"

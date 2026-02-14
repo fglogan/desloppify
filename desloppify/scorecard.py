@@ -333,11 +333,8 @@ def _draw_right_panel(
     table_bot: int,
 ):
     """Draw the right panel: two separate dimension tables side by side."""
-    font_header = _load_font(10, mono=True)
     font_row = _load_font(11, mono=True)
     font_strict = _load_font(9, mono=True)
-    rule_gap = _s(4)
-    rows_gap = _s(6)
     row_count = len(active_dims)
 
     # Split into 2 separate grids
@@ -350,7 +347,6 @@ def _draw_right_panel(
     grid_gap = _s(8)
     available_width = table_w
     grid_w = (available_width - grid_gap) // cols
-    total_grid_width = cols * grid_w + (cols - 1) * grid_gap
     grid_start_x = table_x1
 
     for c in range(cols):
@@ -516,19 +512,24 @@ def generate_scorecard(state: dict, output_path: str | Path) -> Path:
     return output_path
 
 
-def get_badge_config(args) -> tuple[Path | None, bool]:
+def get_badge_config(args, config: dict | None = None) -> tuple[Path | None, bool]:
     """Resolve badge output path and whether badge generation is disabled.
 
-    Returns (output_path, disabled). Checks CLI args, then env vars.
+    Returns (output_path, disabled). Checks CLI args, then config, then env vars.
     """
-    disabled = getattr(args, "no_badge", False) or os.environ.get(
-        "DESLOPPIFY_NO_BADGE", ""
-    ).lower() in ("1", "true", "yes")
+    cfg = config or {}
+    disabled = getattr(args, "no_badge", False)
+    if not disabled:
+        disabled = not cfg.get("generate_scorecard", True)
+    if not disabled:
+        disabled = os.environ.get(
+            "DESLOPPIFY_NO_BADGE", ""
+        ).lower() in ("1", "true", "yes")
     if disabled:
         return None, True
-    path_str = getattr(args, "badge_path", None) or os.environ.get(
-        "DESLOPPIFY_BADGE_PATH", "scorecard.png"
-    )
+    path_str = (getattr(args, "badge_path", None)
+                or cfg.get("badge_path")
+                or os.environ.get("DESLOPPIFY_BADGE_PATH", "scorecard.png"))
     path = Path(path_str)
     if not path.is_absolute():
         path = PROJECT_ROOT / path

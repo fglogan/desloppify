@@ -33,7 +33,7 @@ class TestCmdDetect:
 
     def test_no_lang_exits(self, monkeypatch):
         """When no language is specified, cmd_detect should exit."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
         monkeypatch.setattr(cli_mod, "_resolve_lang", lambda args: None)
 
         class FakeArgs:
@@ -48,7 +48,7 @@ class TestCmdDetect:
 
     def test_unknown_detector_exits(self, monkeypatch):
         """When detector name is invalid for the language, should exit."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
 
         class FakeLang:
             name = "typescript"
@@ -69,7 +69,7 @@ class TestCmdDetect:
 
     def test_valid_detector_dispatches(self, monkeypatch):
         """When detector is valid, it should be called."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
 
         calls = []
 
@@ -91,7 +91,7 @@ class TestCmdDetect:
 
     def test_large_threshold_default(self, monkeypatch):
         """When detector is 'large' and threshold is None, use lang.large_threshold."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
 
         captured_args = []
 
@@ -114,7 +114,7 @@ class TestCmdDetect:
 
     def test_dupes_threshold_default(self, monkeypatch):
         """When detector is 'dupes' and threshold is None, default to 0.8."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
 
         captured_args = []
 
@@ -137,7 +137,7 @@ class TestCmdDetect:
 
     def test_explicit_threshold_not_overridden(self, monkeypatch):
         """When user provides --threshold, it should not be overridden."""
-        import desloppify.cli as cli_mod
+        import desloppify.commands._helpers as cli_mod
 
         captured_args = []
 

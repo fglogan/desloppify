@@ -92,15 +92,10 @@ class TestZoneSet:
 
     def test_invalid_zone_value(self, monkeypatch, capsys):
         """Setting an invalid zone value should print an error."""
-        import desloppify.state as state_mod
-        from desloppify.commands import zone_cmd
-
-        monkeypatch.setattr(zone_cmd, "_state_path", lambda a: "/tmp/fake.json")
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: {
-            "findings": {}, "score": 0, "config": {},
-        })
+        fake_config = {"zone_overrides": {}}
 
         class FakeArgs:
+            _config = fake_config
             zone_path = "src/foo.ts"
             zone_value = "invalid_zone"
             lang = None
@@ -111,18 +106,15 @@ class TestZoneSet:
         assert "Invalid zone" in out
 
     def test_valid_zone_value_saves(self, monkeypatch, capsys):
-        """Setting a valid zone value should save state."""
-        import desloppify.state as state_mod
-        from desloppify.commands import zone_cmd
+        """Setting a valid zone value should save config."""
+        import desloppify.config as config_mod
 
         saved = []
-        fake_state = {"findings": {}, "score": 0, "config": {}}
-
-        monkeypatch.setattr(zone_cmd, "_state_path", lambda a: "/tmp/fake.json")
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
-        monkeypatch.setattr(state_mod, "save_state", lambda s, sp: saved.append(s))
+        fake_config = {"zone_overrides": {}}
+        monkeypatch.setattr(config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg)))
 
         class FakeArgs:
+            _config = fake_config
             zone_path = "src/foo.ts"
             zone_value = "test"
             lang = None
@@ -133,7 +125,7 @@ class TestZoneSet:
         assert "src/foo.ts" in out
         assert "test" in out
         assert len(saved) == 1
-        assert saved[0]["config"]["zone_overrides"]["src/foo.ts"] == "test"
+        assert saved[0]["zone_overrides"]["src/foo.ts"] == "test"
 
 
 # ---------------------------------------------------------------------------
@@ -144,20 +136,14 @@ class TestZoneClear:
     """_zone_clear removes zone overrides."""
 
     def test_clear_existing_override(self, monkeypatch, capsys):
-        import desloppify.state as state_mod
-        from desloppify.commands import zone_cmd
+        import desloppify.config as config_mod
 
         saved = []
-        fake_state = {
-            "findings": {}, "score": 0,
-            "config": {"zone_overrides": {"src/foo.ts": "test"}},
-        }
-
-        monkeypatch.setattr(zone_cmd, "_state_path", lambda a: "/tmp/fake.json")
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
-        monkeypatch.setattr(state_mod, "save_state", lambda s, sp: saved.append(s))
+        fake_config = {"zone_overrides": {"src/foo.ts": "test"}}
+        monkeypatch.setattr(config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg)))
 
         class FakeArgs:
+            _config = fake_config
             zone_path = "src/foo.ts"
             lang = None
             path = "."
@@ -166,18 +152,13 @@ class TestZoneClear:
         out = capsys.readouterr().out
         assert "Cleared" in out
         assert len(saved) == 1
-        assert "src/foo.ts" not in saved[0]["config"]["zone_overrides"]
+        assert "src/foo.ts" not in fake_config["zone_overrides"]
 
     def test_clear_nonexistent_override(self, monkeypatch, capsys):
-        import desloppify.state as state_mod
-        from desloppify.commands import zone_cmd
-
-        fake_state = {"findings": {}, "score": 0, "config": {"zone_overrides": {}}}
-
-        monkeypatch.setattr(zone_cmd, "_state_path", lambda a: "/tmp/fake.json")
-        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        fake_config = {"zone_overrides": {}}
 
         class FakeArgs:
+            _config = fake_config
             zone_path = "src/bar.ts"
             lang = None
             path = "."

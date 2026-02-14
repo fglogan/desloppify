@@ -1,61 +1,10 @@
 """CLI entry point: argparse, subcommand routing, shared helpers."""
 
 import argparse
-import json
 import sys
-from pathlib import Path
 
-from .state import _json_default
+from .commands._helpers import _state_path, _resolve_lang
 from .utils import DEFAULT_PATH, PROJECT_ROOT
-
-
-QUERY_FILE = PROJECT_ROOT / ".desloppify" / "query.json"
-
-
-def _write_query(data: dict):
-    """Write structured query output to .desloppify/query.json.
-
-    Every query command calls this so the LLM can always Read the file
-    instead of parsing terminal output.
-    """
-    try:
-        from .utils import safe_write_text
-        safe_write_text(QUERY_FILE, json.dumps(data, indent=2, default=_json_default) + "\n")
-        print(f"  \u2192 query.json updated", file=sys.stderr)
-    except OSError as e:
-        print(f"  \u26a0 Could not write query.json: {e}", file=sys.stderr)
-
-
-def _state_path(args) -> Path | None:
-    """Get state file path from args, or None for default."""
-    p = getattr(args, "state", None)
-    if p:
-        return Path(p)
-    # Per-language state files when --lang is explicit
-    lang_name = getattr(args, "lang", None)
-    if lang_name:
-        return PROJECT_ROOT / ".desloppify" / f"state-{lang_name}.json"
-    return None
-
-
-def _resolve_lang(args):
-    """Resolve the language config from args, with auto-detection fallback."""
-    lang_name = getattr(args, "lang", None)
-    if lang_name is None:
-        from .lang import auto_detect_lang
-        from .utils import PROJECT_ROOT
-        lang_name = auto_detect_lang(PROJECT_ROOT)
-    if lang_name is None:
-        return None
-    from .lang import get_lang
-    try:
-        return get_lang(lang_name)
-    except ValueError as e:
-        from .utils import c
-        print(c(f"  {e}", "red"), file=sys.stderr)
-        print(c(f"  Hint: use --lang to select manually (e.g. --lang python)", "dim"),
-              file=sys.stderr)
-        sys.exit(1)
 
 
 from .registry import detector_names as _detector_names
@@ -74,6 +23,7 @@ workflow:
   zone set <file> <zone>        Override zone for a file
   review --prepare              Prepare files for AI design review
   review --import FILE          Import review findings from JSON
+  issues                        Review findings work queue
   plan                          Generate prioritized markdown plan
 
 examples:
@@ -162,7 +112,11 @@ def create_parser() -> argparse.ArgumentParser:
     p_ignore.add_argument("pattern", help="File path, glob, or detector::prefix")
     p_ignore.add_argument("--state", type=str, default=None)
 
-    p_fix = sub.add_parser("fix", help="Auto-fix mechanical issues")
+    p_fix = sub.add_parser("fix", help="Auto-fix mechanical issues",
+                           epilog="fixers (typescript): unused-imports, unused-vars, unused-params, "
+                                  "dead-exports, debug-logs, dead-useeffect, empty-if-chain\n"
+                                  "fixers (python): none yet\n"
+                                  "special: review — prepare structured review data")
     p_fix.add_argument("fixer", type=str, help="What to fix")
     p_fix.add_argument("--path", type=str, default=None)
     p_fix.add_argument("--state", type=str, default=None)
@@ -184,7 +138,7 @@ def create_parser() -> argparse.ArgumentParser:
     p_detect.add_argument("--top", type=int, default=20)
     p_detect.add_argument("--path", type=str, default=None)
     p_detect.add_argument("--json", action="store_true")
-    p_detect.add_argument("--fix", action="store_true", help="Auto-fix (logs only)")
+    p_detect.add_argument("--fix", action="store_true", help="Auto-fix detected issues (logs detector only)")
     p_detect.add_argument("--category", choices=["imports", "vars", "params", "all"], default="all",
                           help="Filter unused by category")
     p_detect.add_argument("--threshold", type=float, default=None,
@@ -203,14 +157,25 @@ def create_parser() -> argparse.ArgumentParser:
                           help="Prepare review data (output to query.json)")
     p_review.add_argument("--import", dest="import_file", type=str, metavar="FILE",
                           help="Import review findings from JSON file")
-    p_review.add_argument("--max-age", type=int, default=30,
-                          help="Staleness threshold in days (default: 30)")
+    p_review.add_argument("--max-age", type=int, default=None,
+                          help="Staleness threshold in days (default: from config, or 30)")
     p_review.add_argument("--max-files", type=int, default=50,
                           help="Maximum files to evaluate (default: 50)")
     p_review.add_argument("--refresh", action="store_true",
                           help="Force re-evaluate everything (ignore cache)")
     p_review.add_argument("--dimensions", type=str, default=None,
                           help="Comma-separated dimensions to evaluate")
+    p_review.add_argument("--holistic", action="store_true",
+                          help="Prepare/import holistic codebase-wide review")
+
+    p_issues = sub.add_parser("issues", help="Review findings work queue")
+    p_issues.add_argument("--state", type=str, default=None)
+    issues_sub = p_issues.add_subparsers(dest="issues_action")
+    iss_show = issues_sub.add_parser("show", help="Show issue details")
+    iss_show.add_argument("number", type=int)
+    iss_update = issues_sub.add_parser("update", help="Add investigation to an issue")
+    iss_update.add_argument("number", type=int)
+    iss_update.add_argument("--file", type=str, required=True)
 
     p_zone = sub.add_parser("zone", help="Show/set/clear zone classifications")
     p_zone.add_argument("--path", type=str, default=None)
@@ -223,15 +188,24 @@ def create_parser() -> argparse.ArgumentParser:
     z_clear = zone_sub.add_parser("clear", help="Remove zone override for a file")
     z_clear.add_argument("zone_path", type=str, help="Relative file path")
 
+    p_config = sub.add_parser("config", help="Show/set/unset project configuration")
+    config_sub = p_config.add_subparsers(dest="config_action")
+    config_sub.add_parser("show", help="Show all config values")
+    c_set = config_sub.add_parser("set", help="Set a config value")
+    c_set.add_argument("config_key", type=str, help="Config key name")
+    c_set.add_argument("config_value", type=str, help="Value to set")
+    c_unset = config_sub.add_parser("unset", help="Reset a config key to default")
+    c_unset.add_argument("config_key", type=str, help="Config key name")
+
     return parser
 
 
-def _apply_persisted_exclusions(args, state: dict):
+def _apply_persisted_exclusions(args, config: dict):
     """Merge CLI --exclude with persisted config.exclude, set on utils global."""
     from .utils import set_exclusions, c
 
     cli_exclusions = getattr(args, "exclude", None) or []
-    persisted = state.get("config", {}).get("exclude", [])
+    persisted = config.get("exclude", [])
     combined = list(cli_exclusions) + [e for e in persisted if e not in cli_exclusions]
     if combined:
         set_exclusions(combined)
@@ -239,7 +213,7 @@ def _apply_persisted_exclusions(args, state: dict):
         if cli_exclusions:
             print(c(f"  Excluding: {', '.join(combined)}", "dim"), file=sys.stderr)
         else:
-            print(c(f"  Excluding (from state): {', '.join(combined)}", "dim"), file=sys.stderr)
+            print(c(f"  Excluding (from config): {', '.join(combined)}", "dim"), file=sys.stderr)
 
 
 def main():
@@ -262,11 +236,15 @@ def main():
         else:
             args.path = str(DEFAULT_PATH)
 
-    # Load state once and apply exclusions before any command runs
+    # Load config and state, apply exclusions before any command runs
+    from .config import load_config
+    config = load_config()
+    args._config = config
+
     sp = _state_path(args)
     from .state import load_state
     state = load_state(sp)
-    _apply_persisted_exclusions(args, state)
+    _apply_persisted_exclusions(args, config)
     args._preloaded_state = state
     args._state_path = sp
 
@@ -308,6 +286,12 @@ def main():
     elif args.command == "review":
         from .commands.review_cmd import cmd_review
         commands["review"] = cmd_review
+    elif args.command == "issues":
+        from .commands.issues_cmd import cmd_issues
+        commands["issues"] = cmd_issues
+    elif args.command == "config":
+        from .commands.config_cmd import cmd_config
+        commands["config"] = cmd_config
 
     try:
         commands[args.command](args)

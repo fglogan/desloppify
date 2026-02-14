@@ -3,7 +3,7 @@
 import json
 
 from ..utils import c
-from ..cli import _state_path, _write_query
+from ._helpers import _state_path, _write_query
 
 
 def cmd_next(args):
@@ -22,14 +22,14 @@ def cmd_next(args):
     tier = getattr(args, "tier", None)
     count = getattr(args, "count", 1) or 1
 
-    items = get_next_items(state, tier, count)
+    items = get_next_items(state, tier, count, scan_path=state.get("scan_path"))
     if not items:
         print(c("Nothing to do! Score: 100/100", "green"))
         _write_query({"command": "next", "items": [], "score": state.get("score", 0)})
         return
 
     from ..narrative import compute_narrative
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
     lang = _resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(state, lang=lang_name, command="next")
@@ -94,4 +94,20 @@ def cmd_next(args):
         print(c("\n  Resolve with:", "dim"))
         print(f"    desloppify resolve fixed \"{item['id']}\" --note \"<what you did>\"")
         print(f"    desloppify resolve wontfix \"{item['id']}\" --note \"<why>\"")
+
+    # Review findings nudge — remind agent about the parallel work queue
+    from ..state import path_scoped_findings
+    scoped = path_scoped_findings(state["findings"], state.get("scan_path"))
+    open_review = [f for f in scoped.values()
+                   if f["status"] == "open" and f.get("detector") == "review"]
+    if open_review:
+        uninvestigated = sum(1 for f in open_review
+                             if not f.get("detail", {}).get("investigation"))
+        s = "s" if len(open_review) != 1 else ""
+        msg = f"\n  Also: {len(open_review)} review finding{s} open"
+        if uninvestigated > 0:
+            msg += f" ({uninvestigated} uninvestigated)"
+        msg += ". Run `desloppify issues` for the review work queue."
+        print(c(msg, "cyan"))
+
     print()

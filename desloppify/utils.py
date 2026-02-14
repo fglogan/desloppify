@@ -31,6 +31,15 @@ def set_exclusions(patterns: list[str]):
     _find_source_files_cached.cache_clear()
 
 
+def get_exclusions() -> tuple[str, ...]:
+    """Return current extra exclusion patterns.
+
+    Use this instead of accessing _extra_exclusions directly —
+    from-imports bind to the initial value and become stale after set_exclusions().
+    """
+    return _extra_exclusions
+
+
 # ── File content cache (opt-in, scan-scoped) ─────────────
 
 _file_cache: dict[str, str | None] = {}

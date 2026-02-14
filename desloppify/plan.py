@@ -137,10 +137,12 @@ def _plan_dimension_table(state: dict) -> list[str]:
         "|-----------|------|--------|--------|--------|--------|",
     ]
     from .scoring import DIMENSIONS
+    static_names: set[str] = set()
     for dim in DIMENSIONS:
         ds = dim_scores.get(dim.name)
         if not ds:
             continue
+        static_names.add(dim.name)
         checks = ds.get("checks", 0)
         issues = ds.get("issues", 0)
         score_val = ds.get("score", 100)
@@ -150,6 +152,21 @@ def _plan_dimension_table(state: dict) -> list[str]:
             f"| {bold}{dim.name}{bold} | T{dim.tier} | "
             f"{checks:,} | {issues} | {score_val:.1f}% | {strict_val:.1f}% |"
         )
+    # Append assessment dimensions (review-based) not in static DIMENSIONS
+    assessment_dims = [(name, ds) for name, ds in sorted(dim_scores.items())
+                       if name not in static_names]
+    if assessment_dims:
+        lines.append("| **Review Dimensions** | | | | | |")
+        for name, ds in assessment_dims:
+            issues = ds.get("issues", 0)
+            score_val = ds.get("score", 100)
+            strict_val = ds.get("strict", score_val)
+            tier = ds.get("tier", 4)
+            bold = "**" if score_val < 93 else ""
+            lines.append(
+                f"| {bold}{name}{bold} | T{tier} | "
+                f"— | {issues} | {score_val:.1f}% | {strict_val:.1f}% |"
+            )
     lines.append("")
     return lines
 
@@ -238,18 +255,23 @@ def generate_plan_md(state: dict) -> str:
     return "\n".join(lines)
 
 
-def get_next_item(state: dict, tier: int | None = None) -> dict | None:
+def get_next_item(state: dict, tier: int | None = None,
+                  scan_path: str | None = None) -> dict | None:
     """Get the highest-priority open finding."""
-    items = get_next_items(state, tier, 1)
+    items = get_next_items(state, tier, 1, scan_path=scan_path)
     return items[0] if items else None
 
 
-def get_next_items(state: dict, tier: int | None = None, count: int = 1) -> list[dict]:
+def get_next_items(state: dict, tier: int | None = None, count: int = 1,
+                   scan_path: str | None = None) -> list[dict]:
     """Get the N highest-priority open findings.
 
     Priority: tier (ascending) → confidence (high first) → detail count.
+    When scan_path is set, only returns findings within that path.
     """
-    open_findings = [f for f in state["findings"].values() if f["status"] == "open"]
+    from .state import path_scoped_findings
+    findings = path_scoped_findings(state["findings"], scan_path)
+    open_findings = [f for f in findings.values() if f["status"] == "open"]
     if tier is not None:
         open_findings = [f for f in open_findings if f["tier"] == tier]
     if not open_findings:

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from ..utils import c, rel
-from ..cli import _state_path
+from ._helpers import _state_path
 from ..zones import Zone
 
 
@@ -23,17 +23,17 @@ def cmd_zone(args):
 def _zone_show(args):
     """Show zone classifications for all scanned files."""
     from ..state import load_state
-    from ..cli import _resolve_lang
+    from ._helpers import _resolve_lang
 
     sp = _state_path(args)
-    state = load_state(sp)
+    load_state(sp)  # validate state file exists/loads
     lang = _resolve_lang(args)
     if not lang or not lang.file_finder:
         print(c("No language detected — run a scan first.", "red"))
         return
 
     path = Path(args.path)
-    overrides = state.get("config", {}).get("zone_overrides", {})
+    overrides = args._config.get("zone_overrides", {})
 
     from ..zones import FileZoneMap
     files = lang.file_finder(path)
@@ -68,10 +68,8 @@ def _zone_show(args):
 
 def _zone_set(args):
     """Set a zone override for a file."""
-    from ..state import load_state, save_state
+    from ..config import save_config
 
-    sp = _state_path(args)
-    state = load_state(sp)
     filepath = args.zone_path
     zone_value = args.zone_value
 
@@ -81,24 +79,23 @@ def _zone_set(args):
         print(c(f"Invalid zone: {zone_value}. Valid: {', '.join(sorted(valid_zones))}", "red"))
         return
 
-    state.setdefault("config", {}).setdefault("zone_overrides", {})[filepath] = zone_value
-    save_state(state, sp)
+    config = args._config
+    config.setdefault("zone_overrides", {})[filepath] = zone_value
+    save_config(config)
     print(f"  Set {filepath} → {zone_value}")
     print(c("  Run `desloppify scan` to apply.", "dim"))
 
 
 def _zone_clear(args):
     """Clear a zone override for a file."""
-    from ..state import load_state, save_state
+    from ..config import save_config
 
-    sp = _state_path(args)
-    state = load_state(sp)
     filepath = args.zone_path
 
-    overrides = state.get("config", {}).get("zone_overrides", {})
+    overrides = args._config.get("zone_overrides", {})
     if filepath in overrides:
         del overrides[filepath]
-        save_state(state, sp)
+        save_config(args._config)
         print(f"  Cleared override for {filepath}")
         print(c("  Run `desloppify scan` to apply.", "dim"))
     else:

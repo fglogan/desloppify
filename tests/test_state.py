@@ -93,7 +93,7 @@ class TestEmptyState:
         assert s["version"] == 1
         assert s["last_scan"] is None
         assert s["scan_count"] == 0
-        assert s["config"] == {"ignore": []}
+        assert "config" not in s  # config moved to config.json
         assert s["score"] == 0
         assert s["stats"] == {}
         assert s["findings"] == {}

@@ -85,6 +85,10 @@ def detect_review_coverage(
             })
             continue
 
+        # max_age_days == 0 means "never" — reviews don't expire
+        if max_age_days == 0:
+            continue
+
         # Check if review is stale (age expired)
         reviewed_at = cached.get("reviewed_at", "")
         if reviewed_at:
@@ -124,3 +128,76 @@ def detect_review_coverage(
             })
 
     return entries, potential
+
+
+def detect_holistic_review_staleness(
+    review_cache: dict,
+    total_files: int,
+    max_age_days: int = 30,
+) -> list[dict]:
+    """Detect whether a holistic codebase-wide review is needed.
+
+    Returns 0 or 1 entries:
+    - No holistic review on record → holistic_unreviewed
+    - Stale (>max_age_days) → holistic_stale
+    - File count drifted >20% since review → holistic_stale
+    """
+    holistic = review_cache.get("holistic")
+    if not holistic:
+        return [{
+            "file": "",
+            "name": "holistic_unreviewed",
+            "tier": 4,
+            "confidence": "low",
+            "summary": "No holistic codebase review on record — run `desloppify review --prepare --holistic`",
+            "detail": {"reason": "unreviewed"},
+        }]
+
+    # max_age_days == 0 means "never" — holistic reviews don't expire
+    if max_age_days == 0:
+        return []
+
+    now = datetime.now(timezone.utc)
+
+    # Check age
+    reviewed_at = holistic.get("reviewed_at", "")
+    if reviewed_at:
+        try:
+            reviewed = datetime.fromisoformat(reviewed_at)
+            age_days = (now - reviewed).days
+            if age_days > max_age_days:
+                return [{
+                    "file": "",
+                    "name": "holistic_stale",
+                    "tier": 4,
+                    "confidence": "low",
+                    "summary": f"Holistic review is stale ({age_days} days old) — re-review recommended",
+                    "detail": {"reason": "stale", "age_days": age_days},
+                }]
+        except (ValueError, TypeError):
+            return [{
+                "file": "",
+                "name": "holistic_stale",
+                "tier": 4,
+                "confidence": "low",
+                "summary": "Holistic review date unparseable — re-review recommended",
+                "detail": {"reason": "stale"},
+            }]
+
+    # Check file count drift
+    file_count_at_review = holistic.get("file_count_at_review", 0)
+    if file_count_at_review > 0 and total_files > 0:
+        drift = abs(total_files - file_count_at_review) / file_count_at_review
+        if drift > 0.20:
+            return [{
+                "file": "",
+                "name": "holistic_stale",
+                "tier": 4,
+                "confidence": "low",
+                "summary": (f"Codebase changed significantly since holistic review "
+                            f"({file_count_at_review}→{total_files} files) — re-review recommended"),
+                "detail": {"reason": "drift", "old_files": file_count_at_review,
+                           "new_files": total_files},
+            }]
+
+    return []

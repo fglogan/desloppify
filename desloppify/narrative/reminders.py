@@ -33,7 +33,8 @@ def _compute_fp_rates(findings: dict) -> dict[tuple[str, str], float]:
 def _compute_reminders(state: dict, lang: str | None,
                        phase: str, debt: dict, actions: list[dict],
                        dimensions: dict, badge: dict,
-                       command: str | None) -> list[dict]:
+                       command: str | None,
+                       config: dict | None = None) -> list[dict]:
     """Compute context-specific reminders, suppressing those shown too many times."""
     reminders = []
     obj_strict = state.get("objective_strict")
@@ -119,7 +120,8 @@ def _compute_reminders(state: dict, lang: str | None,
             })
 
     # 8. Zone-aware FP rate calibration reminders
-    fp_rates = _compute_fp_rates(state.get("findings", {}))
+    from ..state import path_scoped_findings
+    fp_rates = _compute_fp_rates(path_scoped_findings(state.get("findings", {}), state.get("scan_path")))
     for (detector, zone), rate in fp_rates.items():
         if rate > 0.3:
             pct = round(rate * 100)
@@ -129,6 +131,30 @@ def _compute_reminders(state: dict, lang: str | None,
                             f"Consider reviewing detection rules for {zone} files."),
                 "command": None,
             })
+
+    # 9a. Review findings pending — uninvestigated review findings need attention
+    from ..state import path_scoped_findings as _psf
+    open_review = [f for f in _psf(state.get("findings", {}), state.get("scan_path")).values()
+                   if f.get("status") == "open" and f.get("detector") == "review"]
+    if open_review:
+        uninvestigated = [f for f in open_review
+                          if not f.get("detail", {}).get("investigation")]
+        if uninvestigated:
+            reminders.append({
+                "type": "review_findings_pending",
+                "message": f"{len(uninvestigated)} review finding(s) need investigation. "
+                           f"Run `desloppify issues` to see the work queue.",
+                "command": "desloppify issues",
+            })
+
+    # 9b. Re-review needed after resolve when assessments exist
+    if command == "resolve" and state.get("review_assessments"):
+        reminders.append({
+            "type": "rereview_needed",
+            "message": "Score is driven by assessments \u2014 re-run "
+                       "`desloppify review --prepare` after fixing to update scores.",
+            "command": "desloppify review --prepare",
+        })
 
     # 9. Review not run — nudge when mechanical score is high but no review exists
     review_cache = state.get("review_cache", {})
@@ -143,7 +169,8 @@ def _compute_reminders(state: dict, lang: str | None,
             })
 
     # 10. Review staleness — nudge when oldest review is past max age
-    if review_cache.get("files"):
+    review_max_age = (config or {}).get("review_max_age_days", 30)
+    if review_max_age > 0 and review_cache.get("files"):
         from datetime import datetime as _dt, timezone as _tz
         try:
             oldest_str = min(
@@ -152,7 +179,7 @@ def _compute_reminders(state: dict, lang: str | None,
             )
             oldest = _dt.fromisoformat(oldest_str)
             age_days = (_dt.now(_tz.utc) - oldest).days
-            if age_days > 30:
+            if age_days > review_max_age:
                 reminders.append({
                     "type": "review_stale",
                     "message": (f"Design review is {age_days} days old \u2014 "
