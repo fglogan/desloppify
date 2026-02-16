@@ -2,7 +2,6 @@
 
 import hashlib
 
-import pytest
 
 from desloppify.detectors.base import FunctionInfo
 from desloppify.detectors.dupes import detect_duplicates

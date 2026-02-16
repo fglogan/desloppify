@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
-import pytest
 
 from desloppify.output.scorecard import (
     _SCALE,
     _get_package_version,
+    _scorecard_ignore_warning,
     _s,
     _score_color,
     get_badge_config,
@@ -98,6 +96,25 @@ class TestScaleHelper:
     def test_scale_factor_is_2(self):
         """Verify the module-level _SCALE constant is 2 for retina."""
         assert _SCALE == 2
+
+
+# ===========================================================================
+# _scorecard_ignore_warning
+# ===========================================================================
+
+class TestIgnoreWarning:
+    def test_none_when_no_ignored_findings(self):
+        assert _scorecard_ignore_warning({"ignore_integrity": {"ignored": 0, "suppressed_pct": 80.0}}) is None
+
+    def test_warning_when_suppression_medium(self):
+        msg = _scorecard_ignore_warning({"ignore_integrity": {"ignored": 10, "suppressed_pct": 35.0}})
+        assert msg is not None
+        assert "35%" in msg
+
+    def test_warning_when_suppression_high(self):
+        msg = _scorecard_ignore_warning({"ignore_integrity": {"ignored": 10, "suppressed_pct": 60.0}})
+        assert msg is not None
+        assert "high" in msg.lower()
 
 
 # ===========================================================================

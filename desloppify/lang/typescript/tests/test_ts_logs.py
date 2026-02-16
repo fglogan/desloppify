@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.logs — tagged console.log detection."""
 
-import os
 from pathlib import Path
 
 import pytest

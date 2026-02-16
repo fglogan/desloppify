@@ -1,7 +1,6 @@
 """Tests for desloppify.commands.detect — single detector runner."""
 
 import inspect
-import sys
 
 import pytest
 

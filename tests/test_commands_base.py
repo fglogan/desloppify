@@ -6,12 +6,9 @@ detector functions with the expected arguments when called.
 """
 
 import json
-from io import StringIO
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from desloppify.lang.commands_base import (
     make_cmd_complexity,

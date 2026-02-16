@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import patch
 
-import pytest
 
 from desloppify.plan import (
     CONFIDENCE_ORDER,

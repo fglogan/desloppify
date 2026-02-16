@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.props — prop interface bloat detection."""
 
-import os
 from pathlib import Path
 
 import pytest

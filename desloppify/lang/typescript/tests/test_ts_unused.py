@@ -4,7 +4,6 @@ Note: detect_unused depends on tsc (TypeScript compiler) and a real project setu
 so we test what is feasible: the helper function _categorize_unused and module imports.
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -33,8 +32,6 @@ def test_module_imports():
     from desloppify.lang.typescript.detectors.unused import (
         detect_unused,
         _categorize_unused,
-        TS6133_RE,
-        TS6192_RE,
     )
     assert callable(detect_unused)
     assert callable(_categorize_unused)

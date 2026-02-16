@@ -4,11 +4,12 @@ from desloppify.detectors.base import FunctionInfo
 from desloppify.detectors.signature import detect_signature_variance, _ALLOWLIST
 
 
-def _fn(name, file, params=None, line=1):
+def _fn(name, file, params=None, line=1, return_annotation=None):
     """Helper: create a FunctionInfo with given name, file, and params."""
     return FunctionInfo(
         name=name, file=file, line=line, end_line=line + 5,
         loc=5, body="pass", params=params or [],
+        return_annotation=return_annotation,
     )
 
 
@@ -62,6 +63,48 @@ def test_custom_min_occurrences():
     entries, _ = detect_signature_variance(functions, min_occurrences=2)
     assert len(entries) == 1
     assert entries[0]["name"] == "process"
+
+
+def test_detects_return_annotation_variance():
+    """Same param signature but different return annotations should be flagged."""
+    functions = [
+        _fn("process", "a.py", ["data"], return_annotation="list[str]"),
+        _fn("process", "b.py", ["data"], return_annotation="dict[str, int]"),
+        _fn("process", "c.py", ["data"], return_annotation="list[str]"),
+    ]
+    entries, _ = detect_signature_variance(functions)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["has_return_variance"] is True
+    assert entry["return_signature_count"] == 2
+    assert entry["has_param_variance"] is False
+
+
+def test_missing_return_annotations_do_not_trigger_return_variance():
+    """Missing annotations are ignored for return-variance detection."""
+    functions = [
+        _fn("process", "a.py", ["data"], return_annotation="list[str]"),
+        _fn("process", "b.py", ["data"], return_annotation=None),
+        _fn("process", "c.py", ["data"], return_annotation="list[str]"),
+    ]
+    entries, _ = detect_signature_variance(functions)
+    assert entries == []
+
+
+def test_phase_pattern_grouping_detects_variance_for_private_phase_functions():
+    """_phase_* and phase_* functions are compared via the phase_* naming group."""
+    functions = [
+        _fn("_phase_unused", "lang/python/phases.py", ["path", "lang"],
+            return_annotation="tuple[list[dict], dict[str, int]]"),
+        _fn("_phase_smells", "lang/typescript/phases.py", ["path", "lang"],
+            return_annotation="tuple[list[Finding], dict[str, int]]"),
+        _fn("phase_dupes", "lang/base.py", ["path", "lang"],
+            return_annotation="tuple[list[Finding], dict[str, int]]"),
+    ]
+    entries, _ = detect_signature_variance(functions, min_occurrences=3)
+    phase_entries = [e for e in entries if e["name"] == "phase_*" and e["group_type"] == "pattern"]
+    assert len(phase_entries) == 1
+    assert phase_entries[0]["has_return_variance"] is True
 
 
 # ── Filtering rules ─────────────────────────────────────────

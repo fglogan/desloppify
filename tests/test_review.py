@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import textwrap
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -267,7 +265,6 @@ class TestSelectFilesForReview:
 
         mock_lang.file_finder = MagicMock(return_value=[str(real_file)])
         state = dict(empty_state)
-        rpath = str(real_file.relative_to(Path.cwd())) if real_file.is_relative_to(Path.cwd()) else str(real_file)
         # We need to patch rel() to return a stable path
         with patch("desloppify.review.selection.rel", return_value="cached.ts"):
             state["review_cache"] = {
@@ -517,8 +514,7 @@ class TestImportReviewFindings:
         # Second import with same findings
         import_review_findings(sample_findings_data, empty_state, "typescript")
         # Wontfix should NOT be auto-resolved (it's still in current findings)
-        wontfix = [f for f in empty_state["findings"].values()
-                    if f["status"] == "wontfix"]
+        assert any(f["status"] == "wontfix" for f in empty_state["findings"].values())
         # The finding still exists
         assert any("naming_quality" in f["id"] for f in empty_state["findings"].values())
 
@@ -1357,9 +1353,8 @@ class TestHeadlineBugFix:
 
 class TestCmdReviewPrepare:
     def test_do_prepare_writes_query_json(self, mock_lang_with_zones, empty_state, tmp_path):
-        from desloppify.commands.review_cmd import _do_prepare, _setup_lang
+        from desloppify.commands.review_cmd import _do_prepare
         from unittest.mock import patch, MagicMock
-        import json
 
         src = tmp_path / "src"
         src.mkdir()
@@ -1417,6 +1412,66 @@ class TestCmdReviewPrepare:
 
         assert saved["sp"] == "fake_sp"
         assert len(empty_state["findings"]) == 1
+
+    def test_do_import_blocks_large_assessment_swing_without_findings(self, empty_state, tmp_path):
+        from desloppify.commands.review_cmd import _do_import
+        from unittest.mock import MagicMock
+
+        empty_state["subjective_assessments"] = {
+            "naming_quality": {"score": 90, "source": "per_file", "assessed_at": "2026-02-01T00:00:00Z"},
+            "logic_clarity": {"score": 90, "source": "per_file", "assessed_at": "2026-02-01T00:00:00Z"},
+        }
+        payload = {
+            "assessments": {"naming_quality": 40, "logic_clarity": 40},
+            "findings": [],
+        }
+        findings_file = tmp_path / "findings_integrity_block.json"
+        findings_file.write_text(json.dumps(payload))
+
+        lang = MagicMock()
+        lang.name = "typescript"
+
+        with pytest.raises(SystemExit):
+            _do_import(str(findings_file), empty_state, lang, "sp")
+
+    def test_do_import_allows_override_with_note(self, empty_state, tmp_path):
+        from desloppify.commands.review_cmd import _do_import
+        from unittest.mock import patch, MagicMock
+
+        empty_state["subjective_assessments"] = {
+            "naming_quality": {"score": 90, "source": "per_file", "assessed_at": "2026-02-01T00:00:00Z"},
+            "logic_clarity": {"score": 90, "source": "per_file", "assessed_at": "2026-02-01T00:00:00Z"},
+        }
+        payload = {
+            "assessments": {"naming_quality": 40, "logic_clarity": 40},
+            "findings": [],
+        }
+        findings_file = tmp_path / "findings_integrity_override.json"
+        findings_file.write_text(json.dumps(payload))
+
+        saved = {}
+
+        def mock_save(state, sp):
+            saved["state"] = state
+            saved["sp"] = sp
+
+        lang = MagicMock()
+        lang.name = "typescript"
+
+        with patch("desloppify.state.save_state", mock_save):
+            _do_import(
+                str(findings_file),
+                empty_state,
+                lang,
+                "fake_sp",
+                assessment_override=True,
+                assessment_note="Manual calibration approved",
+            )
+
+        assert saved["sp"] == "fake_sp"
+        assert empty_state["subjective_assessments"]["naming_quality"]["score"] == 40
+        audit = empty_state.get("assessment_import_audit", [])
+        assert audit and audit[-1]["override_used"] is True
 
     def test_do_import_rejects_nonexistent_file(self, empty_state):
         from desloppify.commands.review_cmd import _do_import
@@ -1716,7 +1771,7 @@ class TestAutoResolveOnReImport:
                  "identifier": "x", "summary": "bad name", "confidence": "high"},
             ],
         }
-        diff2 = import_review_findings(data2, state, "typescript")
+        import_review_findings(data2, state, "typescript")
         # The comment_quality finding should be auto-resolved
         resolved = [f for f in state["findings"].values()
                     if f["status"] == "auto_resolved"

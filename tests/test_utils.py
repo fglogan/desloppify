@@ -1,10 +1,8 @@
 """Tests for desloppify.utils — paths, exclusions, file discovery, grep, hashing."""
 
 import os
-import textwrap
 from pathlib import Path
 
-import pytest
 
 import desloppify.utils as utils_mod
 from desloppify.utils import (

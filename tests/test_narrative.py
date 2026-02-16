@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from desloppify.narrative import (
     STRUCTURAL_MERGE,
@@ -663,6 +662,30 @@ class TestComputeReminders:
         )
         reminder_types = [r["type"] for r in reminders]
         assert "rescan_needed" not in reminder_types
+
+    def test_ignore_suppression_reminder_when_high(self):
+        state = {
+            "strict_score": 50.0,
+            "ignore_integrity": {"ignored": 12, "suppressed_pct": 42.0},
+        }
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {},
+            [], {}, {}, "scan",
+        )
+        reminder_types = [r["type"] for r in reminders]
+        assert "ignore_suppression_high" in reminder_types
+
+    def test_no_ignore_suppression_reminder_when_low(self):
+        state = {
+            "strict_score": 50.0,
+            "ignore_integrity": {"ignored": 2, "suppressed_pct": 12.0},
+        }
+        reminders, _ = _compute_reminders(
+            state, "typescript", "middle_grind", {},
+            [], {}, {}, "scan",
+        )
+        reminder_types = [r["type"] for r in reminders]
+        assert "ignore_suppression_high" not in reminder_types
 
     def test_wontfix_growing_reminder(self):
         state = {"strict_score": 50.0}

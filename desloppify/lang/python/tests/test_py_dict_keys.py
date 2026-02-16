@@ -3,7 +3,6 @@
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from desloppify.lang.python.detectors.dict_keys import (
     detect_dict_key_flow,

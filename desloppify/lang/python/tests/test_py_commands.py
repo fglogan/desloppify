@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.python.commands — command registry."""
 
-import pytest
 
 from desloppify.lang.python.commands import get_detect_commands
 

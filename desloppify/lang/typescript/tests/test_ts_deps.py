@@ -1,7 +1,6 @@
 """Tests for desloppify.lang.typescript.detectors.deps — dependency graph and import analysis."""
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -314,7 +313,7 @@ class TestTsconfigPaths:
     def test_cache_keyed_by_root(self, tmp_path):
         """Cache returns same result on second call without re-parsing."""
         from desloppify.lang.typescript.detectors.deps import (
-            _load_tsconfig_paths, _tsconfig_cache)
+            _load_tsconfig_paths)
         _write(tmp_path, "tsconfig.json", json.dumps({
             "compilerOptions": {"paths": {"@/*": ["./src/*"]}}
         }))

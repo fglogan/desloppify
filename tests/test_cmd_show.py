@@ -1,8 +1,12 @@
 """Tests for desloppify.commands.show — helper/formatting functions."""
 
-import pytest
 
-from desloppify.commands.show import _format_detail, _build_show_payload, _DETAIL_DISPLAY
+from desloppify.commands.show import (
+    _format_detail,
+    _build_show_payload,
+    _suppressed_match_estimate,
+    _DETAIL_DISPLAY,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +94,17 @@ class TestFormatDetail:
         assert "singleton" in pat_part
         assert "factory" in pat_part
 
+    def test_pattern_evidence_formatter(self):
+        parts = _format_detail({
+            "pattern_evidence": {
+                "useAutoSaveSettings": [{"file": "src/a.ts", "line": 12}],
+                "useToolSettings": [{"file": "src/b.ts", "line": 9}, {"file": "src/c.ts", "line": 30}],
+            }
+        })
+        ev_part = [p for p in parts if p.startswith("evidence:")][0]
+        assert "useAutoSaveSettings:1 file(s)" in ev_part
+        assert "useToolSettings:2 file(s)" in ev_part
+
     def test_outliers_truncated(self):
         parts = _format_detail({"outliers": ["a", "b", "c", "d", "e", "f", "g"]})
         out_part = [p for p in parts if p.startswith("outliers:")][0]
@@ -118,6 +133,25 @@ class TestBuildShowPayload:
         assert result["status_filter"] == "open"
         assert result["summary"]["files"] == 0
         assert result["by_file"] == {}
+
+
+class TestSuppressedMatchEstimate:
+    def _make_finding(self, fid, *, file="a.ts", detector="unused",
+                      tier=2, confidence="high"):
+        return {
+            "id": fid, "file": file, "detector": detector,
+            "tier": tier, "confidence": confidence,
+            "summary": f"Finding {fid}", "detail": {},
+        }
+
+    def test_detector_name(self):
+        assert _suppressed_match_estimate("smells", {"smells": 4}) == 4
+
+    def test_detector_prefix_pattern(self):
+        assert _suppressed_match_estimate("smells::*::x", {"smells": 7}) == 7
+
+    def test_unknown_pattern_returns_zero(self):
+        assert _suppressed_match_estimate("nope", {"smells": 3}) == 0
 
     def test_single_finding(self):
         findings = [self._make_finding("unused::a.ts::foo")]

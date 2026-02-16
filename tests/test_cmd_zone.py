@@ -1,11 +1,8 @@
 """Tests for desloppify.commands.zone_cmd — zone command helpers."""
 
-import inspect
 
-import pytest
 
 from desloppify.commands.zone_cmd import cmd_zone, _zone_set, _zone_clear, _zone_show
-from desloppify.zones import Zone
 
 
 # ---------------------------------------------------------------------------

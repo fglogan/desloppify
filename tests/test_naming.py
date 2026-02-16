@@ -2,7 +2,6 @@
 
 import os
 
-import pytest
 
 from desloppify.detectors.naming import _classify_convention, detect_naming_inconsistencies
 

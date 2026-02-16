@@ -10,6 +10,7 @@ from desloppify.state import (
     _empty_state,
     _upsert_findings,
     apply_finding_noise_budget,
+    get_strict_all_detected_score,
     load_state,
     make_finding,
     resolve_finding_noise_budget,
@@ -297,7 +298,19 @@ class TestUpsertFindings:
 
     def _call(self, existing, current, *, ignore=None, lang=None):
         now = "2025-06-01T00:00:00+00:00"
-        return _upsert_findings(existing, current, ignore or [], now, lang=lang)
+        (
+            ids,
+            new,
+            reopened,
+            by_det,
+            ignored,
+            _ignored_by_detector,
+            _ignored_by_tier,
+            _ignored_findings,
+        ) = _upsert_findings(
+            existing, current, ignore or [], now, lang=lang
+        )
+        return ids, new, reopened, by_det, ignored
 
     # -- new findings --
 
@@ -520,8 +533,8 @@ class TestWontfixAutoResolution:
                 detector="test_coverage", file=f"mod{i}.py")
             for i in range(2, 4)
         ]
-        diff = merge_scan(st, current, lang="python",
-                          potentials={"test_coverage": 50})
+        merge_scan(st, current, lang="python",
+                   potentials={"test_coverage": 50})
         # The 2 wontfix findings should be auto-resolved
         assert st["findings"]["test_coverage::mod0.py::untested_module"]["status"] == "auto_resolved"
         assert st["findings"]["test_coverage::mod1.py::untested_module"]["status"] == "auto_resolved"
@@ -532,7 +545,7 @@ class TestWontfixAutoResolution:
     def test_empty_potentials_dict_not_treated_as_none(self):
         """Empty potentials {} means 'scan ran but no detectors reported' —
         should not mark detectors suspect just because dict is falsy."""
-        from desloppify.state import merge_scan, _find_suspect_detectors
+        from desloppify.state import _find_suspect_detectors
         # Build a state with 3 open findings for a detector
         existing = {}
         for i in range(3):
@@ -630,14 +643,19 @@ class TestSuppressionAccounting:
         diff = merge_scan(st, findings, lang="python", ignore=["smells::*"], force_resolve=True)
 
         assert diff["ignored"] == 2
+        assert diff["ignored_by_detector"] == {"smells": 2}
+        assert diff["ignored_by_tier"] == {"T3": 2}
         assert diff["raw_findings"] == 3
         assert diff["suppressed_pct"] == pytest.approx(66.7, abs=0.1)
+        assert len(st["ignore_integrity"]["ignored_findings"]) == 2
 
         hist = st["scan_history"][-1]
         assert hist["ignored"] == 2
+        assert hist["ignored_by_tier"] == {"T3": 2}
         assert hist["raw_findings"] == 3
         assert hist["suppressed_pct"] == pytest.approx(66.7, abs=0.1)
         assert hist["ignore_patterns"] == 1
+        assert isinstance(hist.get("tool_hash"), str)
 
     def test_suppression_metrics_aggregates_recent_history(self):
         from desloppify.state import merge_scan
@@ -672,3 +690,73 @@ class TestSuppressionAccounting:
         assert sup["recent_ignored"] == 2
         assert sup["recent_raw_findings"] == 5
         assert sup["recent_suppressed_pct"] == 40.0
+
+    def test_ignore_suppression_records_warning_metadata(self):
+        from desloppify.state import merge_scan
+
+        st = _empty_state()
+        findings = [
+            _make_raw_finding("logs::a.py::debug", detector="logs", file="a.py"),
+        ]
+
+        merge_scan(
+            st,
+            findings,
+            lang="python",
+            ignore=["logs::*"],
+            potentials={"logs": 1},
+            force_resolve=True,
+        )
+
+        warn = st.get("score_integrity", {}).get("ignore_suppression_warning")
+        assert warn is not None
+        assert warn["suppressed_pct"] == 100.0
+
+
+class TestStrictAllDetectedScore:
+    def test_includes_ignored_findings(self):
+        from desloppify.state import merge_scan
+
+        st = _empty_state()
+        findings = [
+            _make_raw_finding("logs::a.py::debug", detector="logs", file="a.py"),
+        ]
+        merge_scan(
+            st,
+            findings,
+            lang="python",
+            ignore=["logs::*"],
+            potentials={"logs": 1},
+            force_resolve=True,
+        )
+
+        strict_visible = st["strict_score"]
+        all_detected = get_strict_all_detected_score(st)
+        assert all_detected is not None
+        assert all_detected < strict_visible
+
+    def test_includes_zone_excluded_strict_failures(self):
+        from desloppify.state import merge_scan
+
+        st = _empty_state()
+        findings = [
+            _make_raw_finding(
+                "logs::tests/a.py::debug",
+                detector="logs",
+                file="tests/a.py",
+                zone="test",
+            ),
+        ]
+        merge_scan(
+            st,
+            findings,
+            lang="python",
+            ignore=[],
+            potentials={"logs": 1},
+            force_resolve=True,
+        )
+
+        strict_visible = st["strict_score"]
+        all_detected = get_strict_all_detected_score(st)
+        assert all_detected is not None
+        assert all_detected < strict_visible

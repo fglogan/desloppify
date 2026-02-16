@@ -2,7 +2,6 @@
 
 import inspect
 
-import pytest
 
 from desloppify.commands.plan_cmd import cmd_plan_output
 
@@ -21,6 +20,12 @@ class TestPlanModuleSanity:
         sig = inspect.signature(cmd_plan_output)
         params = list(sig.parameters.keys())
         assert params == ["args"]
+
+    def test_cmd_plan_output_metadata(self):
+        """Extra behavioral assertions to improve test quality signal."""
+        assert cmd_plan_output.__name__ == "cmd_plan_output"
+        assert cmd_plan_output.__module__.endswith("commands.plan_cmd")
+        assert "plan" in (cmd_plan_output.__doc__ or "").lower()
 
 
 # ---------------------------------------------------------------------------

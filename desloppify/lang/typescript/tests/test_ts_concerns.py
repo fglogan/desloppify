@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.concerns — mixed concern detection."""
 
-import os
 from pathlib import Path
 
 import pytest

@@ -1,8 +1,6 @@
 """Tests for desloppify.detectors.complexity — detect_complexity function."""
 
 import textwrap
-from pathlib import Path
-from unittest.mock import patch
 
 from desloppify.detectors.base import ComplexitySignal
 from desloppify.detectors.complexity import detect_complexity

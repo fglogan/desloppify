@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from desloppify.detectors.orphaned import (
     _is_dynamically_imported,
@@ -312,7 +310,6 @@ class TestDetectOrphanedFiles:
         def mock_alias_resolver(target):
             return target.replace("@/", "src/")
 
-        rel_path = str(Path("src/utils/helpers.py"))
         with patch("desloppify.detectors.orphaned.rel", side_effect=lambda p: str(Path(p).relative_to(tmp_path))):
             entries, total = detect_orphaned_files(
                 tmp_path, graph, [".py"],

@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.exports — dead export detection."""
 
-import os
 from pathlib import Path
 
 import pytest

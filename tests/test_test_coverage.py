@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 
-import pytest
 
 from desloppify.detectors.test_coverage import (
     _file_loc,
@@ -425,6 +423,47 @@ class TestAnalyzeTestQuality:
         # 1 assertion across 3 test functions → ratio < 1 → smoke
         assert result[tf]["quality"] == "smoke"
 
+    def test_python_trivial_assert_metrics(self, tmp_path):
+        content = (
+            "def test_a():\n"
+            "    assert True\n"
+            "    assert obj is not None\n"
+        )
+        tf = _write_file(tmp_path, "test_trivial.py", content)
+        result = _analyze_test_quality({tf}, "python")
+        assert result[tf]["trivial_assertions"] == 2
+        assert result[tf]["behavioral_assertions"] == 0
+        assert result[tf]["trivial_assert_ratio"] == 1.0
+        assert result[tf]["quality_score"] < 0.5
+
+    def test_python_import_only_metrics(self, tmp_path):
+        content = (
+            "import app.module as module\n"
+            "from app.module import run\n"
+            "\n"
+            "def test_imports():\n"
+            "    assert module is not None\n"
+        )
+        tf = _write_file(tmp_path, "test_import_only.py", content)
+        result = _analyze_test_quality({tf}, "python")
+        assert result[tf]["import_lines"] >= 2
+        assert result[tf]["import_only"] is True
+        assert result[tf]["import_only_likelihood"] >= 0.8
+
+    def test_python_negative_path_metrics(self, tmp_path):
+        content = (
+            "import pytest\n"
+            "\n"
+            "def test_raises():\n"
+            "    with pytest.raises(ValueError):\n"
+            "        raise ValueError('x')\n"
+        )
+        tf = _write_file(tmp_path, "test_negative.py", content)
+        result = _analyze_test_quality({tf}, "python")
+        assert result[tf]["negative_path_assertions"] >= 1
+        assert result[tf]["negative_path_ratio"] > 0
+        assert result[tf]["quality_score"] >= 0.6
+
     def test_no_test_functions(self, tmp_path):
         content = "# just a comment\nprint('hello')\n"
         tf = _write_file(tmp_path, "test_empty.py", content)
@@ -616,6 +655,65 @@ class TestDetectTestCoverage:
         qual_entries = [e for e in entries if e["detail"]["kind"] == "assertion_free_test"]
         assert len(qual_entries) == 1
         assert qual_entries[0]["file"] == prod_f
+
+    def test_quality_finding_trivial_asserts(self, tmp_path):
+        """Directly tested file with mostly trivial assertions is flagged."""
+        prod_f = _write_file(tmp_path, "utils.py", "def foo():\n    return 1\n" * 10)
+        test_f = _write_file(
+            tmp_path, "test_utils.py",
+            "def test_foo():\n"
+            "    assert True\n"
+            "    assert foo is not None\n",
+        )
+        zone_map = _make_zone_map([prod_f, test_f])
+        graph = {
+            prod_f: {"imports": set(), "importer_count": 1},
+            test_f: {"imports": {prod_f}},
+        }
+        entries, _ = detect_test_coverage(graph, zone_map, "python")
+        qual_entries = [e for e in entries if e["detail"]["kind"] == "trivial_assert_tests"]
+        assert len(qual_entries) == 1
+        assert qual_entries[0]["file"] == prod_f
+
+    def test_quality_finding_import_only(self, tmp_path):
+        """Import-dominant test files should be surfaced explicitly."""
+        prod_f = _write_file(tmp_path, "service.py", "def run():\n    return 1\n" * 10)
+        test_f = _write_file(
+            tmp_path, "test_service.py",
+            "import service\n"
+            "from service import run\n"
+            "\n"
+            "def test_imports():\n"
+            "    assert service is not None\n",
+        )
+        zone_map = _make_zone_map([prod_f, test_f])
+        graph = {
+            prod_f: {"imports": set(), "importer_count": 1},
+            test_f: {"imports": {prod_f}},
+        }
+        entries, _ = detect_test_coverage(graph, zone_map, "python")
+        qual_entries = [e for e in entries if e["detail"]["kind"] == "import_only_tests"]
+        assert len(qual_entries) == 1
+        assert qual_entries[0]["file"] == prod_f
+
+    def test_high_risk_module_with_weak_tests_gets_low_confidence_finding(self, tmp_path):
+        """High-risk modules should fail confidence gate with weak tests."""
+        prod_f = _write_file(tmp_path, "critical.py", "def run():\n    return 1\n" + "# code\n" * 30)
+        test_f = _write_file(
+            tmp_path, "test_critical.py",
+            "def test_smoke():\n    assert True\n",
+        )
+        zone_map = _make_zone_map([prod_f, test_f])
+        graph = {
+            prod_f: {"imports": set(), "importer_count": 12},
+            test_f: {"imports": {prod_f}},
+        }
+        entries, _ = detect_test_coverage(graph, zone_map, "python")
+        low_conf = [e for e in entries if e["detail"]["kind"] == "test_quality_low_confidence"]
+        assert len(low_conf) == 1
+        assert low_conf[0]["tier"] == 2
+        assert low_conf[0]["detail"]["risk"] == "high"
+        assert "below threshold" in low_conf[0]["detail"]["reason"]
 
     def test_naming_convention_mapping(self, tmp_path):
         """Test file matched by naming convention (no graph import edge)."""
@@ -1410,3 +1508,32 @@ class TestHasTestableLogic:
         entries, potential = detect_test_coverage(graph, zone_map, "typescript")
         assert potential > 0
         assert len(entries) >= 1
+
+    def test_supabase_entrypoint_classified_separately(self, tmp_path):
+        """Supabase edge index.ts should use runtime_entrypoint_no_direct_tests."""
+        prod = _write_file(
+            tmp_path, "supabase/functions/stripe-webhook/index.ts",
+            "import { serve } from \"https://deno.land/std/http/server.ts\";\n"
+            "serve((_req) => new Response(\"ok\"));\n"
+            "// padding\n" * 8,
+        )
+        zone_map = _make_zone_map([prod])
+        graph = {prod: {"imports": set(), "importer_count": 0}}
+        entries, _ = detect_test_coverage(graph, zone_map, "typescript")
+        assert len(entries) == 1
+        assert entries[0]["detail"]["kind"] == "runtime_entrypoint_no_direct_tests"
+        assert entries[0]["detail"]["loc_weight"] == 0.0
+
+    def test_deno_serve_file_classified_as_runtime_entrypoint(self, tmp_path):
+        """Deno serve entrypoint should not be classified as untested_module."""
+        prod = _write_file(
+            tmp_path, "edge/handler.ts",
+            "import { serve } from \"jsr:@std/http/server\";\n"
+            "serve((_req) => new Response(\"ok\"));\n"
+            "// padding\n" * 8,
+        )
+        zone_map = _make_zone_map([prod])
+        graph = {prod: {"imports": set(), "importer_count": 0}}
+        entries, _ = detect_test_coverage(graph, zone_map, "typescript")
+        assert len(entries) == 1
+        assert entries[0]["detail"]["kind"] == "runtime_entrypoint_no_direct_tests"

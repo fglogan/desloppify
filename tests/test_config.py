@@ -9,6 +9,7 @@ from desloppify.config import (
     load_config,
     save_config,
     add_ignore_pattern,
+    set_ignore_metadata,
     set_config_value,
     unset_config_value,
     config_for_query,
@@ -37,6 +38,7 @@ class TestDefaultConfig:
         assert cfg["languages"] == {}
         assert cfg["exclude"] == []
         assert cfg["ignore"] == []
+        assert cfg["ignore_metadata"] == {}
         assert cfg["zone_overrides"] == {}
 
 
@@ -195,6 +197,16 @@ class TestAddIgnorePattern:
         add_ignore_pattern(cfg, "smells::*::debug")
         add_ignore_pattern(cfg, "smells::*::debug")
         assert cfg["ignore"].count("smells::*::debug") == 1
+
+    def test_ignore_metadata_records_note(self):
+        cfg = default_config()
+        set_ignore_metadata(
+            cfg,
+            "smells::*::debug",
+            note="Intentional migration noise",
+            added_at="2026-02-16T00:00:00Z",
+        )
+        assert cfg["ignore_metadata"]["smells::*::debug"]["note"] == "Intentional migration noise"
 
 
 # ===========================================================================

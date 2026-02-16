@@ -2,7 +2,6 @@
 
 import inspect
 
-import pytest
 
 from desloppify.commands.next import cmd_next
 
@@ -38,7 +37,6 @@ class TestCmdNextOutput:
     def test_no_items_prints_nothing_to_do(self, monkeypatch, capsys):
         """When there are no open findings, cmd_next should say 'Nothing to do'."""
         from desloppify.commands import next as next_mod
-        from desloppify import cli as cli_mod
 
         # Mock load_state to return empty state
         def mock_load_state(sp):

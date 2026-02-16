@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.patterns — pattern anomaly detection."""
 
-import os
 from pathlib import Path
 
 import pytest
@@ -35,8 +34,9 @@ class TestBuildCensus:
         _write(tmp_path, "src/tools/editor/main.ts", (
             "const settings = useAutoSaveSettings<Config>();\n"
         ))
-        census = _build_census(tmp_path)
+        census, evidence = _build_census(tmp_path)
         assert len(census) > 0
+        assert isinstance(evidence, dict)
         # At least one area should have tool_settings family with useAutoSaveSettings
         found = False
         for area, families in census.items():
@@ -48,8 +48,9 @@ class TestBuildCensus:
         """Empty directory returns empty census."""
         from desloppify.lang.typescript.detectors.patterns import _build_census
 
-        census = _build_census(tmp_path)
+        census, evidence = _build_census(tmp_path)
         assert census == {}
+        assert evidence == {}
 
     def test_complementary_patterns_tracked(self, tmp_path):
         """Complementary pattern families are included in census."""
@@ -59,13 +60,14 @@ class TestBuildCensus:
             "const result = useQuery({ queryKey: ['data'] });\n"
             "const mutation = useMutation({ mutationFn: save });\n"
         ))
-        census = _build_census(tmp_path)
+        census, evidence = _build_census(tmp_path)
         found_data_fetching = False
         for area, families in census.items():
             if "data_fetching" in families:
                 found_data_fetching = True
                 assert "useQuery" in families["data_fetching"]
                 assert "useMutation" in families["data_fetching"]
+                assert "useQuery" in evidence.get(area, {}).get("data_fetching", {})
         assert found_data_fetching
 
 
@@ -108,6 +110,8 @@ class TestDetectPatternAnomalies:
         frag = [a for a in anomalies if "editor" in a["area"]]
         assert len(frag) >= 1
         assert frag[0]["pattern_count"] >= 2
+        assert "pattern_evidence" in frag[0]
+        assert "useAutoSaveSettings" in frag[0]["pattern_evidence"]
 
     def test_empty_directory(self, tmp_path):
         """Empty directory returns no anomalies."""

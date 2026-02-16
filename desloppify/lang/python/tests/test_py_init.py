@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.python — PythonConfig and configuration data."""
 
-import pytest
 
 from desloppify.lang.python import (
     PythonConfig,

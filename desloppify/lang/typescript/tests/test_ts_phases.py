@@ -49,3 +49,29 @@ def test_phase_structural_uses_lang_thresholds(monkeypatch, tmp_path: Path):
     assert potentials["structural"] == 0
     assert captured["large_threshold"] == 777
     assert captured["complexity_threshold"] == 33
+
+
+def test_ts_phase_helper_computations():
+    """Cover TypeScript helper computations with direct behavioral assertions."""
+    rich_content = (
+        "const {a, b, c, d, e, f, g, h, i} = props;\n"
+        "export type A = string;\n"
+        "export type B = number;\n"
+        "export interface C {}\n"
+        "export type D = boolean;\n"
+    )
+    lines = rich_content.splitlines()
+
+    destruct = phases._compute_ts_destructure_props(rich_content, lines)
+    inline_types = phases._compute_ts_inline_types(rich_content, lines)
+    no_destruct = phases._compute_ts_destructure_props("const x = 1;\n", ["const x = 1;"])
+    no_inline = phases._compute_ts_inline_types("export type A = string;\n", ["export type A = string;"])
+
+    assert destruct is not None
+    assert destruct[0] == 9
+    assert "props" in destruct[1]
+    assert inline_types is not None
+    assert inline_types[0] == 4
+    assert "inline types" in inline_types[1]
+    assert no_destruct is None
+    assert no_inline is None

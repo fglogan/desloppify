@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.deprecated — @deprecated symbol detection."""
 
-import os
 from pathlib import Path
 
 import pytest

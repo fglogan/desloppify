@@ -727,7 +727,6 @@ class TestHolisticMultiplier:
 
     def test_mixed_holistic_and_regular(self):
         """Holistic + regular file findings combine correctly."""
-        from desloppify.scoring import HOLISTIC_MULTIPLIER
         h = _finding("review", confidence="high", file=".")
         h["detail"] = {"holistic": True}
         r1 = _finding("review", confidence="high", file="src/a.py")

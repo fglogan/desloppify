@@ -1,6 +1,5 @@
 """Tests for desloppify.detectors.flat_dirs — flat directory detection."""
 
-import pytest
 
 from desloppify.detectors.flat_dirs import detect_flat_dirs
 

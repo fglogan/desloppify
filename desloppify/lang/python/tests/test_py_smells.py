@@ -3,7 +3,6 @@
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from desloppify.lang.python.detectors.smells import (
     detect_smells,

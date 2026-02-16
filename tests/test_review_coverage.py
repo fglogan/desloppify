@@ -6,18 +6,16 @@ import hashlib
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from desloppify.detectors.review_coverage import detect_review_coverage
 from desloppify.utils import rel
 from desloppify.review import (
     DEFAULT_DIMENSIONS, DIMENSION_PROMPTS,
-    import_review_findings, MIN_REVIEW_LOC,
+    import_review_findings,
 )
-from desloppify.state import _find_suspect_detectors, make_finding, _empty_state, merge_scan
+from desloppify.state import _find_suspect_detectors, _empty_state
 from desloppify.scoring import DIMENSIONS, _FILE_BASED_DETECTORS
 from desloppify.registry import DETECTORS, _DISPLAY_ORDER
 
@@ -302,7 +300,7 @@ class TestIDCollision:
             },
         ]
         state = _empty_state()
-        diff = import_review_findings(findings_data, state, "python")
+        import_review_findings(findings_data, state, "python")
 
         # Both should be present with distinct IDs (content-hash disambiguated)
         ids = list(state["findings"].keys())
@@ -333,7 +331,7 @@ class TestIDCollision:
             },
         ]
         state = _empty_state()
-        diff = import_review_findings(findings_data, state, "python")
+        import_review_findings(findings_data, state, "python")
 
         ids = list(state["findings"].keys())
         assert len(ids) == 2
@@ -401,7 +399,7 @@ class TestNewDimensions:
                 "suggestion": "fix it",
             }]
             state = _empty_state()
-            diff = import_review_findings(findings_data, state, "python")
+            import_review_findings(findings_data, state, "python")
             assert len(state["findings"]) == 1, f"Finding for {dim} was rejected"
 
 
@@ -443,7 +441,6 @@ class TestPhaseIntegration:
         assert "Subjective review" in labels
 
     def test_review_cache_field_exists(self):
-        from desloppify.lang.base import LangConfig
         # _review_cache should be a dict by default
         from desloppify.lang.python import PythonConfig
         cfg = PythonConfig()

@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.react — React anti-pattern detection."""
 
-import os
 from pathlib import Path
 
 import pytest

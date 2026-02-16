@@ -3,10 +3,8 @@
 Covers: __init__, common, imports, vars, logs, params, exports, if_chain, useeffect.
 """
 
-import os
 import textwrap
 
-import pytest
 
 
 # =====================================================================
@@ -262,7 +260,7 @@ class TestFixUnusedImports:
         entries = [
             {"file": str(ts_file), "name": "beta", "line": 1, "category": "imports"},
         ]
-        results = fix_unused_imports(entries, dry_run=False)
+        fix_unused_imports(entries, dry_run=False)
         content = ts_file.read_text()
         assert "beta" not in content
         assert "alpha" in content
@@ -281,7 +279,7 @@ class TestFixUnusedImports:
         entries = [
             {"file": str(ts_file), "name": "(entire import)", "line": 1, "category": "imports"},
         ]
-        results = fix_unused_imports(entries, dry_run=False)
+        fix_unused_imports(entries, dry_run=False)
         content = ts_file.read_text()
         assert "import React" not in content
         assert "useState" in content
@@ -447,7 +445,7 @@ class TestFixDebugLogs:
             }
         """))
         entries = [{"file": str(ts_file), "line": 3, "tag": "DEBUG", "content": "console.log('[DEBUG] test');"}]
-        results = fix_debug_logs(entries, dry_run=False)
+        fix_debug_logs(entries, dry_run=False)
         content = ts_file.read_text()
         assert "DEBUG" not in content
 
@@ -546,7 +544,7 @@ class TestFixUnusedParams:
         entries = [
             {"file": str(ts_file), "name": "event", "line": 1, "col": 18, "category": "vars"},
         ]
-        results = fix_unused_params(entries, dry_run=True)
+        fix_unused_params(entries, dry_run=True)
         assert ts_file.read_text() == original
 
 
@@ -580,7 +578,7 @@ class TestFixDeadExports:
         ts_file = tmp_path / "config.ts"
         ts_file.write_text("export const VALUE = 42;\n")
         entries = [{"file": str(ts_file), "line": 1, "name": "VALUE"}]
-        results = fix_dead_exports(entries, dry_run=False)
+        fix_dead_exports(entries, dry_run=False)
         content = ts_file.read_text()
         assert content.strip() == "const VALUE = 42;"
 
@@ -590,7 +588,7 @@ class TestFixDeadExports:
         ts_file = tmp_path / "types.ts"
         ts_file.write_text("export type Foo = string;\n")
         entries = [{"file": str(ts_file), "line": 1, "name": "Foo"}]
-        results = fix_dead_exports(entries, dry_run=False)
+        fix_dead_exports(entries, dry_run=False)
         content = ts_file.read_text()
         assert content.strip() == "type Foo = string;"
 
@@ -600,7 +598,7 @@ class TestFixDeadExports:
         ts_file = tmp_path / "types.ts"
         ts_file.write_text("export interface Bar { x: number; }\n")
         entries = [{"file": str(ts_file), "line": 1, "name": "Bar"}]
-        results = fix_dead_exports(entries, dry_run=False)
+        fix_dead_exports(entries, dry_run=False)
         content = ts_file.read_text()
         assert content.strip() == "interface Bar { x: number; }"
 
@@ -613,7 +611,7 @@ class TestFixDeadExports:
             export { a };
         """))
         entries = [{"file": str(ts_file), "line": 2, "name": "a"}]
-        results = fix_dead_exports(entries, dry_run=False)
+        fix_dead_exports(entries, dry_run=False)
         content = ts_file.read_text()
         assert "export" not in content
 
@@ -745,7 +743,7 @@ class TestFixDeadUseEffect:
             const x = 1;
         """))
         entries = [{"file": str(ts_file), "line": 2, "content": "useEffect(() => {"}]
-        results = fix_dead_useeffect(entries, dry_run=False)
+        fix_dead_useeffect(entries, dry_run=False)
         content = ts_file.read_text()
         assert "Load data" not in content
         assert "useEffect" not in content

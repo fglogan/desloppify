@@ -3,7 +3,6 @@
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from desloppify.lang.python.extractors import (
     extract_py_functions,

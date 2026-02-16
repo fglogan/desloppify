@@ -11,9 +11,9 @@ from desloppify.commands.scan import (
     _format_delta,
     _resolve_scan_profile,
     _show_diff_summary,
+    _show_score_delta,
     _show_post_scan_analysis,
     _show_dimension_deltas,
-    _show_detector_progress,
     _warn_explicit_lang_with_no_files,
     cmd_scan,
 )
@@ -135,6 +135,30 @@ class TestShowDiffSummary:
         out = capsys.readouterr().out
         assert "Skipped auto-resolve" in out
         assert "unused" in out
+
+
+# ---------------------------------------------------------------------------
+# _show_score_delta
+# ---------------------------------------------------------------------------
+
+class TestShowScoreDelta:
+    def test_marks_delta_non_comparable(self, capsys):
+        state = {
+            "stats": {"open": 3, "wontfix": 0, "total": 10},
+            "overall_score": 90.0,
+            "objective_score": 88.0,
+            "strict_score": 87.0,
+        }
+        _show_score_delta(
+            state,
+            prev_overall=80.0,
+            prev_objective=78.0,
+            prev_strict=77.0,
+            non_comparable_reason="tool code changed (abc -> def)",
+        )
+        out = capsys.readouterr().out
+        assert "Δ non-comparable" in out
+        assert "tool code changed" in out
 
 
 # ---------------------------------------------------------------------------

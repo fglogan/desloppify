@@ -1,10 +1,8 @@
 """Tests for desloppify.lang.python.detectors.deps — Python dependency graph builder."""
 
-import os
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from desloppify.lang.python.detectors.deps import build_dep_graph
 

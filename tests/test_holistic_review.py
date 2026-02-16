@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -27,7 +25,6 @@ from desloppify.review import (
 from desloppify.scoring import (
     HOLISTIC_MULTIPLIER,
     HOLISTIC_POTENTIAL,
-    CONFIDENCE_WEIGHTS,
     _detector_pass_rate,
 )
 from desloppify.state import _empty_state, path_scoped_findings

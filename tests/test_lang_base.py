@@ -1,10 +1,6 @@
 """Tests for desloppify.lang.base — finding factories and structural signal helpers."""
 
-import os
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from desloppify.lang.base import (
     SMELL_TIER_MAP,

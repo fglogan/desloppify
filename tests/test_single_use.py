@@ -1,6 +1,5 @@
 """Tests for desloppify.detectors.single_use — single-use abstraction detection."""
 
-import pytest
 
 from desloppify.detectors.single_use import detect_single_use_abstractions
 

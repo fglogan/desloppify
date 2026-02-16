@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -127,6 +125,16 @@ class TestCreateParser:
         args = parser.parse_args(["ignore", "smells::*::async_no_await"])
         assert args.command == "ignore"
         assert args.pattern == "smells::*::async_no_await"
+
+    def test_status_include_suppressed_flag(self, parser):
+        args = parser.parse_args(["status", "--include-suppressed"])
+        assert args.command == "status"
+        assert args.include_suppressed is True
+
+    def test_show_include_suppressed_flag(self, parser):
+        args = parser.parse_args(["show", "smells", "--include-suppressed"])
+        assert args.command == "show"
+        assert args.include_suppressed is True
 
     def test_fix_command(self, parser):
         args = parser.parse_args(["fix", "unused_imports", "--dry-run"])

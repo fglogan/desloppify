@@ -1,8 +1,6 @@
 """Tests for desloppify.commands.fix_cmd — fix command helpers."""
 
-import inspect
 
-import pytest
 
 from desloppify.lang.base import FixerConfig, FixResult
 from desloppify.commands.fix_cmd import (

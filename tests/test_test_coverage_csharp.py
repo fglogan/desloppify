@@ -1,6 +1,5 @@
 """C# branches in test coverage mapping should be safe and usable."""
 
-from pathlib import Path
 
 from desloppify.detectors.test_coverage_mapping import _analyze_test_quality, _map_test_to_source
 

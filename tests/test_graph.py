@@ -1,6 +1,5 @@
 """Tests for desloppify.detectors.graph — iterative Tarjan's SCC cycle detection."""
 
-import pytest
 
 from desloppify.detectors.graph import detect_cycles
 

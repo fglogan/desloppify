@@ -2,7 +2,6 @@
 
 import textwrap
 
-import pytest
 
 from desloppify.lang.python.detectors.complexity import (
     compute_max_params,

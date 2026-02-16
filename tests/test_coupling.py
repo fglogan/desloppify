@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from desloppify.detectors.coupling import (
     detect_boundary_candidates,

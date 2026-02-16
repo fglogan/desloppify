@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors.smells — TS/React code smell detection."""
 
-import os
 from pathlib import Path
 
 import pytest

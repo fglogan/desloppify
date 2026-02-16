@@ -319,6 +319,94 @@ class TestStoreAssessments:
         _store_assessments(empty_state, {"naming": {"score": 75, "extra": "data"}}, "per_file")
         assert empty_state["subjective_assessments"]["naming"]["score"] == 75
 
+    def test_provenance_is_stored(self, empty_state):
+        from desloppify.review.import_findings import _store_assessments
+        _store_assessments(
+            empty_state,
+            {
+                "naming": {
+                    "score": 75,
+                    "model": "gpt-5",
+                    "provenance": {"reviewer_id": "agent-1"},
+                }
+            },
+            "per_file",
+            provenance={"tool_version": "2026.02"},
+        )
+        prov = empty_state["subjective_assessments"]["naming"]["provenance"]
+        assert prov["reviewer_id"] == "agent-1"
+        assert prov["model"] == "gpt-5"
+        assert prov["tool_version"] == "2026.02"
+
+
+class TestAssessmentImportIntegrity:
+    def test_skips_when_no_prior_assessments(self, empty_state):
+        from desloppify.review.import_findings import validate_assessment_import_integrity
+        result = validate_assessment_import_integrity(
+            empty_state,
+            {"assessments": {"naming_quality": 80}, "findings": []},
+            mode="per_file",
+        )
+        assert result["checked"] is False
+        assert result["reason"] == "no_prior_assessments"
+
+    def test_blocks_large_assessment_swing_without_findings(self, empty_state):
+        from desloppify.review.import_findings import (
+            validate_assessment_import_integrity,
+            AssessmentImportIntegrityError,
+        )
+        empty_state["subjective_assessments"] = {
+            "naming_quality": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+            "logic_clarity": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+        }
+        payload = {
+            "assessments": {"naming_quality": 40, "logic_clarity": 40},
+            "findings": [],
+        }
+        with pytest.raises(AssessmentImportIntegrityError):
+            validate_assessment_import_integrity(empty_state, payload, mode="holistic")
+
+    def test_override_requires_note(self, empty_state):
+        from desloppify.review.import_findings import (
+            validate_assessment_import_integrity,
+            AssessmentImportIntegrityError,
+        )
+        empty_state["subjective_assessments"] = {
+            "naming_quality": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+            "logic_clarity": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+        }
+        payload = {
+            "assessments": {"naming_quality": 40, "logic_clarity": 40},
+            "findings": [],
+        }
+        with pytest.raises(AssessmentImportIntegrityError):
+            validate_assessment_import_integrity(
+                empty_state,
+                payload,
+                mode="holistic",
+                allow_override=True,
+            )
+
+    def test_override_allows_import_with_note(self, empty_state):
+        from desloppify.review.import_findings import validate_assessment_import_integrity
+        empty_state["subjective_assessments"] = {
+            "naming_quality": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+            "logic_clarity": {"score": 90, "source": "holistic", "assessed_at": "2026-02-01T00:00:00Z"},
+        }
+        payload = {
+            "assessments": {"naming_quality": 40, "logic_clarity": 40},
+            "findings": [],
+        }
+        result = validate_assessment_import_integrity(
+            empty_state,
+            payload,
+            mode="holistic",
+            allow_override=True,
+            override_note="Manual calibration review completed",
+        )
+        assert result["override_used"] is True
+        assert result["override_note"] == "Manual calibration review completed"
+
 
 class TestImportReviewFindings:
     def test_valid_finding(self, empty_state):
@@ -363,7 +451,7 @@ class TestImportReviewFindings:
             "summary": "test",
             "confidence": "INVALID",
         }]
-        diff = import_review_findings(data, empty_state, "typescript")
+        import_review_findings(data, empty_state, "typescript")
         findings = list(empty_state.get("findings", {}).values())
         review_findings = [f for f in findings if f.get("detector") == "review"]
         assert len(review_findings) == 1
@@ -389,7 +477,7 @@ class TestImportReviewFindings:
             "summary": "New finding",
             "confidence": "high",
         }]
-        diff = import_review_findings(data, empty_state, "typescript")
+        import_review_findings(data, empty_state, "typescript")
         # Old finding should be auto-resolved
         assert empty_state["findings"][old["id"]]["status"] == "auto_resolved"
 
@@ -404,7 +492,7 @@ class TestImportHolisticFindings:
             "confidence": "high",
             "related_files": ["src/big.ts"],
         }]
-        diff = import_holistic_findings(data, empty_state, "typescript")
+        import_holistic_findings(data, empty_state, "typescript")
         findings = list(empty_state.get("findings", {}).values())
         holistic = [f for f in findings
                     if f.get("detail", {}).get("holistic")]

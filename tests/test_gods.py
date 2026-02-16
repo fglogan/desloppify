@@ -1,6 +1,5 @@
 """Tests for desloppify.detectors.gods — god class/component detection."""
 
-import pytest
 
 from desloppify.detectors.base import ClassInfo, GodRule
 from desloppify.detectors.gods import detect_gods

@@ -1,6 +1,5 @@
 """Tests for desloppify.lang.typescript.detectors._smell_helpers — string processing helpers."""
 
-import pytest
 
 from desloppify.lang.typescript.detectors._smell_helpers import (
     _strip_ts_comments,

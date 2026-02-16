@@ -8,17 +8,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
-from desloppify.detectors.security import detect_security_issues, make_security_entry
+from desloppify.detectors.security import detect_security_issues
 from desloppify.lang.python.detectors.security import detect_python_security
 from desloppify.lang.typescript.detectors.security import detect_ts_security
 from desloppify.scoring import (
-    compute_dimension_scores, compute_objective_score, _SECURITY_EXCLUDED_ZONES,
+    compute_dimension_scores, _SECURITY_EXCLUDED_ZONES,
     DIMENSIONS, _FILE_BASED_DETECTORS,
 )
-from desloppify.zones import FileZoneMap, Zone, ZoneRule, ZONE_POLICIES
-from desloppify.state import make_finding
+from desloppify.zones import FileZoneMap, Zone, ZONE_POLICIES
 from desloppify.narrative.headline import _compute_headline
 from desloppify.registry import DETECTORS, _DISPLAY_ORDER, dimension_action_type
 
@@ -36,7 +34,6 @@ def _write_temp_file(content: str, suffix: str = ".py", dir_prefix: str = "") ->
 
 def _make_zone_map(files: list[str], zone: Zone = Zone.PRODUCTION) -> FileZoneMap:
     """Create a simple zone map where all files have the same zone."""
-    rules = [ZoneRule(zone, [])] if zone != Zone.PRODUCTION else []
     zm = FileZoneMap.__new__(FileZoneMap)
     zm._map = {f: zone for f in files}
     zm._overrides = None

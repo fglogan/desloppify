@@ -1,6 +1,5 @@
 """Tests for desloppify.detectors.large — large file detection."""
 
-import pytest
 
 from desloppify.detectors.large import detect_large_files
 

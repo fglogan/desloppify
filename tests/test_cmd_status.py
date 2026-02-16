@@ -1,9 +1,10 @@
 """Tests for desloppify.commands.status — display helpers."""
 
-import pytest
 
 from desloppify.commands.status import (
+    _build_detector_transparency,
     _show_dimension_table,
+    _show_detector_transparency,
     _show_focus_suggestion,
     _show_ignore_summary,
     _show_structural_areas,
@@ -32,6 +33,12 @@ class TestStatusModuleSanity:
 
     def test_show_ignore_summary_callable(self):
         assert callable(_show_ignore_summary)
+
+    def test_build_detector_transparency_callable(self):
+        assert callable(_build_detector_transparency)
+
+    def test_show_detector_transparency_callable(self):
+        assert callable(_show_detector_transparency)
 
 
 # ---------------------------------------------------------------------------
@@ -140,3 +147,78 @@ class TestShowIgnoreSummary:
         )
         out = capsys.readouterr().out
         assert "Ignore suppression (last scan): 0 findings hidden" in out
+
+    def test_include_suppressed_prints_detector_breakdown(self, capsys):
+        _show_ignore_summary(
+            ["smells::*"],
+            {
+                "last_ignored": 5,
+                "last_raw_findings": 10,
+                "last_suppressed_pct": 50.0,
+                "recent_scans": 1,
+            },
+            include_suppressed=True,
+            ignore_integrity={"ignored_by_detector": {"smells": 4, "logs": 1}},
+        )
+        out = capsys.readouterr().out
+        assert "Suppressed by detector (last scan)" in out
+        assert "smells:4" in out
+
+
+class TestDetectorTransparency:
+    def test_builds_detector_rows(self):
+        state = {
+            "scan_path": ".",
+            "findings": {
+                "logs::a.py::x": {
+                    "id": "logs::a.py::x",
+                    "detector": "logs",
+                    "file": "a.py",
+                    "status": "open",
+                    "zone": "production",
+                },
+                "smells::tests/a.py::x": {
+                    "id": "smells::tests/a.py::x",
+                    "detector": "smells",
+                    "file": "tests/a.py",
+                    "status": "wontfix",
+                    "zone": "test",
+                },
+            },
+        }
+        transparency = _build_detector_transparency(
+            state,
+            ignore_integrity={"ignored_by_detector": {"logs": 2, "security": 1}},
+        )
+        rows = {row["detector"]: row for row in transparency["rows"]}
+        assert rows["logs"]["visible"] == 1
+        assert rows["logs"]["suppressed"] == 2
+        assert rows["logs"]["excluded"] == 0
+        assert rows["smells"]["excluded"] == 1
+        assert rows["security"]["suppressed"] == 1
+        assert transparency["totals"]["suppressed"] == 3
+        assert transparency["totals"]["excluded"] == 1
+
+    def test_show_prints_when_hidden_exists(self, capsys):
+        _show_detector_transparency(
+            {
+                "rows": [
+                    {"detector": "logs", "visible": 2, "suppressed": 3, "excluded": 0, "total_detected": 5},
+                ],
+                "totals": {"visible": 2, "suppressed": 3, "excluded": 0},
+            }
+        )
+        out = capsys.readouterr().out
+        assert "Strict Transparency" in out
+        assert "Hidden strict failures: 3/5 (60.0%)" in out
+
+    def test_show_silent_when_no_hidden(self, capsys):
+        _show_detector_transparency(
+            {
+                "rows": [
+                    {"detector": "logs", "visible": 2, "suppressed": 0, "excluded": 0, "total_detected": 2},
+                ],
+                "totals": {"visible": 2, "suppressed": 0, "excluded": 0},
+            }
+        )
+        assert capsys.readouterr().out == ""

@@ -2,7 +2,6 @@
 
 import textwrap
 
-import pytest
 
 from desloppify.lang.typescript.extractors import (
     _extract_ts_params,

@@ -3,7 +3,6 @@
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from desloppify.lang.python.detectors.mutable_state import detect_global_mutable_config
 
