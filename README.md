@@ -6,7 +6,7 @@ Every scan generates a scorecard badge you can add to your README — here's the
 
 <img src="scorecard.png" width="100%">
 
-Adding a new language plugin? See `ADDING_NEW_LANGUAGE.md`.
+Adding a new language plugin? See `ADDING_A_NEW_LANGUAGE.md`.
 
 ## For your agent's consideration...
 
@@ -128,7 +128,7 @@ Project config values (stored in `.desloppify/config.json`) are managed via:
 
 #### Adding a language
 
-Use the scaffold workflow documented in `ADDING_NEW_LANGUAGE.md`:
+Use the scaffold workflow documented in `ADDING_A_NEW_LANGUAGE.md`:
 
 ```bash
 desloppify dev scaffold-lang <name> --extension .ext --marker <root-marker>
