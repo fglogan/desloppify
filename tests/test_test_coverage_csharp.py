@@ -1,7 +1,7 @@
 """C# branches in test coverage mapping should be safe and usable."""
 
 
-from desloppify.detectors.test_coverage_mapping import _analyze_test_quality, _map_test_to_source
+from desloppify.engine.detectors.coverage.mapping import _analyze_test_quality, _map_test_to_source
 
 
 def test_map_test_to_source_csharp_name_convention():

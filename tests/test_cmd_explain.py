@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from desloppify.commands.scan import cmd_explain
+from desloppify.app.commands.scan import cmd_explain
 
 
 def _fake_state() -> dict:
@@ -54,7 +54,7 @@ def test_cmd_explain_json(tmp_path, capsys):
 
 
 def test_cmd_explain_text_writes_query(tmp_path, monkeypatch, capsys):
-    from desloppify.commands import scan as explain_mod
+    from desloppify.app.commands import scan as explain_mod
 
     state_path = tmp_path / "state.json"
     state = _fake_state() | {"overall_score": 95.3, "objective_score": 98.5, "strict_score": 93.8}

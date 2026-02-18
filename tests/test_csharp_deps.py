@@ -7,8 +7,8 @@ import subprocess
 
 import pytest
 
-from desloppify.detectors.graph import detect_cycles
-from desloppify.lang.csharp.detectors.deps import build_dep_graph
+from desloppify.engine.detectors.graph import detect_cycles
+from desloppify.languages.csharp.detectors.deps import build_dep_graph
 
 
 def _fixture_root(name: str) -> Path:
@@ -33,7 +33,7 @@ def _edge_set_within_root(graph: dict[str, dict], root: Path) -> set[tuple[str, 
 
 
 def _require_roslyn_payload(roslyn_cmd: str, root: Path):
-    from desloppify.lang.csharp.detectors.deps import _build_roslyn_command
+    from desloppify.languages.csharp.detectors.deps import _build_roslyn_command
 
     cmd = _build_roslyn_command(roslyn_cmd, root)
     assert cmd is not None
@@ -229,7 +229,7 @@ def test_build_dep_graph_uses_roslyn_payload_when_available(tmp_path, monkeypatc
 
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_CMD", "fake-roslyn")
     monkeypatch.setattr(
-        "desloppify.lang.csharp.detectors.deps.subprocess.run",
+        "desloppify.languages.csharp.detectors.deps.subprocess.run",
         lambda *args, **kwargs: _Proc(),
     )
 
@@ -257,7 +257,7 @@ def test_build_dep_graph_roslyn_invokes_subprocess_without_shell(tmp_path, monke
         return _Proc()
 
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_CMD", "fake-roslyn --json")
-    monkeypatch.setattr("desloppify.lang.csharp.detectors.deps.subprocess.run", _fake_run)
+    monkeypatch.setattr("desloppify.languages.csharp.detectors.deps.subprocess.run", _fake_run)
 
     build_dep_graph(tmp_path)
 
@@ -288,7 +288,7 @@ def test_build_dep_graph_prefers_explicit_roslyn_cmd_over_env(tmp_path, monkeypa
         return _Proc()
 
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_CMD", "env-roslyn --json")
-    monkeypatch.setattr("desloppify.lang.csharp.detectors.deps.subprocess.run", _fake_run)
+    monkeypatch.setattr("desloppify.languages.csharp.detectors.deps.subprocess.run", _fake_run)
 
     build_dep_graph(tmp_path, roslyn_cmd="explicit-roslyn --json")
 
@@ -312,7 +312,7 @@ def test_build_dep_graph_falls_back_when_roslyn_command_fails(tmp_path, monkeypa
 
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_CMD", "fake-roslyn")
     monkeypatch.setattr(
-        "desloppify.lang.csharp.detectors.deps.subprocess.run",
+        "desloppify.languages.csharp.detectors.deps.subprocess.run",
         lambda *args, **kwargs: _ProcFail(),
     )
 
@@ -340,7 +340,7 @@ def test_build_dep_graph_uses_fallback_when_roslyn_payload_too_large(tmp_path, m
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_CMD", "fake-roslyn")
     monkeypatch.setenv("DESLOPPIFY_CSHARP_ROSLYN_MAX_OUTPUT_BYTES", "128")
     monkeypatch.setattr(
-        "desloppify.lang.csharp.detectors.deps.subprocess.run",
+        "desloppify.languages.csharp.detectors.deps.subprocess.run",
         lambda *args, **kwargs: _ProcLarge(),
     )
 

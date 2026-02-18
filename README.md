@@ -6,7 +6,7 @@ Every scan generates a scorecard badge you can add to your README — here's the
 
 <img src="assets/scorecard.png" width="100%">
 
-Adding a new language plugin? See `ADDING_A_NEW_LANGUAGE.md`.
+Adding a new language plugin? See `desloppify/languages/README.md`.
 
 ## For your agent's consideration...
 
@@ -21,26 +21,24 @@ desloppify scan --path .
 desloppify status
 desloppify next
 
+# If subjective scores feel stale or inflated, force a clean baseline:
+desloppify scan --path . --reset-subjective
+
 --path is the directory to scan (use "." for the whole project, or "src/" etc).
 Language is auto-detected. To override: desloppify --lang python scan --path .
 (note: --lang goes BEFORE the subcommand)
 
-Fix what it finds, then "desloppify resolve fixed <id>" and rescan.
-For intentional debt: "desloppify resolve wontfix <id> --note 'reason'" (note is required).
-For detector mistakes: "desloppify resolve false_positive <id>".
+Fix what it finds, then "desloppify resolve fixed <id> --note 'what changed' --attest 'I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score.'" and rescan.
+For false positives: "desloppify resolve wontfix <id> --note 'reason' --attest 'I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score.'" (note is required — don't skip work; attestation must include the keywords "I have actually" and "not gaming").
 Keep going until all issues are resolved. If you notice anything wrong or confusing about
 desloppify itself, tell me and ask if I want you to log an issue. If you need to understand
 how desloppify works or debug an issue: git clone https://github.com/peteromallet/desloppify.git /tmp/desloppify
 
 If you're Claude Code, also run:
-mkdir -p .claude/skills/desloppify && { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/skills/CLAUDE.md; } > .claude/skills/desloppify/SKILL.md
+mkdir -p .claude/skills/desloppify && { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/CLAUDE.md; } > .claude/skills/desloppify/SKILL.md
 
 If you're Codex, also run:
-mkdir -p .agents/skills/desloppify "${CODEX_HOME:-$HOME/.codex}/skills/desloppify" && { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/skills/CODEX.md; } | tee .agents/skills/desloppify/SKILL.md > "${CODEX_HOME:-$HOME/.codex}/skills/desloppify/SKILL.md"
-
-If you're using OpenSkills (Cursor/Windsurf/Cline/OpenCode), also run:
-npx -y openskills install peteromallet/desloppify --yes
-npx -y openskills sync --yes
+mkdir -p .agents/skills/desloppify "${CODEX_HOME:-$HOME/.codex}/skills/desloppify" && { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/CODEX.md; } | tee .agents/skills/desloppify/SKILL.md > "${CODEX_HOME:-$HOME/.codex}/skills/desloppify/SKILL.md"
 ```
 
 ## From Vibe Coding to Vibe Engineering
@@ -64,7 +62,7 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
 
 | Command | Description |
 |---------|-------------|
-| `scan` | Run all detectors, update state |
+| `scan [--reset-subjective]` | Run all detectors, update state (optional: reset subjective baseline to 0 first) |
 | `status` | Score + per-tier progress |
 | `explain` | Explain strict-score loss hotspots and priorities |
 | `help-me-improve` | Alias for `explain` |
@@ -83,7 +81,6 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
 | `tree` | Annotated codebase tree |
 | `viz` | Interactive HTML treemap |
 | `dev scaffold-lang` | Generate a standardized language plugin scaffold |
-| `help [command]` | Show top-level or command-specific help |
 
 #### Detectors
 
@@ -102,12 +99,7 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
 | T3 | Needs judgment | Near-dupes, single_use abstractions |
 | T4 | Major refactor | God components, mixed concerns |
 
-Score is weighted (T4 = 4x T1).
-- Lenient/overall score treats `open` findings as debt.
-- Strict score treats both `open` and `wontfix` findings as debt.
-- `status` also reports `strict_all_detected`, which includes ignored and zone-excluded findings from the latest scan.
-- Default subjective dimensions: `naming_quality`, `error_consistency`, `abstraction_fitness`, `logic_clarity`, `ai_generated_debt`, `type_safety`, `contract_coherence`.
-- Assessment dimensions are normalized to canonical names; unknown keys are ignored unless you opt into explicit `custom_` dimensions.
+Score is weighted (T4 = 4x T1). Strict score penalizes both open and wontfix.
 
 #### Configuration
 
@@ -116,7 +108,7 @@ Score is weighted (T4 = 4x T1).
 | `DESLOPPIFY_ROOT` | cwd | Project root |
 | `DESLOPPIFY_SRC` | `src` | Source directory (TS alias resolution) |
 | `--lang <name>` | auto-detected | Language selection (each has own state) |
-| `--exclude <dirs>` | none | Directories to skip (e.g. `--exclude migrations tests`) |
+| `--exclude <pattern>` | none | Path patterns to skip (repeatable: `--exclude migrations --exclude tests`) |
 | `--no-badge` | false | Skip scorecard image generation |
 | `--badge-path <path>` | `assets/scorecard.png` | Output path for scorecard image |
 | `DESLOPPIFY_NO_BADGE` | — | Set to `true` to disable badge via env |
@@ -125,10 +117,11 @@ Score is weighted (T4 = 4x T1).
 Project config values (stored in `.desloppify/config.json`) are managed via:
 - `desloppify config show`
 - `desloppify config set target_strict_score 95` (default: `95`, valid range: `0-100`)
+- `desloppify config set badge_path assets/scorecard.png` (path must include directory + filename; customize name like `assets/health.png`)
 
 #### Adding a language
 
-Use the scaffold workflow documented in `ADDING_A_NEW_LANGUAGE.md`:
+Use the scaffold workflow documented in `desloppify/languages/README.md`:
 
 ```bash
 desloppify dev scaffold-lang <name> --extension .ext --marker <root-marker>
@@ -143,11 +136,43 @@ Validated at registration. Zero shared code changes.
 #### Architecture
 
 ```
-detectors/              ← Generic algorithms (zero language knowledge)
-lang/base.py            ← Shared finding helpers
-lang/<name>/            ← Language config + phases + extractors + detectors + fixers
+engine/detectors/       ← Generic algorithms (zero language knowledge)
+hook_registry.py        ← Detector-safe access to optional language hooks
+languages/framework/runtime.py ← LangRun (per-run mutable scan state)
+languages/framework/base.py    ← Shared finding helpers
+languages/<name>/       ← Language config + phases + extractors + detectors + fixers
 ```
 
-Import direction: `lang/` → `detectors/`. Never the reverse.
+Import direction: `languages/` → `engine/detectors/`. Never the reverse.
+`LangConfig` stays static; runtime state lives on `LangRun`.
+
+#### Command-Layer Boundaries
+
+Command entry modules are intentionally thin orchestrators:
+
+- `desloppify/app/commands/review/cmd.py` delegates to
+  `desloppify/app/commands/review/prepare.py`, `desloppify/app/commands/review/batches.py`, `desloppify/app/commands/review/import_cmd.py`, and `desloppify/app/commands/review/runtime.py`
+- `desloppify/app/commands/scan/scan_reporting_dimensions.py` delegates to
+  `desloppify/app/commands/scan/scan_reporting_progress.py`, `desloppify/app/commands/scan/scan_reporting_breakdown.py`, and `desloppify/app/commands/scan/scan_reporting_subjective_paths.py`
+- `scan_reporting_subjective_paths.py` is a facade over
+  `scan_reporting_subjective_common.py`, `scan_reporting_subjective_integrity.py`, and `scan_reporting_subjective_output.py`
+- `desloppify/app/cli_support/parser.py` delegates subcommand construction to `desloppify/app/cli_support/parser_groups.py`
+
+Public CLI behavior should be preserved when refactoring these orchestrators.
+
+#### Allowed Dynamic Import Zones
+
+Dynamic/optional loading is allowed only in explicit extension points:
+
+- `desloppify/languages/__init__.py` for plugin discovery and registration
+- `desloppify/hook_registry.py` for detector-safe optional hooks
+
+Outside these zones, use static imports.
+
+#### State Ownership
+
+- `desloppify/state.py` and `desloppify/engine/state_internal/` own persisted schema and merge rules
+- `desloppify/languages/framework/runtime.py` (`LangRun`) owns per-run mutable execution state
+- command modules may read/write state through state APIs, but should not define ad-hoc persisted fields
 
 </details>

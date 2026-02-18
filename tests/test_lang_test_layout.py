@@ -6,9 +6,9 @@ import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
-from desloppify.lang import available_langs, get_lang
+from desloppify.languages import available_langs, get_lang
 from desloppify.utils import PROJECT_ROOT, compute_tool_hash, rel
-from desloppify.zones import FileZoneMap, Zone
+from desloppify.engine.policy.zones import FileZoneMap, Zone
 
 
 def _load_pyproject() -> dict:
@@ -16,11 +16,11 @@ def _load_pyproject() -> dict:
 
 
 def _lang_test_rel_path(lang: str) -> str:
-    return f"desloppify/lang/{lang}/tests"
+    return f"desloppify/languages/{lang}/tests"
 
 
 def _lang_test_exclude(lang: str) -> str:
-    return f"desloppify.lang.{lang}.tests*"
+    return f"desloppify.languages.{lang}.tests*"
 
 
 def test_pyproject_discovers_lang_test_paths():

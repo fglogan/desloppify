@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from desloppify.lang.csharp.detectors.security import detect_csharp_security
-from desloppify.zones import FileZoneMap
+from desloppify.languages.csharp.detectors.security import detect_csharp_security
+from desloppify.engine.policy.zones import FileZoneMap
 
 
 def test_detect_csharp_security_flags_sql_interpolation(tmp_path):

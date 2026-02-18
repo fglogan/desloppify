@@ -16,10 +16,47 @@ desloppify = "desloppify.cli:main"
 [tool.setuptools.packages.find]
 include = ["desloppify*"]
 
+[tool.setuptools.package-data]
+"desloppify.languages._shared" = ["review_data/*.json"]
+"desloppify.languages.python" = ["review_data/*.json"]
+"desloppify.languages.typescript" = ["review_data/*.json"]
+"desloppify.languages.csharp" = ["review_data/*.json"]
+"desloppify.languages.dart" = ["review_data/*.json"]
+"desloppify.languages.gdscript" = ["review_data/*.json"]
+
 [tool.pytest.ini_options]
-testpaths = [
-  "tests",
-  "desloppify/lang/python/tests",
-  "desloppify/lang/typescript/tests",
-  "desloppify/lang/csharp/tests",
+pythonpath = ["."]
+testpaths = ['tests', 'desloppify/languages/python/tests', 'desloppify/languages/typescript/tests', 'desloppify/languages/csharp/tests', 'desloppify/languages/dart/tests', 'desloppify/languages/gdscript/tests']
+norecursedirs = ["tests/fixtures"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unreachable = true
+show_error_codes = true
+strict_optional = true
+ignore_missing_imports = true
+follow_imports = "skip"
+pretty = true
+files = [
+  "desloppify/commands/review_cmd.py",
+  "desloppify/commands/review_prepare.py",
+  "desloppify/commands/review_batches.py",
+  "desloppify/commands/review_import.py",
+  "desloppify/commands/review_runtime.py",
+  "desloppify/commands/scan/scan_reporting_dimensions.py",
+  "desloppify/commands/scan/scan_reporting_progress.py",
+  "desloppify/commands/scan/scan_reporting_breakdown.py",
+  "desloppify/commands/scan/scan_reporting_subjective_paths.py",
+  "desloppify/cli_parser.py",
+  "desloppify/cli_parser_groups.py",
 ]

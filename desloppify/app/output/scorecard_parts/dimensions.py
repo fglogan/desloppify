@@ -1,0 +1,279 @@
+"""Dimension projection policy for scorecard rendering."""
+
+from __future__ import annotations
+
+from desloppify.app.output.scorecard_parts.dimension_policy import _DEFAULT_ELEGANCE_COMPONENTS, _ELEGANCE_COMPONENTS_BY_LANG, _MECHANICAL_SCORECARD_DIMENSIONS, _SCORECARD_DIMENSIONS_BY_LANG, _SCORECARD_MAX_DIMENSIONS, _SUBJECTIVE_SCORECARD_ORDER_BY_LANG, _SUBJECTIVE_SCORECARD_ORDER_DEFAULT
+
+
+def _resolve_scorecard_lang(state: dict) -> str | None:
+    """Best-effort current scan language key for scorecard display policy."""
+    history = state.get("scan_history")
+    if isinstance(history, list):
+        for entry in reversed(history):
+            if not isinstance(entry, dict):
+                continue
+            lang = entry.get("lang")
+            if isinstance(lang, str) and lang.strip():
+                return lang.strip().lower()
+
+    capabilities = state.get("lang_capabilities")
+    if isinstance(capabilities, dict) and len(capabilities) == 1:
+        only_lang = next(iter(capabilities.keys()))
+        if isinstance(only_lang, str) and only_lang.strip():
+            return only_lang.strip().lower()
+
+    findings = state.get("findings")
+    if isinstance(findings, dict):
+        counts: dict[str, int] = {}
+        for finding in findings.values():
+            if not isinstance(finding, dict):
+                continue
+            lang = finding.get("lang")
+            if isinstance(lang, str) and lang.strip():
+                key = lang.strip().lower()
+                counts[key] = counts.get(key, 0) + 1
+        if counts:
+            return max(counts, key=counts.get)
+    return None
+
+
+def _is_unassessed_subjective_placeholder(data: dict) -> bool:
+    return (
+        "subjective_assessment" in data.get("detectors", {})
+        and data.get("score", 0) == 0
+        and data.get("issues", 0) == 0
+    )
+
+
+def _collapse_elegance_dimensions(
+    active_dims: list[tuple[str, dict]],
+    *,
+    lang_key: str | None,
+) -> list[tuple[str, dict]]:
+    """Collapse High/Mid/Low elegance rows into one aggregate display row."""
+    component_names = set(
+        _ELEGANCE_COMPONENTS_BY_LANG.get(lang_key or "", _DEFAULT_ELEGANCE_COMPONENTS)
+    )
+    elegance_rows = [
+        (name, data) for name, data in active_dims if name in component_names
+    ]
+    if not elegance_rows:
+        return active_dims
+
+    remaining_rows = [
+        (name, data) for name, data in active_dims if name not in component_names
+    ]
+    count = len(elegance_rows)
+    score_avg = round(
+        sum(float(data.get("score", 100.0)) for _, data in elegance_rows) / count, 1
+    )
+    strict_avg = round(
+        sum(
+            float(data.get("strict", data.get("score", 100.0)))
+            for _, data in elegance_rows
+        )
+        / count,
+        1,
+    )
+    checks_total = sum(int(data.get("checks", 0)) for _, data in elegance_rows)
+    issues_total = sum(int(data.get("issues", 0)) for _, data in elegance_rows)
+    tier = max(int(data.get("tier", 4)) for _, data in elegance_rows)
+
+    label = "Elegance"
+    if any(name.lower() == label.lower() for name, _ in remaining_rows):
+        label = "Elegance (combined)"
+
+    pass_rate = round(score_avg / 100.0, 4)
+    return [
+        *remaining_rows,
+        (
+            label,
+            {
+                "score": score_avg,
+                "strict": strict_avg,
+                "checks": checks_total,
+                "issues": issues_total,
+                "tier": tier,
+                "detectors": {
+                    "subjective_assessment": {
+                        "potential": checks_total,
+                        "pass_rate": pass_rate,
+                        "issues": issues_total,
+                        "weighted_failures": round(checks_total * (1 - pass_rate), 4),
+                        "components": [name for name, _ in elegance_rows],
+                    }
+                },
+            },
+        ),
+    ]
+
+
+def _limit_scorecard_dimensions(
+    active_dims: list[tuple[str, dict]],
+    *,
+    lang_key: str | None,
+    max_rows: int = _SCORECARD_MAX_DIMENSIONS,
+) -> list[tuple[str, dict]]:
+    """Limit scorecard rows with language-specific subjective priority."""
+    if len(active_dims) <= max_rows:
+        return active_dims
+
+    mechanical = [
+        (name, data)
+        for name, data in active_dims
+        if "subjective_assessment" not in data.get("detectors", {})
+    ]
+    subjective = [
+        (name, data)
+        for name, data in active_dims
+        if "subjective_assessment" in data.get("detectors", {})
+    ]
+    if len(mechanical) >= max_rows:
+        return mechanical[:max_rows]
+
+    budget = max_rows - len(mechanical)
+    preferred_order = _SUBJECTIVE_SCORECARD_ORDER_BY_LANG.get(
+        lang_key or "",
+        _SUBJECTIVE_SCORECARD_ORDER_DEFAULT,
+    )
+
+    remaining = {name: (name, data) for name, data in subjective}
+    selected: list[tuple[str, dict]] = []
+    for name in preferred_order:
+        row = remaining.pop(name, None)
+        if row is None:
+            continue
+        selected.append(row)
+        if len(selected) >= budget:
+            break
+
+    if len(selected) < budget and remaining:
+        extras = sorted(
+            remaining.values(),
+            key=lambda item: (
+                float(item[1].get("strict", item[1].get("score", 100.0))),
+                item[0],
+            ),
+        )
+        selected.extend(extras[: budget - len(selected)])
+
+    return [*mechanical, *selected]
+
+
+def _prepare_scorecard_dimensions(state: dict) -> list[tuple[str, dict]]:
+    """Prepare scorecard rows (active, elegance-collapsed, capped)."""
+    dim_scores = state.get("dimension_scores", {})
+    if not isinstance(dim_scores, dict):
+        return []
+
+    all_dims = [
+        (name, data) for name, data in dim_scores.items() if isinstance(data, dict)
+    ]
+
+    lang_key = _resolve_scorecard_lang(state)
+    all_dims = _collapse_elegance_dimensions(all_dims, lang_key=lang_key)
+    dims_by_name = {name: data for name, data in all_dims}
+
+    target_names = _SCORECARD_DIMENSIONS_BY_LANG.get(lang_key or "")
+    if target_names:
+        selected: list[tuple[str, dict]] = []
+        for name in target_names:
+            data = dims_by_name.get(name)
+            if data is None:
+                is_subjective = name not in _MECHANICAL_SCORECARD_DIMENSIONS
+                if is_subjective:
+                    data = {
+                        "score": 0.0,
+                        "strict": 0.0,
+                        "checks": 0,
+                        "issues": 0,
+                        "tier": 4,
+                        "detectors": {
+                            "subjective_assessment": {
+                                "potential": 0,
+                                "pass_rate": 0.0,
+                                "issues": 0,
+                                "weighted_failures": 0.0,
+                                "components": [],
+                            }
+                        },
+                    }
+                else:
+                    data = {
+                        "score": 0.0,
+                        "strict": 0.0,
+                        "checks": 0,
+                        "issues": 0,
+                        "tier": 3,
+                        "detectors": {},
+                    }
+            selected.append((name, data))
+
+        selected.sort(key=lambda x: (0 if x[0] == "File health" else 1, x[0]))
+        return selected[:_SCORECARD_MAX_DIMENSIONS]
+
+    # Unknown language fallback: keep prior behavior for active dimensions only.
+    active_dims = [
+        (name, data)
+        for name, data in all_dims
+        if data.get("checks", 0) > 0 and not _is_unassessed_subjective_placeholder(data)
+    ]
+    active_dims = _limit_scorecard_dimensions(active_dims, lang_key=lang_key)
+    active_dims.sort(key=lambda x: (0 if x[0] == "File health" else 1, x[0]))
+    return active_dims
+
+
+def prepare_scorecard_dimensions(state: dict) -> list[tuple[str, dict]]:
+    """Public wrapper for scorecard row projection used by CLI/reporting surfaces."""
+    return _prepare_scorecard_dimensions(state)
+
+
+def resolve_scorecard_lang(state: dict) -> str | None:
+    """Public wrapper for scorecard language resolution."""
+    return _resolve_scorecard_lang(state)
+
+
+def collapse_elegance_dimensions(
+    active_dims: list[tuple[str, dict]],
+    *,
+    lang_key: str | None,
+) -> list[tuple[str, dict]]:
+    """Public wrapper for elegance-row collapsing."""
+    return _collapse_elegance_dimensions(active_dims, lang_key=lang_key)
+
+
+def limit_scorecard_dimensions(
+    active_dims: list[tuple[str, dict]],
+    *,
+    lang_key: str | None,
+    max_rows: int = _SCORECARD_MAX_DIMENSIONS,
+) -> list[tuple[str, dict]]:
+    """Public wrapper for scorecard row limiting."""
+    return _limit_scorecard_dimensions(
+        active_dims,
+        lang_key=lang_key,
+        max_rows=max_rows,
+    )
+
+
+def prepare_scorecard_dimensions_internal(state: dict) -> list[tuple[str, dict]]:
+    """Public wrapper for internal projection behavior."""
+    return _prepare_scorecard_dimensions(state)
+
+
+SCORECARD_MAX_DIMENSIONS = _SCORECARD_MAX_DIMENSIONS
+
+
+__all__ = [
+    "SCORECARD_MAX_DIMENSIONS",
+    "collapse_elegance_dimensions",
+    "limit_scorecard_dimensions",
+    "prepare_scorecard_dimensions_internal",
+    "prepare_scorecard_dimensions",
+    "resolve_scorecard_lang",
+    "_SCORECARD_MAX_DIMENSIONS",
+    "_collapse_elegance_dimensions",
+    "_limit_scorecard_dimensions",
+    "_prepare_scorecard_dimensions",
+    "_resolve_scorecard_lang",
+]

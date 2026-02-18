@@ -6,9 +6,9 @@ from pathlib import Path
 import shutil
 from types import SimpleNamespace
 
-from desloppify.lang.csharp import CSharpConfig
-from desloppify.lang.csharp.phases import _apply_csharp_actionability_gates
-from desloppify.plan import generate_findings
+from desloppify.languages.csharp import CSharpConfig
+from desloppify.languages.csharp.phases import _apply_csharp_actionability_gates
+from desloppify.engine.planning.core import generate_findings
 
 
 def _signal_rich_area(filepath: str) -> str:
@@ -198,7 +198,7 @@ def test_csharp_scan_uses_roslyn_cmd_override_from_lang_config(monkeypatch):
         captured["kwargs"] = kwargs
         return _Proc()
 
-    monkeypatch.setattr("desloppify.lang.csharp.detectors.deps.subprocess.run", _fake_run)
+    monkeypatch.setattr("desloppify.languages.csharp.detectors.deps.subprocess.run", _fake_run)
 
     config = CSharpConfig()
     config.set_runtime_context(options={"roslyn_cmd": "override-roslyn --json"})

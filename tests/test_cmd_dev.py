@@ -1,4 +1,4 @@
-"""Tests for desloppify.commands.dev_cmd."""
+"""Tests for desloppify.app.commands.dev_cmd."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import desloppify.commands.dev_cmd as dev_mod
+import desloppify.app.commands.dev_cmd as dev_mod
 
 
 REQUIRED_SCAFFOLD_PATHS = [
@@ -43,7 +43,7 @@ def test_scaffold_lang_creates_standard_files(tmp_path, monkeypatch):
     monkeypatch.setattr(dev_mod, "PROJECT_ROOT", tmp_path)
     dev_mod.cmd_dev(_args())
 
-    lang_dir = tmp_path / "desloppify" / "lang" / "ruby"
+    lang_dir = tmp_path / "desloppify" / "languages" / "ruby"
     assert lang_dir.is_dir()
     for rel_path in REQUIRED_SCAFFOLD_PATHS:
         assert (lang_dir / rel_path).exists(), f"missing scaffold path: {rel_path}"
@@ -68,7 +68,7 @@ def test_scaffold_lang_force_overwrites(tmp_path, monkeypatch):
     monkeypatch.setattr(dev_mod, "PROJECT_ROOT", tmp_path)
     dev_mod.cmd_dev(_args())
 
-    target = tmp_path / "desloppify" / "lang" / "ruby" / "commands.py"
+    target = tmp_path / "desloppify" / "languages" / "ruby" / "commands.py"
     target.write_text("SENTINEL\n")
 
     with pytest.raises(SystemExit, match="Language directory already exists"):
@@ -93,10 +93,10 @@ def test_scaffold_lang_wires_pyproject_once(tmp_path, monkeypatch):
 
     dev_mod.cmd_dev(_args(wire_pyproject=True))
     first = pyproject.read_text()
-    assert 'desloppify.lang.ruby.tests*' not in first
-    assert 'desloppify/lang/ruby/tests' in first
+    assert 'desloppify.languages.ruby.tests*' not in first
+    assert 'desloppify/languages/ruby/tests' in first
 
     dev_mod.cmd_dev(_args(force=True, wire_pyproject=True))
     second = pyproject.read_text()
-    assert second.count('desloppify.lang.ruby.tests*') == 0
-    assert second.count('desloppify/lang/ruby/tests') == 1
+    assert second.count('desloppify.languages.ruby.tests*') == 0
+    assert second.count('desloppify/languages/ruby/tests') == 1

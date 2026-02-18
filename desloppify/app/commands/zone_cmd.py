@@ -1,0 +1,116 @@
+"""zone command: show/set/clear zone classifications."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from desloppify.core import config as config_mod
+from desloppify.state import load_state
+from desloppify.utils import colorize, rel
+from desloppify.engine.policy.zones import FileZoneMap, Zone
+from desloppify.app.commands.helpers.lang import resolve_lang
+from desloppify.app.commands.helpers.rendering import print_agent_plan
+from desloppify.app.commands.helpers.runtime import command_runtime
+from desloppify.app.commands.helpers.state import state_path
+
+
+def cmd_zone(args: argparse.Namespace) -> None:
+    """Handle zone subcommands: show, set, clear."""
+    action = getattr(args, "zone_action", None)
+    if action in (None, "show"):
+        _zone_show(args)
+    elif action == "set":
+        _zone_set(args)
+    elif action == "clear":
+        _zone_clear(args)
+    else:
+        print(colorize("Usage: desloppify zone {show|set|clear}", "red"))
+
+
+def _zone_show(args):
+    """Show zone classifications for all scanned files."""
+    sp = state_path(args)
+    load_state(sp)  # validate state file exists/loads
+    lang = resolve_lang(args)
+    if not lang or not lang.file_finder:
+        print(colorize("No language detected — run a scan first.", "red"))
+        return
+
+    path = Path(args.path)
+    overrides = command_runtime(args).config.get("zone_overrides", {})
+
+    files = lang.file_finder(path)
+    zone_map = FileZoneMap(
+        files, lang.zone_rules, rel_fn=rel, overrides=overrides or None
+    )
+
+    # Group files by zone
+    by_zone: dict[str, list[str]] = {}
+    for f in sorted(files, key=lambda f: rel(f)):
+        zone = zone_map.get(f)
+        by_zone.setdefault(zone.value, []).append(f)
+
+    total = len(files)
+    print(colorize(f"\nZone classifications ({total} files)\n", "bold"))
+
+    for zone_val in ["production", "test", "config", "generated", "script", "vendor"]:
+        zone_files = by_zone.get(zone_val, [])
+        if not zone_files:
+            continue
+        print(colorize(f"  {zone_val} ({len(zone_files)} files)", "bold"))
+        for f in zone_files:
+            rp = rel(f)
+            is_override = rp in overrides
+            suffix = colorize(" (override)", "cyan") if is_override else ""
+            print(f"    {rp}{suffix}")
+        print()
+
+    if overrides:
+        print(colorize(f"  {len(overrides)} override(s) active", "dim"))
+    print(colorize("  Override: desloppify zone set <file> <zone>", "dim"))
+    print(colorize("  Clear:    desloppify zone clear <file>", "dim"))
+    print_agent_plan(
+        ["Fix misclassified files, then re-scan."],
+        next_command="desloppify scan",
+    )
+
+
+def _zone_set(args):
+    """Set a zone override for a file."""
+    filepath = args.zone_path
+    zone_value = args.zone_value
+
+    # Validate zone value
+    valid_zones = {z.value for z in Zone}
+    if zone_value not in valid_zones:
+        print(
+            colorize(
+                f"Invalid zone: {zone_value}. Valid: {', '.join(sorted(valid_zones))}",
+                "red",
+            )
+        )
+        return
+
+    config = command_runtime(args).config
+    config.setdefault("zone_overrides", {})[filepath] = zone_value
+    config_mod.save_config(config)
+    print(f"  Set {filepath} → {zone_value}")
+    print(colorize("  Run `desloppify scan` to apply.", "dim"))
+    print(colorize("  Next command: `desloppify scan`", "dim"))
+
+
+def _zone_clear(args):
+    """Clear a zone override for a file."""
+    filepath = args.zone_path
+
+    config = command_runtime(args).config
+    overrides = config.get("zone_overrides", {})
+    if filepath in overrides:
+        del overrides[filepath]
+        config_mod.save_config(config)
+        print(f"  Cleared override for {filepath}")
+        print(colorize("  Run `desloppify scan` to apply.", "dim"))
+        print(colorize("  Next command: `desloppify scan`", "dim"))
+    else:
+        print(colorize(f"  No override found for {filepath}", "yellow"))

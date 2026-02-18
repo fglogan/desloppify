@@ -1,70 +1,84 @@
 """Shared utilities: paths, colors, output formatting, file discovery."""
 
 import hashlib
+import json
 import os
 import re
 import sys
 import tempfile
-from functools import lru_cache
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
-PROJECT_ROOT = Path(os.environ.get("DESLOPPIFY_ROOT", Path.cwd())).resolve()
+from desloppify.core.internal import text_utils as _text_utils
+from desloppify.core.runtime_state import CACHE_ENABLED as _cache_enabled
+from desloppify.core.runtime_state import EXCLUSION_CONFIG, FILE_TEXT_CACHE, SOURCE_FILE_CACHE
+
+get_area = _text_utils.get_area
+strip_c_style_comments = _text_utils.strip_c_style_comments
+
+PROJECT_ROOT = _text_utils.PROJECT_ROOT
 DEFAULT_PATH = PROJECT_ROOT / "src"
 SRC_PATH = PROJECT_ROOT / os.environ.get("DESLOPPIFY_SRC", "src")
 
-# Directories that are never useful to scan — always pruned during traversal.
-DEFAULT_EXCLUSIONS = frozenset({
-    "node_modules", ".git", "__pycache__", ".venv", "venv", ".env",
-    "dist", "build", ".next", ".nuxt", ".output",
-    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".eggs", "*.egg-info",
-    ".svn", ".hg",
-})
 
-# Extra exclusions set via --exclude CLI flag, applied to all file discovery
-_EXTRA_EXCLUSIONS_STATE: dict[str, tuple[str, ...]] = {"value": ()}
-# Backward-compatible alias used by tests and older call sites.
-_extra_exclusions: tuple[str, ...] = _EXTRA_EXCLUSIONS_STATE["value"]
+def read_code_snippet(filepath: str, line: int, context: int = 1) -> str | None:
+    """Compatibility wrapper that honors runtime changes to PROJECT_ROOT."""
+    return _text_utils.read_code_snippet(
+        filepath, line, context, project_root=PROJECT_ROOT
+    )
+
+# Directories that are never useful to scan — always pruned during traversal.
+DEFAULT_EXCLUSIONS = frozenset(
+    {
+        "node_modules",
+        ".git",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".env",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".eggs",
+        "*.egg-info",
+        ".svn",
+        ".hg",
+    }
+)
 
 
 def set_exclusions(patterns: list[str]):
     """Set global exclusion patterns (called once from CLI at startup)."""
-    value = tuple(patterns)
-    _EXTRA_EXCLUSIONS_STATE["value"] = value
-    globals()["_extra_exclusions"] = value
-    _find_source_files_cached.cache_clear()
+    EXCLUSION_CONFIG.values = tuple(patterns)
+    SOURCE_FILE_CACHE.clear()
 
 
 def get_exclusions() -> tuple[str, ...]:
     """Return current extra exclusion patterns.
 
-    Use this instead of accessing the mutable exclusion state directly —
+    Use this instead of accessing exclusion state directly —
     from-imports bind to the initial value and become stale after set_exclusions().
     """
-    return _EXTRA_EXCLUSIONS_STATE["value"]
-
-
-# ── File content cache (opt-in, scan-scoped) ─────────────
-
-_FILE_CACHE: dict[str, str | None] = {}
-_CACHE_FLAGS = {"enabled": False}
-
-
-def is_file_cache_enabled() -> bool:
-    """Whether the scan-scoped file content cache is currently enabled."""
-    return bool(_CACHE_FLAGS["enabled"])
+    return EXCLUSION_CONFIG.values
 
 
 def enable_file_cache():
     """Enable scan-scoped file content cache."""
-    _CACHE_FLAGS["enabled"] = True
-    _FILE_CACHE.clear()
+    FILE_TEXT_CACHE.enable()
+    _cache_enabled.set(True)
 
 
 def disable_file_cache():
     """Disable file content cache and free memory."""
-    _CACHE_FLAGS["enabled"] = False
-    _FILE_CACHE.clear()
+    FILE_TEXT_CACHE.disable()
+    _cache_enabled.set(False)
 
 
 # ── Atomic file writes ─────────────────────────────────────
@@ -77,11 +91,9 @@ def safe_write_text(filepath: str | Path, content: str) -> None:
         with os.fdopen(fd, "w") as f:
             f.write(content)
         os.replace(tmp, str(p))
-    except BaseException:
-        try:
+    except OSError:
+        if os.path.exists(tmp):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -90,19 +102,12 @@ def safe_write_text(filepath: str | Path, content: str) -> None:
 
 def read_file_text(filepath: str) -> str | None:
     """Read a file as text, with optional caching."""
-    if _CACHE_FLAGS["enabled"] and filepath in _FILE_CACHE:
-        return _FILE_CACHE[filepath]
-    try:
-        content = Path(filepath).read_text(errors="replace")
-    except OSError:
-        content = None
-    if _CACHE_FLAGS["enabled"]:
-        _FILE_CACHE[filepath] = content
-    return content
+    return FILE_TEXT_CACHE.read(filepath)
 
 
-def grep_files(pattern: str, file_list: list[str], *,
-               flags: int = 0) -> list[tuple[str, int, str]]:
+def grep_files(
+    pattern: str, file_list: list[str], *, flags: int = 0
+) -> list[tuple[str, int, str]]:
     """Search files for a regex pattern. Returns list of (filepath, lineno, line_text).
 
     Cross-platform replacement for ``grep -rn -E <pattern> <path>``.
@@ -120,8 +125,9 @@ def grep_files(pattern: str, file_list: list[str], *,
     return results
 
 
-def grep_files_containing(names: set[str], file_list: list[str], *,
-                          word_boundary: bool = True) -> dict[str, set[str]]:
+def grep_files_containing(
+    names: set[str], file_list: list[str], *, word_boundary: bool = True
+) -> dict[str, set[str]]:
     r"""Find which files contain which names. Returns {name: set(filepaths)}.
 
     Cross-platform replacement for ``grep -rlFw -f patternfile <path>``
@@ -131,7 +137,9 @@ def grep_files_containing(names: set[str], file_list: list[str], *,
         return {}
     if word_boundary:
         escaped = sorted(names, key=len, reverse=True)
-        combined = re.compile(r"\b(?:" + "|".join(re.escape(n) for n in escaped) + r")\b")
+        combined = re.compile(
+            r"\b(?:" + "|".join(re.escape(n) for n in escaped) + r")\b"
+        )
     else:
         escaped = sorted(names, key=len, reverse=True)
         combined = re.compile("|".join(re.escape(n) for n in escaped))
@@ -148,8 +156,9 @@ def grep_files_containing(names: set[str], file_list: list[str], *,
     return name_to_files
 
 
-def grep_count_files(name: str, file_list: list[str], *,
-                     word_boundary: bool = True) -> list[str]:
+def grep_count_files(
+    name: str, file_list: list[str], *, word_boundary: bool = True
+) -> list[str]:
     """Return list of files containing name. Replacement for ``grep -rl -w name``."""
     if word_boundary:
         pat = re.compile(r"\b" + re.escape(name) + r"\b")
@@ -196,30 +205,44 @@ def log(msg: str):
     print(colorize(msg, "dim"), file=sys.stderr)
 
 
-def print_table(headers: list[str], rows: list[list[str]], widths: list[int] | None = None):
+def print_table(
+    headers: list[str], rows: list[list[str]], widths: list[int] | None = None
+) -> None:
     if not rows:
         return
     if not widths:
-        widths = [max(len(str(h)), *(len(str(r[i])) for r in rows)) for i, h in enumerate(headers)]
-    header_line = "  ".join(h.ljust(w) for h, w in zip(headers, widths))
+        widths = [
+            max(len(str(h)), *(len(str(r[i])) for r in rows))
+            for i, h in enumerate(headers)
+        ]
+    header_line = "  ".join(h.ljust(w) for h, w in zip(headers, widths, strict=False))
     print(colorize(header_line, "bold"))
     print(colorize("─" * (sum(widths) + 2 * (len(widths) - 1)), "dim"))
     for row in rows:
-        print("  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
+        print("  ".join(str(v).ljust(w) for v, w in zip(row, widths, strict=False)))
 
 
-def display_entries(args, entries, *, label, empty_msg, columns, widths, row_fn,
-                    json_payload=None, overflow=True):
+def display_entries(
+    args: object,
+    entries: Sequence[Any],
+    *,
+    label: str,
+    empty_msg: str,
+    columns: Sequence[str],
+    widths: list[int] | None,
+    row_fn: Callable[[Any], list[str]],
+    json_payload: dict | None = None,
+    overflow: bool = True,
+) -> bool:
     """Standard JSON/empty/table display for detect commands.
 
     Handles the three-branch pattern shared by most cmd wrappers:
     1. --json → dump payload  2. empty → green message  3. table → header + rows + overflow.
     Returns True if entries were displayed, False if empty.
     """
-    import json as _json
     if getattr(args, "json", False):
         payload = json_payload or {"count": len(entries), "entries": entries}
-        print(_json.dumps(payload, indent=2))
+        print(json.dumps(payload, indent=2))
         return True
     if not entries:
         print(colorize(empty_msg, "green"))
@@ -227,7 +250,7 @@ def display_entries(args, entries, *, label, empty_msg, columns, widths, row_fn,
     print(colorize(f"\n{label}: {len(entries)}\n", "bold"))
     top = getattr(args, "top", 20)
     rows = [row_fn(e) for e in entries[:top]]
-    print_table(columns, rows, widths)
+    print_table(list(columns), rows, widths)
     if overflow and len(entries) > top:
         print(f"\n  ... and {len(entries) - top} more")
     return True
@@ -282,58 +305,92 @@ def matches_exclusion(rel_path: str, exclusion: str) -> bool:
     # Directory prefix match (e.g. "src/test" matches "src/test/bar.py")
     if "/" in exclusion or os.sep in exclusion:
         normalized = exclusion.rstrip("/").rstrip(os.sep)
-        return rel_path.startswith(normalized + "/") or rel_path.startswith(normalized + os.sep)
+        return rel_path.startswith(normalized + "/") or rel_path.startswith(
+            normalized + os.sep
+        )
     return False
 
 
 def _is_excluded_dir(name: str, rel_path: str, extra: tuple[str, ...]) -> bool:
     """Check if a directory should be pruned during traversal."""
-    if name in DEFAULT_EXCLUSIONS or name.endswith(".egg-info"):
-        return True
-    if name.startswith(".venv") or name.startswith("venv"):
-        return True
-    if extra and any(matches_exclusion(rel_path, ex) or ex == name for ex in extra):
-        return True
-    return False
+    in_default_exclusions = name in DEFAULT_EXCLUSIONS or name.endswith(".egg-info")
+    is_virtualenv_dir = name.startswith(".venv") or name.startswith("venv")
+    matches_extra_exclusion = bool(
+        extra
+        and any(
+            matches_exclusion(rel_path, exclusion) or exclusion == name
+            for exclusion in extra
+        )
+    )
+    return in_default_exclusions or is_virtualenv_dir or matches_extra_exclusion
 
 
-@lru_cache(maxsize=16)
-def _find_source_files_cached(path: str, extensions: tuple[str, ...],
-                               exclusions: tuple[str, ...] | None = None,
-                               extra_exclusions: tuple[str, ...] = (),
-                               project_root: str = ".") -> tuple[str, ...]:
+# Backward-compatible names used in tests; state is owned by core.runtime_state.
+_SOURCE_FILE_CACHE_MAX = SOURCE_FILE_CACHE.max_entries
+_SOURCE_FILE_CACHE = SOURCE_FILE_CACHE.values
+
+
+def _clear_source_file_cache() -> None:
+    """Clear cached source-file discovery results."""
+    SOURCE_FILE_CACHE.clear()
+
+
+def _find_source_files_cached(
+    path: str,
+    extensions: tuple[str, ...],
+    exclusions: tuple[str, ...] | None = None,
+    extra_exclusions: tuple[str, ...] = (),
+) -> tuple[str, ...]:
     """Cached file discovery using os.walk — cross-platform, prunes during traversal."""
-    project_root_path = Path(project_root)
+    cache_key = (path, extensions, exclusions, extra_exclusions)
+    cached = SOURCE_FILE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     root = Path(path)
     if not root.is_absolute():
-        root = project_root_path / root
+        root = PROJECT_ROOT / root
     all_exclusions = (exclusions or ()) + extra_exclusions
     ext_set = set(extensions)
     files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded directories in-place (prevents descending into them)
-        rel_dir = _normalize_path_separators(_safe_relpath(dirpath, project_root_path))
+        rel_dir = _normalize_path_separators(_safe_relpath(dirpath, PROJECT_ROOT))
         dirnames[:] = sorted(
-            d for d in dirnames
+            d
+            for d in dirnames
             if not _is_excluded_dir(d, rel_dir + "/" + d, all_exclusions)
         )
         for fname in filenames:
             if any(fname.endswith(ext) for ext in ext_set):
                 full = os.path.join(dirpath, fname)
-                rel_file = _normalize_path_separators(_safe_relpath(full, project_root_path))
-                if all_exclusions and any(matches_exclusion(rel_file, ex) for ex in all_exclusions):
+                rel_file = _normalize_path_separators(_safe_relpath(full, PROJECT_ROOT))
+                if all_exclusions and any(
+                    matches_exclusion(rel_file, ex) for ex in all_exclusions
+                ):
                     continue
                 files.append(rel_file)
-    return tuple(sorted(files))
+    result = tuple(sorted(files))
+    SOURCE_FILE_CACHE.put(cache_key, result)
+    return result
 
 
-def find_source_files(path: str | Path, extensions: list[str],
-                      exclusions: list[str] | None = None) -> list[str]:
+_find_source_files_cached.cache_clear = _clear_source_file_cache
+
+
+def find_source_files(
+    path: str | Path, extensions: list[str], exclusions: list[str] | None = None
+) -> list[str]:
     """Find all files with given extensions under a path, excluding patterns."""
-    # Pass runtime exclusions as part of cache key so updates invalidate cached results.
-    return list(_find_source_files_cached(
-        str(path), tuple(extensions), tuple(exclusions) if exclusions else None,
-        _EXTRA_EXCLUSIONS_STATE["value"], str(PROJECT_ROOT)))
+    # Pass configured extra exclusions as part of the cache key so changes invalidate cached results.
+    return list(
+        _find_source_files_cached(
+            str(path),
+            tuple(extensions),
+            tuple(exclusions) if exclusions else None,
+            get_exclusions(),
+        )
+    )
 
 
 def find_ts_files(path: str | Path) -> list[str]:
@@ -371,6 +428,8 @@ def compute_tool_hash() -> str:
             h.update(str(py_file.relative_to(TOOL_DIR)).encode())
             h.update(py_file.read_bytes())
         except OSError:
+            # Keep hash deterministic even when a source file is temporarily unreadable.
+            h.update(f"[unreadable:{py_file.name}]".encode())
             continue
     return h.hexdigest()[:12]
 
@@ -382,79 +441,8 @@ def check_tool_staleness(state: dict) -> str | None:
         return None
     current = compute_tool_hash()
     if current != stored:
-        return (f"Tool code changed since last scan (was {stored}, now {current}). "
-                f"Consider re-running: desloppify scan")
+        return (
+            f"Tool code changed since last scan (was {stored}, now {current}). "
+            f"Consider re-running: desloppify scan"
+        )
     return None
-
-
-def read_code_snippet(filepath: str, line: int, context: int = 1) -> str | None:
-    """Read ±context lines around a line number. Returns formatted string or None."""
-    try:
-        full = str(PROJECT_ROOT / filepath)
-        content = Path(full).read_text(errors="replace")
-    except OSError:
-        return None
-    lines = content.splitlines()
-    if line < 1 or line > len(lines):
-        return None
-    start = max(0, line - 1 - context)
-    end = min(len(lines), line + context)
-    parts = []
-    for i in range(start, end):
-        ln = i + 1
-        marker = "→" if ln == line else " "
-        text = lines[i]
-        if len(text) > 120:
-            text = text[:117] + "..."
-        parts.append(f"    {marker} {ln:>4} │ {text}")
-    return "\n".join(parts)
-
-
-def get_area(filepath: str) -> str:
-    """Derive an area name from a file path (generic: first 2 path components)."""
-    parts = filepath.split("/")
-    return "/".join(parts[:2]) if len(parts) > 1 else parts[0]
-
-
-def strip_c_style_comments(text: str) -> str:
-    """Strip // and /* */ comments while preserving string literals.
-
-    Works for any language with C-style comments (JS, TS, Java, Go, etc.).
-    Handles single-quoted, double-quoted, and template literal strings.
-    """
-    result: list[str] = []
-    i = 0
-    in_str = None
-    while i < len(text):
-        ch = text[i]
-        if in_str:
-            if ch == '\\' and i + 1 < len(text):
-                result.append(text[i:i + 2])
-                i += 2
-                continue
-            if ch == in_str:
-                in_str = None
-            result.append(ch)
-            i += 1
-        elif ch in ('"', "'", '`'):
-            in_str = ch
-            result.append(ch)
-            i += 1
-        elif ch == '/' and i + 1 < len(text):
-            if text[i + 1] == '/':
-                nl = text.find('\n', i)
-                if nl == -1:
-                    break
-                i = nl
-            elif text[i + 1] == '*':
-                end = text.find('*/', i + 2)
-                if end == -1:
-                    break
-                i = end + 2
-            else:
-                result.append(ch)
-                i += 1
-        else:
-            result.append(ch)
-            i += 1
-    return ''.join(result)

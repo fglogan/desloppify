@@ -1,5 +1,5 @@
 """Allow running as: python -m desloppify"""
 
-from .cli import main
+from desloppify.cli import main
 
 main()

@@ -1,0 +1,185 @@
+"""Per-file review finding import workflow."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+from typing import Any
+
+from desloppify.state import make_finding, merge_scan, utc_now
+from desloppify.utils import PROJECT_ROOT
+from desloppify.intelligence.review.dimensions.data import load_per_file_dimensions_for_lang
+from desloppify.intelligence.review.importing.shared import extract_reviewed_files, store_assessments
+
+
+def _extract_findings_and_assessments(
+    data: list[dict] | dict,
+) -> tuple[list[dict], dict | None]:
+    """Parse import payload in legacy/list or current/object format."""
+    if isinstance(data, list):
+        return data, None
+    if isinstance(data, dict):
+        findings = data.get("findings", [])
+        assessments = data.get("assessments") or None
+        return findings if isinstance(findings, list) else [], assessments
+    return [], None
+
+
+def import_review_findings(
+    findings_data: list[dict] | dict,
+    state: dict[str, Any],
+    lang_name: str,
+    *,
+    project_root=PROJECT_ROOT,
+    utc_now_fn=utc_now,
+) -> dict[str, Any]:
+    """Import agent-produced per-file review findings into state."""
+    findings_list, assessments = _extract_findings_and_assessments(findings_data)
+    reviewed_files = extract_reviewed_files(findings_data)
+    if assessments:
+        store_assessments(
+            state,
+            assessments,
+            source="per_file",
+            utc_now_fn=utc_now_fn,
+        )
+
+    _, per_file_prompts, _ = load_per_file_dimensions_for_lang(lang_name)
+    required_fields = ("file", "dimension", "identifier", "summary", "confidence")
+
+    review_findings: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for idx, finding in enumerate(findings_list):
+        missing = [key for key in required_fields if key not in finding]
+        if missing:
+            skipped.append(
+                {
+                    "index": idx,
+                    "missing": missing,
+                    "identifier": finding.get("identifier", "<none>"),
+                }
+            )
+            continue
+
+        confidence = finding.get("confidence", "low")
+        if confidence not in ("high", "medium", "low"):
+            confidence = "low"
+
+        dimension = finding["dimension"]
+        if dimension not in per_file_prompts:
+            skipped.append(
+                {
+                    "index": idx,
+                    "missing": [f"invalid dimension: {dimension}"],
+                    "identifier": finding.get("identifier", "<none>"),
+                }
+            )
+            continue
+
+        content_hash = hashlib.sha256(finding["summary"].encode()).hexdigest()[:8]
+        imported = make_finding(
+            detector="review",
+            file=str(project_root / finding["file"]),
+            name=f"{dimension}::{finding['identifier']}::{content_hash}",
+            tier=3,
+            confidence=confidence,
+            summary=finding["summary"],
+            detail={
+                "dimension": dimension,
+                "evidence": finding.get("evidence", []),
+                "suggestion": finding.get("suggestion", ""),
+                "reasoning": finding.get("reasoning", ""),
+                "evidence_lines": finding.get("evidence_lines", []),
+            },
+        )
+        imported["lang"] = lang_name
+        review_findings.append(imported)
+
+    reviewed_from_findings = {
+        finding["file"]
+        for finding in findings_list
+        if all(key in finding for key in required_fields)
+    }
+    review_potential_files = reviewed_from_findings | set(reviewed_files)
+
+    potentials = state.setdefault("potentials", {}).setdefault(lang_name, {})
+    potentials["review"] = len(review_potential_files)
+
+    diff = merge_scan(
+        state,
+        review_findings,
+        lang=lang_name,
+        potentials={"review": potentials.get("review", 0)},
+        merge_potentials=True,
+    )
+
+    new_ids = {finding["id"] for finding in review_findings}
+    reimported_files = {
+        finding["file"]
+        for finding in findings_list
+        if all(key in finding for key in required_fields)
+    }
+    for finding_id, finding in state.get("findings", {}).items():
+        if (
+            finding["status"] == "open"
+            and finding.get("detector") == "review"
+            and not finding.get("detail", {}).get("holistic")
+            and finding.get("file", "") in reimported_files
+            and finding_id not in new_ids
+        ):
+            finding["status"] = "auto_resolved"
+            finding["resolved_at"] = utc_now_fn()
+            finding["note"] = "not reported in latest per-file re-import"
+            diff["auto_resolved"] = diff.get("auto_resolved", 0) + 1
+
+    if skipped:
+        diff["skipped"] = len(skipped)
+        diff["skipped_details"] = skipped
+
+    update_review_cache(
+        state,
+        findings_list,
+        reviewed_files=reviewed_files,
+        project_root=project_root,
+        utc_now_fn=utc_now_fn,
+    )
+    return diff
+
+
+def update_review_cache(
+    state: dict[str, Any],
+    findings_data: list[dict],
+    *,
+    reviewed_files: list[str] | None = None,
+    project_root=PROJECT_ROOT,
+    utc_now_fn=utc_now,
+) -> None:
+    """Update per-file review cache with timestamps and content hashes."""
+    selection_mod = importlib.import_module("desloppify.intelligence.review.selection")
+
+    review_cache = state.setdefault("review_cache", {})
+    file_cache = review_cache.setdefault("files", {})
+    now = utc_now_fn()
+
+    findings_by_file: dict[str, list[dict]] = {}
+    for finding in findings_data:
+        file_path = finding.get("file")
+        if not isinstance(file_path, str):
+            continue
+        findings_by_file.setdefault(file_path, []).append(finding)
+
+    reviewed_set = set(findings_by_file)
+    if reviewed_files:
+        reviewed_set.update(file_path for file_path in reviewed_files if file_path)
+
+    for file_path in reviewed_set:
+        absolute = project_root / file_path
+        content_hash = (
+            selection_mod.hash_file(str(absolute)) if absolute.exists() else ""
+        )
+        file_cache[file_path] = {
+            "content_hash": content_hash,
+            "reviewed_at": now,
+            "finding_count": len(findings_by_file.get(file_path, [])),
+        }

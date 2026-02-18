@@ -5,32 +5,32 @@ from __future__ import annotations
 import ast
 import inspect
 
-import desloppify.cli_parser as cli_parser
-import desloppify.cli_parser_extras as cli_parser_extras
-import desloppify.csharp_deps_cli as csharp_deps_cli
-import desloppify.csharp_deps_fallback as csharp_deps_fallback
-import desloppify.layer_violation_core as layer_violation_core
-import desloppify.commands.config_cmd as config_cmd
-import desloppify.commands._show_terminal as show_terminal
-import desloppify.commands._status_sections as status_sections
-import desloppify.commands._status_transparency as status_transparency
-import desloppify.commands.resolve as resolve_cmd
-import desloppify.detectors.lang_hooks as lang_hooks
-import desloppify.lang.csharp.move as csharp_move
-import desloppify.lang.csharp._parse_helpers as csharp_parse_helpers
-import desloppify.lang.csharp.review as csharp_review
-import desloppify.lang.finding_factories as finding_factories
-import desloppify.lang.python._phase_quality as py_phase_quality
-import desloppify.lang.python.detectors.dict_keys_visitor as dict_keys_visitor
-import desloppify.lang.python.detectors.private_imports as private_imports
-import desloppify.lang.python.detectors.smells_ast as smells_ast
-import desloppify.lang.python.phases as py_phases
-import desloppify.lang.python.review as py_review
-import desloppify.lang.typescript.phases as ts_phases
-import desloppify.lang.typescript.review as ts_review
-import desloppify.output._tree_helpers as tree_helpers
-import desloppify.output._scorecard_draw as scorecard_draw
-import desloppify.review.dimensions as review_dimensions
+import desloppify.app.cli_support.parser as cli_parser
+import desloppify.app.cli_support.parser_extras as cli_parser_extras
+import desloppify.languages.csharp.deps.cli as csharp_deps_cli
+import desloppify.languages.csharp.deps.fallback as csharp_deps_fallback
+import desloppify.core.internal.layer_violation as layer_violation_core
+import desloppify.app.commands.config_cmd as config_cmd
+import desloppify.app.commands._show_terminal as show_terminal
+import desloppify.app.commands.status_parts.sections as status_sections
+import desloppify.app.commands.status_parts.transparency as status_transparency
+import desloppify.app.commands.resolve as resolve_cmd
+import desloppify.engine.detectors.lang_hooks as lang_hooks
+import desloppify.languages.csharp.move as csharp_move
+import desloppify.languages.csharp._parse_helpers as csharp_parse_helpers
+import desloppify.languages.csharp.review as csharp_review
+import desloppify.languages.framework.finding_factories as finding_factories
+import desloppify.languages.python._phase_quality as py_phase_quality
+import desloppify.languages.python.detectors.dict_keys_visitor as dict_keys_visitor
+import desloppify.languages.python.detectors.private_imports as private_imports
+import desloppify.languages.python.detectors.smells_ast as smells_ast
+import desloppify.languages.python.phases as py_phases
+import desloppify.languages.python.review as py_review
+import desloppify.languages.typescript.phases as ts_phases
+import desloppify.languages.typescript.review as ts_review
+import desloppify.app.output._tree_helpers as tree_helpers
+import desloppify.app.output.scorecard_parts.draw as scorecard_draw
+import desloppify.intelligence.review.dimensions as review_dimensions
 
 
 def test_direct_module_coverage_smoke_signals():
