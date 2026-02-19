@@ -15,7 +15,7 @@ desloppify = "desloppify.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["desloppify*"]
-exclude = ["*.tests", "*.tests.*"]
+exclude = ["desloppify.tests", "desloppify.tests.*"]
 
 [tool.setuptools]
 include-package-data = false

@@ -90,7 +90,10 @@ def emit_scorecard_badge(
     except OSError:
         return None
 
-    rel_path = badge_path.name if badge_path.parent == PROJECT_ROOT else str(badge_path)
+    try:
+        rel_path = str(badge_path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        rel_path = str(badge_path)
 
     readme_has_badge = False
     for readme_name in ("README.md", "readme.md", "README.MD"):

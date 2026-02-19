@@ -117,12 +117,6 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
             config[key] = copy.deepcopy(schema.default)
             changed = True
         elif key == "badge_path":
-            if str(config[key]).strip() == "assets/scorecard.png":
-                # 0.6.0 briefly changed the default to assets/scorecard.png.
-                # Treat that exact value as a legacy default and restore root default.
-                config[key] = copy.deepcopy(schema.default)
-                changed = True
-                continue
             try:
                 normalized = _validate_badge_path(str(config[key]))
                 if normalized != config[key]:
