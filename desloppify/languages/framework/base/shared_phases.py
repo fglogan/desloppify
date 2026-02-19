@@ -233,8 +233,15 @@ def phase_subjective_review(
     if isinstance(review_cache, dict) and "files" in review_cache:
         per_file_cache = review_cache.get("files", {})
     else:
-        per_file_cache = review_cache if isinstance(review_cache, dict) else {}
+        # Legacy format: flat dict of file entries with no "files" wrapper.
+        # Filter out known top-level structural keys so they aren't treated as
+        # file paths, then reconstruct the canonical shape preserving them.
+        _TOP_LEVEL_KEYS = frozenset({"holistic"})
+        raw = review_cache if isinstance(review_cache, dict) else {}
+        per_file_cache = {k: v for k, v in raw.items() if k not in _TOP_LEVEL_KEYS}
         review_cache = {"files": per_file_cache}
+        if "holistic" in raw:
+            review_cache["holistic"] = raw["holistic"]
 
     entries, potential = detect_review_coverage(
         files,
