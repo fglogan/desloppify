@@ -98,6 +98,59 @@ def test_write_packet_snapshot_redacts_target_from_blind_packet(tmp_path):
     assert blind_payload["config"]["noise_budget"] == 10
 
 
+def _make_do_prepare_args(*, total_files: int = 3, state: dict | None = None):
+    """Return the common kwargs for do_prepare, overriding total_files."""
+    args = SimpleNamespace(path=".", dimensions=None)
+    captured: dict = {}
+
+    def _setup_lang(_lang, _path, _config):
+        return SimpleNamespace(name="python"), []
+
+    return dict(
+        args=args,
+        state=state or {},
+        lang=SimpleNamespace(name="python"),
+        _state_path=None,
+        config={},
+        holistic=True,
+        setup_lang_fn=_setup_lang,
+        narrative_mod=SimpleNamespace(
+            NarrativeContext=lambda **kwargs: SimpleNamespace(**kwargs),
+            compute_narrative=lambda *_args, **_kwargs: {"headline": "x"},
+        ),
+        review_mod=SimpleNamespace(
+            HolisticReviewPrepareOptions=lambda **kwargs: SimpleNamespace(**kwargs),
+            prepare_holistic_review=lambda *_args, **_kwargs: {
+                "total_files": total_files,
+                "investigation_batches": [],
+                "workflow": [],
+            },
+        ),
+        write_query_fn=lambda payload: captured.update(payload),
+        colorize_fn=lambda text, _style: text,
+        log_fn=lambda _msg: None,
+    ), captured
+
+
+def test_review_prepare_zero_files_exits_with_error(capsys):
+    """Regression guard for issue #127: 0-file result must error, not silently succeed."""
+    kwargs, _ = _make_do_prepare_args(total_files=0)
+    with pytest.raises(SystemExit) as exc:
+        do_prepare(**kwargs)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "no files found" in err.lower()
+
+
+def test_review_prepare_zero_files_hints_scan_path(capsys):
+    """When state has a scan_path, the error hint mentions it."""
+    kwargs, _ = _make_do_prepare_args(total_files=0, state={"scan_path": "."})
+    with pytest.raises(SystemExit):
+        do_prepare(**kwargs)
+    err = capsys.readouterr().err
+    assert "--path" in err
+
+
 def test_review_prepare_query_redacts_target_score():
     captured: dict[str, object] = {}
 
@@ -129,7 +182,7 @@ def test_review_prepare_query_redacts_target_score():
         review_mod=SimpleNamespace(
             HolisticReviewPrepareOptions=lambda **kwargs: SimpleNamespace(**kwargs),
             prepare_holistic_review=lambda *_args, **_kwargs: {
-                "total_files": 0,
+                "total_files": 3,
                 "investigation_batches": [],
                 "workflow": [],
             }

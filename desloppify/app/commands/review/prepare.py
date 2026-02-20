@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -56,6 +57,34 @@ def do_prepare(
     data["next_command"] = "desloppify review --import findings.json"
     write_query_fn(data)
     total = data.get("total_files", 0)
+    if total == 0:
+        print(
+            colorize_fn(
+                f"\n  Error: no files found at path '{path}'. "
+                "Nothing to review.",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+        scan_path = state.get("scan_path") if isinstance(state, dict) else None
+        if scan_path:
+            print(
+                colorize_fn(
+                    f"  Hint: your last scan used --path {scan_path}. "
+                    f"Try: desloppify review --prepare --path {scan_path}",
+                    "yellow",
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(
+                colorize_fn(
+                    "  Hint: pass --path <dir> matching the path used during scan.",
+                    "yellow",
+                ),
+                file=sys.stderr,
+            )
+        sys.exit(1)
     batches = data.get("investigation_batches", [])
     print(colorize_fn(f"\n  Holistic review prepared: {total} files in codebase", "bold"))
     if batches:
