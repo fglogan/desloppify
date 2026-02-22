@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.text_utils import PROJECT_ROOT, get_project_root
 from desloppify.core.runtime_state import current_runtime_context
 
 __all__ = [
@@ -57,13 +57,13 @@ DEFAULT_EXCLUSIONS = frozenset(
 def set_exclusions(patterns: list[str]):
     """Set global exclusion patterns (called once from CLI at startup)."""
     runtime = current_runtime_context()
-    runtime.exclusion_config.values = tuple(patterns)
+    runtime.exclusions = tuple(patterns)
     runtime.source_file_cache.clear()
 
 
 def get_exclusions() -> tuple[str, ...]:
     """Return current extra exclusion patterns."""
-    return current_runtime_context().exclusion_config.values
+    return current_runtime_context().exclusions
 
 
 def matches_exclusion(rel_path: str, exclusion: str) -> bool:
@@ -97,11 +97,12 @@ def _safe_relpath(path: str | Path, start: str | Path) -> str:
 
 
 def rel(path: str) -> str:
+    root = get_project_root()
     resolved = Path(path).resolve()
     try:
-        return _normalize_path_separators(str(resolved.relative_to(PROJECT_ROOT)))
+        return _normalize_path_separators(str(resolved.relative_to(root)))
     except ValueError:
-        return _normalize_path_separators(_safe_relpath(resolved, PROJECT_ROOT))
+        return _normalize_path_separators(_safe_relpath(resolved, root))
 
 
 def resolve_path(filepath: str) -> str:
@@ -109,7 +110,7 @@ def resolve_path(filepath: str) -> str:
     p = Path(filepath)
     if p.is_absolute():
         return str(p.resolve())
-    return str((PROJECT_ROOT / filepath).resolve())
+    return str((get_project_root() / filepath).resolve())
 
 
 def safe_write_text(filepath: str | Path, content: str) -> None:
@@ -134,19 +135,19 @@ def enable_file_cache():
     """Enable scan-scoped file content cache."""
     runtime = current_runtime_context()
     runtime.file_text_cache.enable()
-    runtime.cache_enabled.set(True)
+    runtime.cache_enabled = True
 
 
 def disable_file_cache():
     """Disable file content cache and free memory."""
     runtime = current_runtime_context()
     runtime.file_text_cache.disable()
-    runtime.cache_enabled.set(False)
+    runtime.cache_enabled = False
 
 
 def is_file_cache_enabled() -> bool:
     """Return whether scan-scoped file cache is currently enabled."""
-    return bool(current_runtime_context().cache_enabled)
+    return current_runtime_context().cache_enabled
 
 
 def read_file_text(filepath: str) -> str | None:
@@ -184,14 +185,15 @@ def _find_source_files_cached(
     if cached is not None:
         return cached
 
+    project_root = get_project_root()
     root = Path(path)
     if not root.is_absolute():
-        root = PROJECT_ROOT / root
+        root = project_root / root
     all_exclusions = (exclusions or ()) + extra_exclusions
     ext_set = set(extensions)
     files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        rel_dir = _normalize_path_separators(_safe_relpath(dirpath, PROJECT_ROOT))
+        rel_dir = _normalize_path_separators(_safe_relpath(dirpath, project_root))
         dirnames[:] = sorted(
             d
             for d in dirnames
@@ -200,7 +202,7 @@ def _find_source_files_cached(
         for fname in filenames:
             if any(fname.endswith(ext) for ext in ext_set):
                 full = os.path.join(dirpath, fname)
-                rel_file = _normalize_path_separators(_safe_relpath(full, PROJECT_ROOT))
+                rel_file = _normalize_path_separators(_safe_relpath(full, project_root))
                 if all_exclusions and any(
                     matches_exclusion(rel_file, ex) for ex in all_exclusions
                 ):
@@ -210,8 +212,6 @@ def _find_source_files_cached(
     cache.put(cache_key, result)
     return result
 
-
-_find_source_files_cached.cache_clear = _clear_source_file_cache
 
 
 def find_source_files(

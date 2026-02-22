@@ -5,7 +5,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(os.environ.get("DESLOPPIFY_ROOT", Path.cwd())).resolve()
+_DEFAULT_PROJECT_ROOT = Path(os.environ.get("DESLOPPIFY_ROOT", Path.cwd())).resolve()
+
+# Legacy module-level constant — kept for backwards compat, but prefer
+# get_project_root() which respects RuntimeContext overrides.
+PROJECT_ROOT = _DEFAULT_PROJECT_ROOT
+
+
+def get_project_root() -> Path:
+    """Return the active project root, checking RuntimeContext first.
+
+    Tests set ``RuntimeContext.project_root`` to point at a tmp directory.
+    Production code uses the process-level default from $DESLOPPIFY_ROOT / cwd.
+    """
+    from desloppify.core.runtime_state import current_runtime_context
+
+    override = current_runtime_context().project_root
+    if override is not None:
+        return override
+    return _DEFAULT_PROJECT_ROOT
 
 
 def read_code_snippet(
@@ -112,4 +130,11 @@ def is_numeric(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-__all__ = ["get_area", "is_numeric", "read_code_snippet", "strip_c_style_comments"]
+__all__ = [
+    "PROJECT_ROOT",
+    "get_area",
+    "get_project_root",
+    "is_numeric",
+    "read_code_snippet",
+    "strip_c_style_comments",
+]

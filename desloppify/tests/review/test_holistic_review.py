@@ -49,12 +49,14 @@ from desloppify.scoring import (
 
 @pytest.fixture
 def patch_project_root(monkeypatch):
-    """Patch PROJECT_ROOT across all modules that define/import it."""
+    """Patch PROJECT_ROOT via RuntimeContext so all consumers see the override."""
+    from desloppify.core.runtime_state import current_runtime_context
+    ctx = current_runtime_context()
     def _patch(tmp_path):
+        monkeypatch.setattr(ctx, "project_root", tmp_path)
         monkeypatch.setattr(_u, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(_utils_text_mod, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(_file_discovery_mod, "PROJECT_ROOT", tmp_path)
-        _u._find_source_files_cached.cache_clear()
+        _file_discovery_mod._clear_source_file_cache()
     return _patch
 
 
@@ -458,7 +460,10 @@ class TestImportHolisticFindings:
             "reviewed_files": ["pkg/module.py"],
         }
 
-        with patch("desloppify.intelligence.review.importing.holistic.PROJECT_ROOT", tmp_path):
+        from desloppify.core.runtime_state import RuntimeContext, runtime_scope
+        ctx = RuntimeContext(project_root=tmp_path)
+        with runtime_scope(ctx), \
+             patch("desloppify.intelligence.review.importing.holistic.PROJECT_ROOT", tmp_path):
             _ = import_holistic_findings(findings_data, state, "python")
 
         files_cache = state.get("review_cache", {}).get("files", {})

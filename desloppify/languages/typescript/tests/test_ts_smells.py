@@ -5,24 +5,13 @@ from pathlib import Path
 import pytest
 
 import desloppify.languages.typescript.detectors.smells as smells_detector_mod
-import desloppify.file_discovery as file_discovery_mod
-import desloppify.utils as utils_mod
 from desloppify.languages.typescript.detectors.smells import detect_smells
 
 
 @pytest.fixture(autouse=True)
-def _set_project_root(tmp_path, monkeypatch):
-    """Point PROJECT_ROOT at the tmp directory so file resolution works.
-
-    Must patch both utils and smells modules because smells.py binds
-    PROJECT_ROOT at import time via `from ....utils import PROJECT_ROOT`.
-    """
-    monkeypatch.setenv("DESLOPPIFY_ROOT", str(tmp_path))
-    monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(file_discovery_mod, "PROJECT_ROOT", tmp_path)
+def _root(tmp_path, set_project_root, monkeypatch):
+    """Point PROJECT_ROOT at the tmp directory via RuntimeContext."""
     monkeypatch.setattr(smells_detector_mod, "PROJECT_ROOT", tmp_path)
-    # Clear the lru_cache so file discovery uses the new PROJECT_ROOT
-    file_discovery_mod._clear_source_file_cache()
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:

@@ -8,13 +8,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-class ExclusionConfig:
-    """In-memory exclusion configuration shared across scans."""
-
-    def __init__(self) -> None:
-        self.values: tuple[str, ...] = ()
-
-
 class FileTextCache:
     """Optional read-through file-text cache used by scan/review passes."""
 
@@ -43,22 +36,6 @@ class FileTextCache:
         return content
 
 
-class CacheEnabledFlag:
-    """Mutable bool-like wrapper to avoid rebinding during tests."""
-
-    def __init__(self) -> None:
-        self.value = False
-
-    def set(self, enabled: bool) -> None:
-        self.value = enabled
-
-    def __bool__(self) -> bool:
-        return self.value
-
-    def __repr__(self) -> str:
-        return str(self.value)
-
-
 class SourceFileCache:
     """Small FIFO cache for source-file discovery results."""
 
@@ -82,9 +59,10 @@ class SourceFileCache:
 class RuntimeContext:
     """Mutable runtime container for exclusion and cache state."""
 
-    exclusion_config: ExclusionConfig = field(default_factory=ExclusionConfig)
+    exclusions: tuple[str, ...] = ()
+    project_root: Path | None = None
     file_text_cache: FileTextCache = field(default_factory=FileTextCache)
-    cache_enabled: CacheEnabledFlag = field(default_factory=CacheEnabledFlag)
+    cache_enabled: bool = False
     source_file_cache: SourceFileCache = field(
         default_factory=lambda: SourceFileCache(max_entries=16)
     )
@@ -123,21 +101,11 @@ def runtime_scope(runtime: RuntimeContext | None = None):
         _RUNTIME_CONTEXT.reset(token)
 
 
-def set_process_runtime_context(runtime: RuntimeContext | None = None) -> RuntimeContext:
-    """Replace process fallback runtime context (primarily for tests)."""
-    global _PROCESS_RUNTIME_CONTEXT
-    _PROCESS_RUNTIME_CONTEXT = runtime or make_runtime_context()
-    return _PROCESS_RUNTIME_CONTEXT
-
-
 __all__ = [
-    "CacheEnabledFlag",
-    "ExclusionConfig",
     "FileTextCache",
     "RuntimeContext",
     "SourceFileCache",
     "current_runtime_context",
     "make_runtime_context",
     "runtime_scope",
-    "set_process_runtime_context",
 ]

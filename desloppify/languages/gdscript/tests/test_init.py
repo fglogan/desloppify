@@ -39,10 +39,11 @@ def test_file_finder_skips_godot_artifacts(tmp_path):
     (tmp_path / ".import" / "meta.gd").write_text("extends Node\n")
 
     cfg = GdscriptConfig()
-    with patch("desloppify.utils.PROJECT_ROOT", tmp_path), \
-         patch("desloppify.file_discovery.PROJECT_ROOT", tmp_path):
-        from desloppify import file_discovery as _fd
-        _fd._clear_source_file_cache()
+    from desloppify.core.runtime_state import RuntimeContext, runtime_scope
+    from desloppify.file_discovery import _clear_source_file_cache
+    ctx = RuntimeContext(project_root=tmp_path)
+    with runtime_scope(ctx):
+        _clear_source_file_cache()
         files = cfg.file_finder(tmp_path)
 
     assert files == ["src/player.gd"]

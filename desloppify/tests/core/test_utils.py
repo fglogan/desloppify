@@ -27,12 +27,14 @@ from desloppify.utils import (
 
 @pytest.fixture
 def patch_project_root(monkeypatch):
-    """Patch PROJECT_ROOT across all modules that define/import it."""
+    """Patch PROJECT_ROOT via RuntimeContext so all consumers see the override."""
+    from desloppify.core.runtime_state import current_runtime_context
+    ctx = current_runtime_context()
     def _patch(tmp_path):
+        monkeypatch.setattr(ctx, "project_root", tmp_path)
         monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(utils_text_mod, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(file_discovery_mod, "PROJECT_ROOT", tmp_path)
-        file_discovery_mod._find_source_files_cached.cache_clear()
+        file_discovery_mod._clear_source_file_cache()
     return _patch
 
 
@@ -193,7 +195,7 @@ def test_find_source_files_excludes_prefixed_virtualenv_dirs(tmp_path, patch_pro
 
 
 def test_set_exclusions(monkeypatch):
-    """set_exclusions() updates the module-level _extra_exclusions."""
+    """set_exclusions() updates the runtime context exclusion config."""
     # Save original
     original = get_exclusions()
     try:
@@ -202,7 +204,7 @@ def test_set_exclusions(monkeypatch):
     finally:
         # Restore
         set_exclusions(list(original))
-        file_discovery_mod._find_source_files_cached.cache_clear()
+        file_discovery_mod._clear_source_file_cache()
 
 
 # ── grep_files() ─────────────────────────────────────────────

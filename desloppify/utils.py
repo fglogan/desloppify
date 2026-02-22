@@ -81,6 +81,7 @@ from desloppify.file_discovery import (
 )
 
 get_area = _text_utils.get_area
+get_project_root = _text_utils.get_project_root
 strip_c_style_comments = _text_utils.strip_c_style_comments
 
 PROJECT_ROOT = _text_utils.PROJECT_ROOT
@@ -91,7 +92,7 @@ SRC_PATH = PROJECT_ROOT / os.environ.get("DESLOPPIFY_SRC", "src")
 def read_code_snippet(filepath: str, line: int, context: int = 1) -> str | None:
     """Read a snippet around a 1-based line number."""
     return _text_utils.read_code_snippet(
-        filepath, line, context, project_root=PROJECT_ROOT
+        filepath, line, context, project_root=get_project_root()
     )
 
 
@@ -108,7 +109,7 @@ def grep_files(
     compiled = re.compile(pattern, flags)
     results: list[tuple[str, int, str]] = []
     for filepath in file_list:
-        abs_path = filepath if os.path.isabs(filepath) else str(PROJECT_ROOT / filepath)
+        abs_path = filepath if os.path.isabs(filepath) else str(get_project_root() / filepath)
         content = read_file_text(abs_path)
         if content is None:
             continue
@@ -138,7 +139,7 @@ def grep_files_containing(
 
     name_to_files: dict[str, set[str]] = {}
     for filepath in file_list:
-        abs_path = filepath if os.path.isabs(filepath) else str(PROJECT_ROOT / filepath)
+        abs_path = filepath if os.path.isabs(filepath) else str(get_project_root() / filepath)
         content = read_file_text(abs_path)
         if content is None:
             continue
@@ -158,7 +159,7 @@ def grep_count_files(
         pat = re.compile(re.escape(name))
     matching: list[str] = []
     for filepath in file_list:
-        abs_path = filepath if os.path.isabs(filepath) else str(PROJECT_ROOT / filepath)
+        abs_path = filepath if os.path.isabs(filepath) else str(get_project_root() / filepath)
         content = read_file_text(abs_path)
         if content is None:
             continue
@@ -330,7 +331,7 @@ class SkillInstall:
 def find_installed_skill() -> SkillInstall | None:
     """Find the installed skill document and return its metadata, or None."""
     for rel_path in SKILL_SEARCH_PATHS:
-        full = PROJECT_ROOT / rel_path
+        full = get_project_root() / rel_path
         if not full.is_file():
             continue
         try:

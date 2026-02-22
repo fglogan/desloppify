@@ -22,7 +22,7 @@ from desloppify.languages.typescript.detectors.deps_runtime import (
 from desloppify.languages.typescript.detectors.deps_runtime import (
     ts_alias_resolver as _ts_alias_resolver,
 )
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.text_utils import get_project_root
 from desloppify.file_discovery import rel, resolve_path
 from desloppify.file_discovery import find_source_files, find_ts_files
 from desloppify.utils import (
@@ -232,7 +232,8 @@ def build_dep_graph(
     graph: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"imports": set(), "importers": set(), "external_imports": set()}
     )
-    tsconfig_paths = _load_tsconfig_paths(PROJECT_ROOT)
+    project_root = get_project_root()
+    tsconfig_paths = _load_tsconfig_paths(project_root)
 
     ts_files = find_ts_files(path)
     hits = grep_files(r"""(?:\bfrom\s+['"]|\bimport\s+['"])""", ts_files)
@@ -248,7 +249,7 @@ def build_dep_graph(
                 module_path,
                 filepath,
                 tsconfig_paths,
-                PROJECT_ROOT,
+                project_root,
                 graph,
                 source_resolved,
             )
@@ -267,7 +268,7 @@ def build_dep_graph(
                     module_path,
                     filepath,
                     tsconfig_paths,
-                    PROJECT_ROOT,
+                    project_root,
                     graph,
                     source_resolved,
                 )
@@ -393,5 +394,5 @@ def ts_alias_resolver(target: str) -> str:
     return _ts_alias_resolver(
         target,
         load_paths_fn=_load_tsconfig_paths,
-        project_root=PROJECT_ROOT,
+        project_root=get_project_root(),
     )

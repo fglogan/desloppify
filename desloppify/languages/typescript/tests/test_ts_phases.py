@@ -66,13 +66,23 @@ def test_phase_structural_uses_lang_thresholds(monkeypatch, tmp_path: Path):
         lambda _p, threshold=14: ([], 0),
     )
 
-    findings, potentials = phases._phase_structural(tmp_path, _FakeLang())
+    lang = _FakeLang()
+    findings, potentials = phases._phase_structural(tmp_path, lang)
 
+    # Findings should be empty since all detectors return empty lists
     assert findings == []
     assert isinstance(findings, list)
+
+    # Potentials dict structure
     assert isinstance(potentials, dict)
     assert potentials["structural"] == 0
-    assert {"structural", "props", "flat_dirs"}.issubset(set(potentials.keys()))
+    assert potentials["props"] == 0
+    assert potentials["flat_dirs"] == 0
+    assert set(potentials.keys()) == {"structural", "props", "flat_dirs"}
+    # All potential values should be non-negative integers
+    assert all(isinstance(v, int) and v >= 0 for v in potentials.values())
+
+    # Thresholds were forwarded from the lang config
     assert len(captured) == 2
     assert set(captured.keys()) == {"large_threshold", "complexity_threshold"}
     assert captured["large_threshold"] == 777
@@ -129,10 +139,26 @@ def test_phase_coupling_passes_orphaned_options(monkeypatch, tmp_path: Path):
         lambda _path, file_finder, skip_names, skip_dirs: ([], 0),
     )
 
-    findings, potentials = phases._phase_coupling(tmp_path, _FakeCouplingLang())
+    lang = _FakeCouplingLang()
+    findings, potentials = phases._phase_coupling(tmp_path, lang)
 
+    # Findings should be empty since all detectors return empty lists
     assert findings == []
+    assert isinstance(findings, list)
+
+    # Potentials dict should contain all expected coupling dimension keys
+    assert isinstance(potentials, dict)
+    expected_keys = {"single_use", "coupling", "cycles", "orphaned", "patterns", "naming", "facade"}
+    assert set(potentials.keys()) == expected_keys
     assert "orphaned" in potentials
+    # All potential values should be non-negative integers
+    assert all(isinstance(v, int) and v >= 0 for v in potentials.values())
+
+    # The dep_graph should have been set on the lang object
+    assert hasattr(lang, "dep_graph")
+    assert lang.dep_graph == {}
+
+    # Orphaned detector options were correctly constructed
     options = captured.get("options")
     assert options is not None
     assert isinstance(options, phases.orphaned_detector_mod.OrphanedDetectionOptions)
@@ -140,3 +166,6 @@ def test_phase_coupling_passes_orphaned_options(monkeypatch, tmp_path: Path):
     assert options.extra_barrel_names == _FakeCouplingLang.barrel_names
     assert callable(options.dynamic_import_finder)
     assert callable(options.alias_resolver)
+
+    # Extensions were correctly passed from lang config
+    assert captured["extensions"] == [".ts", ".tsx"]
