@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
+from desloppify.state import StateModel
+
 ActionType = Literal[
     "auto_fix",
     "manual_fix",
@@ -66,6 +68,6 @@ class ActionContext:
 
     by_detector: dict[str, int]
     dimension_scores: dict[str, dict[str, Any]]
-    state: dict[str, Any]
+    state: StateModel
     debt: dict[str, float]
     lang: str | None

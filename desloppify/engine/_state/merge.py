@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 from desloppify.engine._state.merge_findings import (
-    _auto_resolve_disappeared,
+    auto_resolve_disappeared,
     find_suspect_detectors,
     upsert_findings,
 )
@@ -103,7 +103,7 @@ def merge_scan(
         resolved_options.force_resolve,
         ran_detectors,
     )
-    auto_resolved, skipped_other_lang, skipped_out_of_scope = _auto_resolve_disappeared(
+    auto_resolved, skipped_other_lang, skipped_out_of_scope = auto_resolve_disappeared(
         existing,
         current_ids,
         suspect_detectors,

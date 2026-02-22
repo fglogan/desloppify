@@ -57,4 +57,5 @@ Workflow:
 }
 ```
 
-<!-- desloppify-update: { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/COPILOT.md; } >> .github/copilot-instructions.md -->
+<!-- desloppify-overlay: copilot -->
+<!-- desloppify-end -->

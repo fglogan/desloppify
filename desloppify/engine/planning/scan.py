@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.engine._state.schema import Finding
+from desloppify.state import Finding
 from desloppify.engine.planning.common import is_subjective_phase
 from desloppify.engine.policy.zones import ZONE_POLICIES, FileZoneMap
 from desloppify.file_discovery import rel

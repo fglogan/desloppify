@@ -13,8 +13,8 @@ from desloppify.engine.detectors.review_coverage import (
     detect_holistic_review_staleness,
     detect_review_coverage,
 )
-from desloppify.engine._state.merge import find_suspect_detectors
-from desloppify.engine._state.schema import empty_state
+from desloppify.state import find_suspect_detectors
+from desloppify.state import empty_state
 from desloppify.intelligence.review import (
     DIMENSIONS as REVIEW_DIMENSIONS,
     DIMENSION_PROMPTS,

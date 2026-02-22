@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from desloppify.state import get_strict_score
+from desloppify.state import StateModel, get_strict_score
 
 from ._constants import _history_strict
 
@@ -51,7 +51,7 @@ def _detect_phase(history: list[dict], strict_score: float | None) -> str:
 
 
 def _detect_milestone(
-    state: dict, _diff: dict | None, history: list[dict],
+    state: StateModel, _diff: dict | None, history: list[dict],
 ) -> str | None:
     """Detect notable milestones worth celebrating."""
     strict_score = get_strict_score(state)

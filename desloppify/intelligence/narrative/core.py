@@ -8,7 +8,13 @@ from typing import Literal, TypedDict
 
 from desloppify.core.config import load_config as _load_config
 from desloppify.intelligence.narrative._constants import STRUCTURAL_MERGE
-from desloppify.state import get_overall_score, get_strict_score, path_scoped_findings
+from desloppify.state import (
+    Finding,
+    StateModel,
+    get_overall_score,
+    get_strict_score,
+    path_scoped_findings,
+)
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.intelligence.narrative.action_engine import compute_actions
 from desloppify.intelligence.narrative.action_models import (
@@ -33,6 +39,22 @@ _RISK_SEVERITY_ORDER = {
     "low": 3,
     "info": 4,
 }
+
+
+class BadgeStatus(TypedDict):
+    """Scorecard badge metadata."""
+
+    generated: bool
+    in_readme: bool
+    path: str
+    recommendation: str | None
+
+
+class PrimaryAction(TypedDict):
+    """Top-priority user action."""
+
+    command: str
+    description: str
 DEFAULT_TARGET_STRICT_SCORE = 95
 MIN_TARGET_STRICT_SCORE = 0
 MAX_TARGET_STRICT_SCORE = 100
@@ -151,7 +173,7 @@ def _resolve_badge_path(project_root: Path) -> tuple[str, Path]:
     return rel_path, path
 
 
-def _compute_badge_status() -> dict:
+def _compute_badge_status() -> BadgeStatus:
     """Check configured scorecard path and whether README references it."""
     project_root = PROJECT_ROOT
 
@@ -185,7 +207,7 @@ def _compute_badge_status() -> dict:
     }
 
 
-def _compute_primary_action(actions: list[dict]) -> dict | None:
+def _compute_primary_action(actions: list[dict]) -> PrimaryAction | None:
     """Pick the highest-priority action for user-facing guidance."""
     if not actions:
         return None
@@ -235,7 +257,7 @@ def _compute_verification_step(_command: str | None) -> VerificationStep:
     }
 
 
-def _compute_risk_flags(state: dict, debt: dict) -> list[RiskFlag]:
+def _compute_risk_flags(state: StateModel, debt: dict) -> list[RiskFlag]:
     """Build ordered risk flags from suppression and wontfix debt signals."""
     flags: list[dict] = []
 
@@ -294,13 +316,13 @@ def _history_for_lang(raw_history: list[dict], lang: str | None) -> list[dict]:
     return [entry for entry in raw_history if entry.get("lang") in (lang, None)]
 
 
-def _scoped_findings(state: dict) -> dict:
+def _scoped_findings(state: StateModel) -> dict[str, Finding]:
     return path_scoped_findings(
         state.get("findings", {}), state.get("scan_path")
     )
 
 
-def _score_snapshot(state: dict) -> tuple[float | None, float | None]:
+def _score_snapshot(state: StateModel) -> tuple[float | None, float | None]:
     return get_strict_score(state), get_overall_score(state)
 
 
@@ -416,7 +438,7 @@ class NarrativeResult(TypedDict):
 
 
 def compute_narrative(
-    state: dict,
+    state: StateModel,
     context: NarrativeContext | None = None,
 ) -> NarrativeResult:
     """Compute structured narrative context from state data."""

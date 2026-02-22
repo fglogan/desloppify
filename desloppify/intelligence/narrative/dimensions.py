@@ -9,10 +9,10 @@ from desloppify.scoring import (
     compute_score_impact,
     merge_potentials,
 )
-from desloppify.state import path_scoped_findings
+from desloppify.state import StateModel, path_scoped_findings
 
 
-def _analyze_dimensions(dim_scores: dict, history: list[dict], state: dict) -> dict:
+def _analyze_dimensions(dim_scores: dict, history: list[dict], state: StateModel) -> dict:
     """Compute per-dimension structured analysis."""
     if not dim_scores:
         return {}
@@ -59,7 +59,7 @@ def _lowest_dimensions(dim_scores: dict, potentials: dict) -> list[dict]:
     return lowest
 
 
-def _biggest_gap_dimensions(dim_scores: dict, state: dict) -> list[dict]:
+def _biggest_gap_dimensions(dim_scores: dict, state: StateModel) -> list[dict]:
     """Build summary entries for dimensions with the biggest strict gap."""
     biggest_gap = []
     scoped = path_scoped_findings(

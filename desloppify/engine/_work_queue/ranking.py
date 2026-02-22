@@ -6,27 +6,13 @@ from desloppify.engine.planning.common import CONFIDENCE_ORDER
 from desloppify.state import path_scoped_findings
 from desloppify.engine._work_queue.helpers import (
     is_review_finding as _is_review_finding,
-)
-from desloppify.engine._work_queue.helpers import (
     is_subjective_finding as _is_subjective_finding,
-)
-from desloppify.engine._work_queue.helpers import (
     primary_command_for_finding as _primary_command_for_finding,
-)
-from desloppify.engine._work_queue.helpers import (
     review_finding_weight as _review_finding_weight,
-)
-from desloppify.engine._work_queue.helpers import (
     scope_matches as _scope_matches,
-)
-from desloppify.engine._work_queue.helpers import slugify as _slugify
-from desloppify.engine._work_queue.helpers import (
+    slugify as _slugify,
     status_matches as _status_matches,
-)
-from desloppify.engine._work_queue.helpers import (
     subjective_strict_scores as _subjective_strict_scores,
-)
-from desloppify.engine._work_queue.helpers import (
     supported_fixers_for_item as _supported_fixers_for_item,
 )
 

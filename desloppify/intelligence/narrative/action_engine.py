@@ -9,9 +9,10 @@ from desloppify.intelligence.narrative._constants import DETECTOR_TOOLS
 from desloppify.intelligence.narrative.action_models import ActionContext, ActionItem
 from desloppify.languages import get_lang
 from desloppify.scoring import compute_score_impact, get_dimension_for_detector, merge_potentials
+from desloppify.state import StateModel
 
 
-def supported_fixers(state: dict[str, Any], lang: str | None) -> set[str] | None:
+def supported_fixers(state: StateModel, lang: str | None) -> set[str] | None:
     """Return supported fixers for the active language, or None when unknown."""
     if not lang:
         return None
@@ -29,7 +30,7 @@ def supported_fixers(state: dict[str, Any], lang: str | None) -> set[str] | None
 
 def _impact_calculator(
     dimension_scores: dict[str, dict[str, Any]],
-    state: dict[str, Any],
+    state: StateModel,
 ) -> Callable[[str, int], float]:
     """Build an impact estimator closure keyed by detector and count."""
     merged_potentials = merge_potentials(state.get("potentials", {}))
@@ -60,7 +61,7 @@ def _dimension_name(detector: str) -> str:
 
 
 def _fixer_has_applicable_findings(
-    state: dict[str, Any], detector: str, fixer_name: str
+    state: StateModel, detector: str, fixer_name: str
 ) -> bool:
     """For the smells detector, verify the fixer has matching open findings.
 
@@ -87,7 +88,7 @@ def _append_auto_fix_actions(
     by_detector: dict[str, int],
     supported: set[str] | None,
     impact_for: Callable[[str, int], float],
-    state: dict[str, Any],
+    state: StateModel,
 ) -> None:
     """Append auto-fix/manual-fix actions for detectors with auto fixers."""
     for detector, tool_info in DETECTOR_TOOLS.items():

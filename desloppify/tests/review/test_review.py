@@ -18,7 +18,7 @@ from desloppify.app.commands.review.runtime import setup_lang_concrete as _setup
 from desloppify.cli import create_parser
 from desloppify.core.registry import DETECTORS, display_order
 from desloppify.engine.policy.zones import Zone, ZoneRule
-from desloppify.engine._state.schema import empty_state as build_empty_state
+from desloppify.state import empty_state as build_empty_state
 from desloppify.intelligence.narrative.headline import _compute_headline
 from desloppify.intelligence.narrative.reminders import _compute_reminders
 from desloppify.intelligence.review import (

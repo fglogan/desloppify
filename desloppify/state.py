@@ -13,7 +13,12 @@ from desloppify.engine._state.filtering import (
     path_scoped_findings,
     remove_ignored_findings,
 )
-from desloppify.engine._state.merge import MergeScanOptions, merge_scan
+from desloppify.engine._state.merge import (
+    MergeScanOptions,
+    find_suspect_detectors,
+    merge_scan,
+    upsert_findings,
+)
 from desloppify.engine._state.noise import (
     DEFAULT_FINDING_NOISE_BUDGET,
     DEFAULT_FINDING_NOISE_GLOBAL_BUDGET,
@@ -34,18 +39,26 @@ from desloppify.engine._state.schema import (
     STATE_DIR,
     STATE_FILE,
     ConcernDismissal,
+    DimensionScore,
     Finding,
     StateModel,
+    StateStats,
     SubjectiveAssessment,
     SubjectiveIntegrity,
+    empty_state,
+    ensure_state_defaults,
     get_objective_score,
     get_overall_score,
     get_strict_score,
     get_verified_strict_score,
     json_default,
     utc_now,
+    validate_state_invariants,
 )
-from desloppify.engine._state.scoring import suppression_metrics
+from desloppify.engine._state.scoring import (
+    _coerce_subjective_score,
+    suppression_metrics,
+)
 
 
 class ScoreSnapshot(NamedTuple):
@@ -68,21 +81,30 @@ def score_snapshot(state: StateModel) -> ScoreSnapshot:
 
 
 __all__ = [
-    "CURRENT_VERSION",
+    # Types
     "ConcernDismissal",
-    "DEFAULT_FINDING_NOISE_BUDGET",
-    "DEFAULT_FINDING_NOISE_GLOBAL_BUDGET",
+    "DimensionScore",
     "Finding",
     "MergeScanOptions",
     "ScoreSnapshot",
     "StateModel",
+    "StateStats",
     "SubjectiveAssessment",
     "SubjectiveIntegrity",
+    # Constants
+    "CURRENT_VERSION",
+    "DEFAULT_FINDING_NOISE_BUDGET",
+    "DEFAULT_FINDING_NOISE_GLOBAL_BUDGET",
     "STATE_DIR",
     "STATE_FILE",
-    "coerce_assessment_score",
+    # Functions
+    "_coerce_subjective_score",
     "add_ignore",
     "apply_finding_noise_budget",
+    "coerce_assessment_score",
+    "empty_state",
+    "ensure_state_defaults",
+    "find_suspect_detectors",
     "get_objective_score",
     "get_overall_score",
     "get_strict_score",
@@ -102,5 +124,7 @@ __all__ = [
     "save_state",
     "score_snapshot",
     "suppression_metrics",
+    "upsert_findings",
     "utc_now",
+    "validate_state_invariants",
 ]

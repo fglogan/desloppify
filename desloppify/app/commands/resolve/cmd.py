@@ -16,6 +16,8 @@ from desloppify.engine.work_queue import ATTEST_EXAMPLE
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.utils import colorize
 
+from desloppify.state import _coerce_subjective_score
+
 from .apply import _resolve_all_patterns, _write_resolve_query_entry
 from .render import (
     _print_next_command,
@@ -26,7 +28,6 @@ from .render import (
 )
 from .selection import (
     ResolveQueryContext,
-    _assessment_score,
     _enforce_batch_wontfix_confirmation,
     _previous_score_snapshot,
     _show_attestation_requirement,
@@ -50,7 +51,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     )
     prev = _previous_score_snapshot(state)
     prev_subjective_scores = {
-        str(dim): _assessment_score(payload)
+        str(dim): _coerce_subjective_score(payload)
         for dim, payload in (state.get("subjective_assessments") or {}).items()
         if isinstance(dim, str)
     }
@@ -85,7 +86,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         state=state,
         all_resolved=all_resolved,
         prev_subjective_scores=prev_subjective_scores,
-        assessment_score_fn=_assessment_score,
+        assessment_score_fn=_coerce_subjective_score,
     )
 
     lang = resolve_lang(args)

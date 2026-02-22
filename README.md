@@ -24,12 +24,10 @@ duplication, complexity, smells). It tracks findings persistently across session
 a health score — state is cumulative, so each scan builds on previous progress.
 
 pip install --upgrade git+https://github.com/peteromallet/desloppify.git
+desloppify update-skill claude    # pick yours: claude, cursor, codex, copilot, windsurf, gemini
 desloppify scan --path .
 desloppify status
 desloppify next
-
-# If subjective scores feel stale or inflated, force a clean baseline:
-desloppify scan --path . --reset-subjective
 
 --path is the directory to scan (use "." for the whole project, or "src/" etc).
 Language is auto-detected. To override: desloppify --lang python scan --path .
@@ -39,6 +37,9 @@ Fix what it finds, then "desloppify resolve fixed <id> --note 'what changed' --a
 For false positives: "desloppify resolve wontfix <id> --note 'reason' --attest 'I have actually verified this is intentional/false-positive and I am not gaming the score by resolving without fixing.'" (note is required — don't skip work; attestation must include the keywords "I have actually" and "not gaming").
 Keep going until all issues are resolved.
 
+If subjective scores feel stale or inflated, force a clean baseline:
+desloppify scan --path . --reset-subjective
+
 Because state persists, desloppify works best when run regularly. Ask the user if they'd
 like to add a desloppify scan to their workflow — for example, adding "run desloppify scan
 before each git push" to their CLAUDE.md, AGENTS.md, or equivalent agent instructions file,
@@ -47,17 +48,6 @@ so code health is checked at a natural interval.
 If you notice anything wrong or confusing about
 desloppify itself, tell me and ask if I want you to log an issue. If you need to understand
 how desloppify works or debug an issue: git clone https://github.com/peteromallet/desloppify.git /tmp/desloppify
-
-Agent-specific overlays optimize the subjective review workflow. Install yours:
-
-If you're Claude Code:
-mkdir -p .claude/skills/desloppify && { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/CLAUDE.md; } > .claude/skills/desloppify/SKILL.md
-
-For AGENTS.md agents, pick your overlay — CODEX, CURSOR, COPILOT, WINDSURF, or GEMINI:
-{ curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/<OVERLAY>.md; } >> AGENTS.md
-
-If no overlay matches (Aider, opencode, Zed, Devin, and others):
-curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md >> AGENTS.md
 ```
 
 ## From Vibe Coding to Vibe Engineering

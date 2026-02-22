@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from desloppify.engine._scoring.policy.core import (
+from desloppify.scoring import (
     SUBJECTIVE_TARGET_MATCH_TOLERANCE,
     matches_target_score,
 )

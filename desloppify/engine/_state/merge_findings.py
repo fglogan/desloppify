@@ -46,7 +46,7 @@ def find_suspect_detectors(
     return suspect
 
 
-def _auto_resolve_disappeared(
+def auto_resolve_disappeared(
     existing: dict,
     current_ids: set[str],
     suspect_detectors: set[str],
@@ -197,7 +197,7 @@ def upsert_findings(
 
 
 __all__ = [
-    "_auto_resolve_disappeared",
+    "auto_resolve_disappeared",
     "find_suspect_detectors",
     "upsert_findings",
 ]

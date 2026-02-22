@@ -12,8 +12,8 @@ import desloppify.core._internal.text_utils as _utils_text_mod
 import desloppify.file_discovery as _file_discovery_mod
 from desloppify import utils as _u
 from desloppify.engine.detectors.review_coverage import detect_holistic_review_staleness
-from desloppify.engine._state.filtering import path_scoped_findings
-from desloppify.engine._state.schema import empty_state
+from desloppify.state import path_scoped_findings
+from desloppify.state import empty_state
 from desloppify.intelligence.narrative.core import _count_open_by_detector
 from desloppify.intelligence.review import (
     DIMENSIONS,

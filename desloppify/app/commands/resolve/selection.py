@@ -64,15 +64,6 @@ def _show_attestation_requirement(
     print(colorize(f'Example: --attest "{example}"', "dim"))
 
 
-def _assessment_score(value: object) -> float:
-    raw = value.get("score", 0) if isinstance(value, dict) else value
-    try:
-        score = float(raw)
-    except (TypeError, ValueError):
-        score = 0.0
-    return max(0.0, min(100.0, score))
-
-
 def _validate_resolve_inputs(args: argparse.Namespace, attestation: str | None) -> None:
     if args.status == "wontfix" and not args.note:
         print(

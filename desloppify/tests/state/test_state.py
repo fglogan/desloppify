@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from desloppify.engine._state import filtering as state_query_mod
-from desloppify.engine._state.merge import MergeScanOptions, upsert_findings
-from desloppify.engine._state.schema import (
+from desloppify.state import (
+    MergeScanOptions,
     empty_state,
     ensure_state_defaults,
+    upsert_findings,
     validate_state_invariants,
 )
 from desloppify.state import (
@@ -528,7 +529,7 @@ class TestUpsertFindings:
 
 class TestMissingFindingsResolved:
     """Findings present in state but absent from scan get auto-resolved
-    (tested via merge_scan which calls _auto_resolve_disappeared)."""
+    (tested via merge_scan which calls auto_resolve_disappeared)."""
 
     def test_missing_finding_auto_resolved(self):
         """A finding that existed before but is absent from the new scan
@@ -670,7 +671,7 @@ class TestWontfixAutoResolution:
     def test_empty_potentials_dict_not_treated_as_none(self):
         """Empty potentials {} means 'scan ran but no detectors reported' —
         should not mark detectors suspect just because dict is falsy."""
-        from desloppify.engine._state.merge import find_suspect_detectors
+        from desloppify.state import find_suspect_detectors
 
         # Build a state with 3 open findings for a detector
         existing = {}
@@ -687,7 +688,7 @@ class TestWontfixAutoResolution:
 
     def test_potentials_none_means_no_info(self):
         """potentials=None means no ran_detectors info at all."""
-        from desloppify.engine._state.merge import find_suspect_detectors
+        from desloppify.state import find_suspect_detectors
 
         existing = {}
         for i in range(3):

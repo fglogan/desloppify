@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from desloppify.intelligence.narrative._constants import DETECTOR_TOOLS
+from desloppify.state import StateModel
 from desloppify.intelligence.narrative.action_engine import supported_fixers
 from desloppify.intelligence.narrative.action_models import ToolFixer, ToolInventory
 
@@ -25,7 +26,7 @@ def _move_reasons(by_detector: dict[str, int]) -> list[str]:
 
 
 def _build_fixers(
-    by_detector: dict[str, int], state: dict[str, Any], lang: str | None
+    by_detector: dict[str, int], state: StateModel, lang: str | None
 ) -> list[ToolFixer]:
     fixers: list[ToolFixer] = []
     supported = supported_fixers(state, lang)
@@ -54,7 +55,7 @@ def _build_fixers(
 
 def compute_tools(
     by_detector: dict[str, int],
-    state: dict[str, Any],
+    state: StateModel,
     lang: str | None,
     badge: dict[str, Any],
 ) -> ToolInventory:

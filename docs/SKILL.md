@@ -1,3 +1,4 @@
+<!-- desloppify-begin -->
 <!-- desloppify-skill-version: 1 -->
 ---
 name: desloppify
@@ -128,4 +129,4 @@ When desloppify itself appears wrong or inconsistent:
 
 `command -v desloppify >/dev/null 2>&1 && echo "desloppify: installed" || echo "NOT INSTALLED — run: pip install --upgrade git+https://github.com/peteromallet/desloppify.git"`
 
-<!-- desloppify-update: see https://github.com/peteromallet/desloppify#quick-start -->
+<!-- desloppify-end -->

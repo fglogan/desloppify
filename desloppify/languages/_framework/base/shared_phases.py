@@ -35,7 +35,7 @@ from desloppify.languages._framework.finding_factories import (
     make_single_use_findings,
 )
 from desloppify.languages._framework.runtime import LangRun
-from desloppify.engine._state.schema import Finding
+from desloppify.state import Finding
 from desloppify.state import make_finding
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.file_discovery import rel

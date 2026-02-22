@@ -38,6 +38,45 @@ def group_matches_by_file(matches: list[dict]) -> list[tuple[str, list]]:
     return sorted(by_file.items(), key=lambda item: -len(item[1]))
 
 
+def _print_single_finding(finding: dict, *, show_code: bool) -> None:
+    """Render a single finding to terminal."""
+    status_icon = {
+        "open": "○",
+        "fixed": "✓",
+        "wontfix": "—",
+        "false_positive": "✗",
+        "auto_resolved": "◌",
+    }.get(finding["status"], "?")
+    zone = finding.get("zone", "production")
+    zone_tag = colorize(f" [{zone}]", "dim") if zone != "production" else ""
+    print(
+        f"    {status_icon} T{finding['tier']} [{finding['confidence']}] {finding['summary']}{zone_tag}"
+    )
+
+    detail_parts = format_detail(finding.get("detail", {}))
+    if detail_parts:
+        print(colorize(f"      {' · '.join(detail_parts)}", "dim"))
+    if show_code:
+        detail = finding.get("detail", {})
+        target_line = (
+            detail.get("line") or (detail.get("lines", [None]) or [None])[0]
+        )
+        if target_line and finding["file"] not in (".", ""):
+            snippet = read_code_snippet(finding["file"], target_line)
+            if snippet:
+                print(snippet)
+    if finding.get("reopen_count", 0) >= 2:
+        print(
+            colorize(
+                f"      ⟳ reopened {finding['reopen_count']} times — fix properly or wontfix",
+                "red",
+            )
+        )
+    if finding.get("note"):
+        print(colorize(f"      note: {finding['note']}", "dim"))
+    print(colorize(f"      {finding['id']}", "dim"))
+
+
 def render_findings(
     matches: list[dict],
     *,
@@ -97,44 +136,7 @@ def render_findings(
         )
 
         for finding in findings:
-            status_icon = {
-                "open": "○",
-                "fixed": "✓",
-                "wontfix": "—",
-                "false_positive": "✗",
-                "auto_resolved": "◌",
-            }.get(finding["status"], "?")
-            zone = finding.get("zone", "production")
-            zone_tag = colorize(f" [{zone}]", "dim") if zone != "production" else ""
-            print(
-                f"    {status_icon} T{finding['tier']} [{finding['confidence']}] {finding['summary']}{zone_tag}"
-            )
-
-            detail_parts = format_detail(finding.get("detail", {}))
-            if detail_parts:
-                print(colorize(f"      {' · '.join(detail_parts)}", "dim"))
-            if show_code:
-                detail = finding.get("detail", {})
-                target_line = (
-                    detail.get("line") or (detail.get("lines", [None]) or [None])[0]
-                )
-                if target_line and finding["file"] not in (".", ""):
-                    snippet = read_code_snippet(finding["file"], target_line)
-                    if snippet:
-                        print(snippet)
-            if finding.get("reopen_count", 0) >= 2:
-                print(
-                    colorize(
-                        (
-                            "      ⟳ reopened "
-                            f"{finding['reopen_count']} times — fix properly or wontfix"
-                        ),
-                        "red",
-                    )
-                )
-            if finding.get("note"):
-                print(colorize(f"      note: {finding['note']}", "dim"))
-            print(colorize(f"      {finding['id']}", "dim"))
+            _print_single_finding(finding, show_code=show_code)
         print()
 
     if remaining_findings:

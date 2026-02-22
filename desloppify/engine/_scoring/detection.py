@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from desloppify.engine._scoring.policy.core import (
     CONFIDENCE_WEIGHTS,
     FAILURE_STATUSES_BY_MODE,
@@ -65,17 +67,24 @@ def _file_count_cap(findings_in_file: int) -> float:
     return _FILE_CAP_LOW
 
 
+@dataclass
+class _ModeAccum:
+    """Per-mode accumulator for file-based detector scoring."""
+
+    by_file: dict[str, float] = field(default_factory=dict)
+    by_file_count: dict[str, int] = field(default_factory=dict)
+    file_cap: dict[str, float] = field(default_factory=dict)
+    holistic_sum: float = 0.0
+    issue_count: int = 0
+
+
 def _file_based_failures_by_mode(
     detector: str,
     findings: dict[str, Finding],
     policy,
 ) -> dict[ScoreMode, tuple[int, float]]:
     """Accumulate weighted failures by score mode for file-based detectors."""
-    by_file: dict[ScoreMode, dict[str, float]] = {mode: {} for mode in SCORING_MODES}
-    by_file_count: dict[ScoreMode, dict[str, int]] = {mode: {} for mode in SCORING_MODES}
-    file_cap: dict[ScoreMode, dict[str, float]] = {mode: {} for mode in SCORING_MODES}
-    holistic_sum: dict[ScoreMode, float] = {mode: 0.0 for mode in SCORING_MODES}
-    issue_count: dict[ScoreMode, int] = {mode: 0 for mode in SCORING_MODES}
+    accum: dict[ScoreMode, _ModeAccum] = {mode: _ModeAccum() for mode in SCORING_MODES}
 
     for finding in _iter_scoring_candidates(detector, findings, policy.excluded_zones):
         status = finding.get("status", "open")
@@ -88,33 +97,35 @@ def _file_based_failures_by_mode(
                 continue
 
             if holistic:
-                holistic_sum[mode] += (
+                accum[mode].holistic_sum += (
                     _finding_weight(finding, use_loc_weight=False) * HOLISTIC_MULTIPLIER
                 )
-                issue_count[mode] += 1
+                accum[mode].issue_count += 1
                 continue
 
             weight = _finding_weight(finding, use_loc_weight=policy.use_loc_weight)
             file_key = finding.get("file", "")
-            by_file[mode][file_key] = by_file[mode].get(file_key, 0.0) + weight
-            by_file_count[mode][file_key] = by_file_count[mode].get(file_key, 0) + 1
-            if policy.use_loc_weight and file_key not in file_cap[mode]:
-                file_cap[mode][file_key] = weight
-            issue_count[mode] += 1
+            a = accum[mode]
+            a.by_file[file_key] = a.by_file.get(file_key, 0.0) + weight
+            a.by_file_count[file_key] = a.by_file_count.get(file_key, 0) + 1
+            if policy.use_loc_weight and file_key not in a.file_cap:
+                a.file_cap[file_key] = weight
+            a.issue_count += 1
 
     out: dict[ScoreMode, tuple[int, float]] = {}
     for mode in SCORING_MODES:
+        a = accum[mode]
         if policy.use_loc_weight:
             weighted = sum(
-                min(weighted_sum, file_cap[mode].get(file_key, weighted_sum))
-                for file_key, weighted_sum in by_file[mode].items()
+                min(weighted_sum, a.file_cap.get(file_key, weighted_sum))
+                for file_key, weighted_sum in a.by_file.items()
             )
         else:
             weighted = sum(
-                min(weighted_sum, _file_count_cap(by_file_count[mode].get(file_key, 0)))
-                for file_key, weighted_sum in by_file[mode].items()
+                min(weighted_sum, _file_count_cap(a.by_file_count.get(file_key, 0)))
+                for file_key, weighted_sum in a.by_file.items()
             )
-        out[mode] = (issue_count[mode], weighted + holistic_sum[mode])
+        out[mode] = (a.issue_count, weighted + a.holistic_sum)
     return out
 
 

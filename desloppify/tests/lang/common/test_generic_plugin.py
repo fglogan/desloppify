@@ -383,7 +383,7 @@ class TestDynamicRegistration:
         _DISPLAY_ORDER.remove(name)
 
     def test_register_scoring_policy_rebuilds_dimensions(self):
-        from desloppify.engine._scoring.policy.core import (
+        from desloppify.scoring import (
             DETECTOR_SCORING_POLICIES,
             DIMENSIONS,
             DetectorScoringPolicy,
@@ -422,7 +422,7 @@ class TestDynamicRegistration:
 @pytest.mark.usefixtures("_cleanup_registry")
 class TestScoringIntegration:
     def test_generic_findings_contribute_to_code_quality_dimension(self):
-        from desloppify.engine._scoring.policy.core import DIMENSIONS
+        from desloppify.scoring import DIMENSIONS
 
         generic_lang(
             name="test_scoring_1",
@@ -433,7 +433,7 @@ class TestScoringIntegration:
         assert "test_score_det_1" in cq.detectors
 
     def test_generic_findings_score_with_correct_tier(self):
-        from desloppify.engine._scoring.policy.core import DETECTOR_SCORING_POLICIES
+        from desloppify.scoring import DETECTOR_SCORING_POLICIES
 
         generic_lang(
             name="test_scoring_2",

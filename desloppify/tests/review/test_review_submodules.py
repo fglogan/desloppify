@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from desloppify.engine._state.schema import empty_state as build_empty_state
+from desloppify.state import empty_state as build_empty_state
 from desloppify.intelligence.review.importing.holistic import (
     import_holistic_findings,
     update_holistic_review_cache,

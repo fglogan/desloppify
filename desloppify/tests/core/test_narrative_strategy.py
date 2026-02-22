@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from desloppify.engine._state.schema import empty_state as empty_state_factory
+from desloppify.state import empty_state as empty_state_factory
 from desloppify.intelligence.narrative.dimensions import (
     _analyze_debt,
     _analyze_dimensions,

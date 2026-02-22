@@ -65,4 +65,5 @@ concurrent agent calls instead.
 }
 ```
 
-<!-- desloppify-update: { curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/SKILL.md; printf '\n\n'; curl -fsSL https://raw.githubusercontent.com/peteromallet/desloppify/main/docs/GEMINI.md; } >> AGENTS.md -->
+<!-- desloppify-overlay: gemini -->
+<!-- desloppify-end -->

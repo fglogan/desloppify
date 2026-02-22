@@ -12,7 +12,7 @@ from desloppify.intelligence.narrative._constants import (
     _REMINDER_DECAY_THRESHOLD,
     STRUCTURAL_MERGE,
 )
-from desloppify.state import get_strict_score, path_scoped_findings
+from desloppify.state import StateModel, get_strict_score, path_scoped_findings
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def _badge_reminder(strict_score: float | None, badge: dict) -> list[dict]:
     ]
 
 
-def _wontfix_debt_reminders(state: dict, debt: dict, command: str | None) -> list[dict]:
+def _wontfix_debt_reminders(state: StateModel, debt: dict, command: str | None) -> list[dict]:
     reminders: list[dict] = []
     if debt.get("trend") == "growing":
         reminders.append(
@@ -139,7 +139,7 @@ def _wontfix_debt_reminders(state: dict, debt: dict, command: str | None) -> lis
     return reminders
 
 
-def _ignore_suppression_reminder(state: dict) -> list[dict]:
+def _ignore_suppression_reminder(state: StateModel) -> list[dict]:
     """Nudge when ignores/suppression are high enough to mask signal quality."""
     integrity = state.get("ignore_integrity", {}) or {}
     ignored = int(integrity.get("ignored", 0) or 0)
@@ -194,7 +194,7 @@ def _dry_run_reminder(actions: list[dict]) -> list[dict]:
     ]
 
 
-def _zone_classification_reminder(state: dict) -> list[dict]:
+def _zone_classification_reminder(state: StateModel) -> list[dict]:
     zone_dist = state.get("zone_distribution")
     if not zone_dist:
         return []
@@ -241,7 +241,7 @@ def _fp_calibration_reminders(fp_rates: dict[tuple[str, str], float]) -> list[di
 
 
 def _review_queue_reminders(
-    state: dict,
+    state: StateModel,
     scoped_findings: dict,
     command: str | None,
     strict_score: float | None,
@@ -297,7 +297,7 @@ def _review_queue_reminders(
     return reminders
 
 
-def _review_staleness_reminder(state: dict, config: dict | None) -> list[dict]:
+def _review_staleness_reminder(state: StateModel, config: dict | None) -> list[dict]:
     review_max_age = (config or {}).get("review_max_age_days", 30)
     review_cache = state.get("review_cache", {})
     if review_max_age <= 0 or not review_cache.get("files"):
@@ -325,7 +325,7 @@ def _review_staleness_reminder(state: dict, config: dict | None) -> list[dict]:
 
 
 def _feedback_reminder(
-    state: dict,
+    state: StateModel,
     phase: str,
     command: str | None,
     fp_rates: dict[tuple[str, str], float],
@@ -441,7 +441,7 @@ def _apply_decay(
 
 
 def _compute_reminders(
-    state: dict,
+    state: StateModel,
     lang: str | None,
     phase: str,
     debt: dict,
