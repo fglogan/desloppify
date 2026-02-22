@@ -91,6 +91,27 @@ def _import_based_mapping(
         for bf in barrel_files:
             tested |= _resolve_barrel_reexports(bf, production_files, lang_name)
 
+    # Facade expansion: if a directly-tested file has no testable logic (pure
+    # re-export facade), promote its imports to directly tested.  This prevents
+    # false "transitive_only" findings for internal modules behind facades like
+    # scoring.py -> _scoring/policy/core.py.
+    has_logic = getattr(mod, "has_testable_logic", None)
+    if callable(has_logic):
+        facade_targets: set[str] = set()
+        for f in list(tested):
+            entry = graph.get(f)
+            if entry is None:
+                continue
+            try:
+                content = Path(f).read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not has_logic(f, content):
+                for imp in entry.get("imports", set()):
+                    if imp in production_files:
+                        facade_targets.add(imp)
+        tested |= facade_targets
+
     return tested
 
 

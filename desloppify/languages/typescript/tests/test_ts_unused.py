@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import desloppify.file_discovery as file_discovery_mod
 import desloppify.languages.typescript.detectors.unused as ts_unused_mod
 import desloppify.utils as utils_mod
 from desloppify.languages.typescript.detectors.unused import (
@@ -23,7 +24,9 @@ def _set_project_root(tmp_path, monkeypatch):
     """Point PROJECT_ROOT at the tmp directory."""
     monkeypatch.setenv("DESLOPPIFY_ROOT", str(tmp_path))
     monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(file_discovery_mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(ts_unused_mod, "PROJECT_ROOT", tmp_path)
+    file_discovery_mod._clear_source_file_cache()
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:

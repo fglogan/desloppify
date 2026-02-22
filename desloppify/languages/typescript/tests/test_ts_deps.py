@@ -17,9 +17,10 @@ def _set_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("DESLOPPIFY_ROOT", str(tmp_path))
     monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(utils_mod, "SRC_PATH", tmp_path / "src")
+    monkeypatch.setattr(file_discovery_mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deps_detector_mod, "PROJECT_ROOT", tmp_path)
     # Clear caches so each test starts fresh
-    file_discovery_mod._find_source_files_cached.cache_clear()
+    file_discovery_mod._clear_source_file_cache()
     deps_detector_mod._load_tsconfig_paths_cached.cache_clear()
 
 
