@@ -5,6 +5,10 @@ from __future__ import annotations
 import importlib
 from copy import deepcopy
 
+__all__ = [
+    "suppression_metrics",
+]
+
 from desloppify.engine._scoring.policy.core import matches_target_score
 from desloppify.engine._state.filtering import path_scoped_findings
 from desloppify.engine._state.schema import ensure_state_defaults

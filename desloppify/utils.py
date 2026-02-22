@@ -10,6 +10,56 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+__all__ = [
+    # Re-exports from file_discovery
+    "DEFAULT_EXCLUSIONS",
+    "disable_file_cache",
+    "enable_file_cache",
+    "find_py_files",
+    "find_source_files",
+    "find_ts_files",
+    "find_tsx_files",
+    "get_exclusions",
+    "is_file_cache_enabled",
+    "matches_exclusion",
+    "read_file_text",
+    "rel",
+    "resolve_path",
+    "safe_write_text",
+    "set_exclusions",
+    # Re-exports from text_utils
+    "get_area",
+    "strip_c_style_comments",
+    # Own public API
+    "PROJECT_ROOT",
+    "DEFAULT_PATH",
+    "SRC_PATH",
+    "read_code_snippet",
+    "grep_files",
+    "grep_files_containing",
+    "grep_count_files",
+    "LOC_COMPACT_THRESHOLD",
+    "COLORS",
+    "NO_COLOR",
+    "colorize",
+    "log",
+    "print_table",
+    "display_entries",
+    "TOOL_DIR",
+    "compute_tool_hash",
+    "check_tool_staleness",
+    "SKILL_VERSION",
+    "SKILL_VERSION_RE",
+    "SKILL_OVERLAY_RE",
+    "SKILL_BEGIN",
+    "SKILL_END",
+    "SKILL_SEARCH_PATHS",
+    "SKILL_TARGETS",
+    "SkillInstall",
+    "find_installed_skill",
+    "check_skill_version",
+]
+
 from desloppify.core._internal import text_utils as _text_utils
 from desloppify.file_discovery import (
     DEFAULT_EXCLUSIONS as DEFAULT_EXCLUSIONS,

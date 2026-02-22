@@ -16,10 +16,10 @@ from desloppify.engine._state.filtering import path_scoped_findings
 from desloppify.engine._state.schema import empty_state
 from desloppify.intelligence.narrative.core import _count_open_by_detector
 from desloppify.intelligence.review import (
-    HOLISTIC_DIMENSION_PROMPTS,
-    HOLISTIC_DIMENSIONS,
+    DIMENSIONS,
+    DIMENSION_PROMPTS,
     HOLISTIC_DIMENSIONS_BY_LANG,
-    HOLISTIC_REVIEW_SYSTEM_PROMPT,
+    REVIEW_SYSTEM_PROMPT,
     build_holistic_context,
     generate_remediation_plan,
 )
@@ -112,28 +112,28 @@ def import_holistic_findings(findings_data, state, lang_name):
 
 
 # ===================================================================
-# HOLISTIC_DIMENSIONS and prompts
+# DIMENSIONS and prompts
 # ===================================================================
 
 
 class TestHolisticConstants:
     def test_fifteen_dimensions(self):
-        assert len(HOLISTIC_DIMENSIONS) == 20
+        assert len(DIMENSIONS) == 20
 
     def test_all_dimensions_have_prompts(self):
-        for dim in HOLISTIC_DIMENSIONS:
-            assert dim in HOLISTIC_DIMENSION_PROMPTS, f"Missing prompt for {dim}"
+        for dim in DIMENSIONS:
+            assert dim in DIMENSION_PROMPTS, f"Missing prompt for {dim}"
 
     def test_prompts_have_required_fields(self):
-        for dim, prompt in HOLISTIC_DIMENSION_PROMPTS.items():
+        for dim, prompt in DIMENSION_PROMPTS.items():
             assert "description" in prompt, f"{dim} missing description"
             assert "look_for" in prompt, f"{dim} missing look_for"
             assert "skip" in prompt, f"{dim} missing skip"
             assert len(prompt["look_for"]) >= 2, f"{dim} has too few look_for items"
 
     def test_system_prompt_exists(self):
-        assert "IMPORT GUARD" in HOLISTIC_REVIEW_SYSTEM_PROMPT
-        assert "related_files" in HOLISTIC_REVIEW_SYSTEM_PROMPT
+        assert "IMPORT GUARD" in REVIEW_SYSTEM_PROMPT
+        assert "related_files" in REVIEW_SYSTEM_PROMPT
 
 
 # ===================================================================
@@ -145,14 +145,14 @@ class TestHolisticDimensionsByLang:
     def test_curated_dims_are_subset_of_superset(self):
         for lang_name, dims in HOLISTIC_DIMENSIONS_BY_LANG.items():
             for dim in dims:
-                assert dim in HOLISTIC_DIMENSIONS, (
-                    f"{lang_name} dim {dim!r} not in HOLISTIC_DIMENSIONS"
+                assert dim in DIMENSIONS, (
+                    f"{lang_name} dim {dim!r} not in DIMENSIONS"
                 )
 
     def test_all_curated_dims_have_prompts(self):
         for lang_name, dims in HOLISTIC_DIMENSIONS_BY_LANG.items():
             for dim in dims:
-                assert dim in HOLISTIC_DIMENSION_PROMPTS, (
+                assert dim in DIMENSION_PROMPTS, (
                     f"{lang_name} dim {dim!r} missing prompt"
                 )
 
@@ -1401,7 +1401,7 @@ class TestPrepareHolisticReviewEnriched:
 
 class TestConventionOutlierPrompt:
     def test_sibling_behavior_in_look_for(self):
-        prompt = HOLISTIC_DIMENSION_PROMPTS["convention_outlier"]
+        prompt = DIMENSION_PROMPTS["convention_outlier"]
         look_for = " ".join(prompt["look_for"])
         assert "Sibling modules" in look_for
         assert "behavioral protocols" in look_for
@@ -1624,28 +1624,28 @@ class TestGenerateRemediationPlan:
 
 class TestNewHolisticDimensions:
     def test_authorization_consistency_prompt(self):
-        assert "authorization_consistency" in HOLISTIC_DIMENSION_PROMPTS
-        prompt = HOLISTIC_DIMENSION_PROMPTS["authorization_consistency"]
+        assert "authorization_consistency" in DIMENSION_PROMPTS
+        prompt = DIMENSION_PROMPTS["authorization_consistency"]
         assert "description" in prompt
         assert "look_for" in prompt
         assert "skip" in prompt
 
     def test_ai_generated_debt_prompt(self):
-        assert "ai_generated_debt" in HOLISTIC_DIMENSION_PROMPTS
-        prompt = HOLISTIC_DIMENSION_PROMPTS["ai_generated_debt"]
+        assert "ai_generated_debt" in DIMENSION_PROMPTS
+        prompt = DIMENSION_PROMPTS["ai_generated_debt"]
         assert "description" in prompt
         assert len(prompt["look_for"]) >= 3
 
     def test_incomplete_migration_prompt(self):
-        assert "incomplete_migration" in HOLISTIC_DIMENSION_PROMPTS
-        prompt = HOLISTIC_DIMENSION_PROMPTS["incomplete_migration"]
+        assert "incomplete_migration" in DIMENSION_PROMPTS
+        prompt = DIMENSION_PROMPTS["incomplete_migration"]
         assert "description" in prompt
         assert len(prompt["look_for"]) >= 3
 
     def test_new_dimensions_in_holistic_list(self):
-        assert "authorization_consistency" in HOLISTIC_DIMENSIONS
-        assert "ai_generated_debt" in HOLISTIC_DIMENSIONS
-        assert "incomplete_migration" in HOLISTIC_DIMENSIONS
+        assert "authorization_consistency" in DIMENSIONS
+        assert "ai_generated_debt" in DIMENSIONS
+        assert "incomplete_migration" in DIMENSIONS
 
     def test_import_accepts_new_holistic_dimensions(self):
         state = empty_state()
@@ -1676,13 +1676,13 @@ class TestNewHolisticDimensions:
         assert diff["new"] == 3
 
     def test_cross_module_prompt_includes_contract_drift_signal(self):
-        look_for = HOLISTIC_DIMENSION_PROMPTS["cross_module_architecture"]["look_for"]
+        look_for = DIMENSION_PROMPTS["cross_module_architecture"]["look_for"]
         joined = " ".join(look_for)
         assert "contracts drifting" in joined
         assert "Compatibility shim paths" in joined
 
     def test_high_level_prompt_includes_docs_runtime_alignment(self):
-        look_for = HOLISTIC_DIMENSION_PROMPTS["high_level_elegance"]["look_for"]
+        look_for = DIMENSION_PROMPTS["high_level_elegance"]["look_for"]
         joined = " ".join(look_for)
         assert "reference docs match runtime reality" in joined
 
@@ -2019,11 +2019,11 @@ class TestStructureContext:
 
 class TestPackageOrganizationDimension:
     def test_dimension_in_holistic_list(self):
-        assert "package_organization" in HOLISTIC_DIMENSIONS
+        assert "package_organization" in DIMENSIONS
 
     def test_dimension_has_prompt(self):
-        assert "package_organization" in HOLISTIC_DIMENSION_PROMPTS
-        prompt = HOLISTIC_DIMENSION_PROMPTS["package_organization"]
+        assert "package_organization" in DIMENSION_PROMPTS
+        prompt = DIMENSION_PROMPTS["package_organization"]
         assert "description" in prompt
         assert "look_for" in prompt
         assert "skip" in prompt

@@ -44,30 +44,3 @@ def resolve_dimensions(
         or _non_empty(default_dimensions)
         or DIMENSIONS
     )
-
-
-# Backward-compat aliases
-def resolve_per_file_dimensions(
-    *,
-    cli_dimensions: list[str] | None,
-    config_dimensions: list[str] | None = None,
-    default_dimensions: list[str] | None = None,
-) -> list[str]:
-    return resolve_dimensions(
-        cli_dimensions=cli_dimensions,
-        config_dimensions=config_dimensions,
-        default_dimensions=default_dimensions,
-    )
-
-
-def resolve_holistic_dimensions(
-    *,
-    lang_name: str,
-    cli_dimensions: list[str] | None,
-    default_dimensions: list[str] | None = None,
-) -> list[str]:
-    return resolve_dimensions(
-        cli_dimensions=cli_dimensions,
-        lang_name=lang_name,
-        default_dimensions=default_dimensions,
-    )

@@ -13,7 +13,7 @@ import desloppify.intelligence.review.dimensions.metadata as dimensions_metadata
 import desloppify.intelligence.review.dimensions.selection as dimensions_selection_mod
 import desloppify.intelligence.review.dimensions.validation as dimensions_validation_mod
 import desloppify.languages as lang_mod
-from desloppify.intelligence.review.dimensions.file import DEFAULT_DIMENSIONS
+from desloppify.intelligence.review.dimensions.holistic import DIMENSIONS
 
 
 def test_collect_holistic_dims_by_lang_filters_empty_entries(monkeypatch):
@@ -102,27 +102,27 @@ def test_dimensions_validation_requires_prompt_for_each_default_dimension(monkey
         dimensions_data_mod.load_dimensions.cache_clear()
 
 
-def test_resolve_per_file_dimensions_precedence():
-    resolved = dimensions_selection_mod.resolve_per_file_dimensions(
+def test_resolve_dimensions_per_file_precedence():
+    resolved = dimensions_selection_mod.resolve_dimensions(
         cli_dimensions=["logic_clarity"],
         config_dimensions=["naming_quality"],
     )
     assert resolved == ["logic_clarity"]
 
-    resolved = dimensions_selection_mod.resolve_per_file_dimensions(
+    resolved = dimensions_selection_mod.resolve_dimensions(
         cli_dimensions=None,
         config_dimensions=["naming_quality"],
     )
     assert resolved == ["naming_quality"]
 
-    resolved = dimensions_selection_mod.resolve_per_file_dimensions(
+    resolved = dimensions_selection_mod.resolve_dimensions(
         cli_dimensions=None,
         config_dimensions=None,
     )
-    assert resolved == DEFAULT_DIMENSIONS
+    assert resolved == DIMENSIONS
 
 
-def test_resolve_holistic_dimensions_precedence(monkeypatch):
+def test_resolve_dimensions_holistic_precedence(monkeypatch):
     monkeypatch.setattr(
         dimensions_selection_mod,
         "HOLISTIC_DIMENSIONS_BY_LANG",
@@ -134,19 +134,19 @@ def test_resolve_holistic_dimensions_precedence(monkeypatch):
         ["cross_module_architecture"],
     )
 
-    resolved = dimensions_selection_mod.resolve_holistic_dimensions(
+    resolved = dimensions_selection_mod.resolve_dimensions(
         lang_name="python",
         cli_dimensions=["test_strategy"],
     )
     assert resolved == ["test_strategy"]
 
-    resolved = dimensions_selection_mod.resolve_holistic_dimensions(
+    resolved = dimensions_selection_mod.resolve_dimensions(
         lang_name="python",
         cli_dimensions=None,
     )
     assert resolved == ["dependency_health"]
 
-    resolved = dimensions_selection_mod.resolve_holistic_dimensions(
+    resolved = dimensions_selection_mod.resolve_dimensions(
         lang_name="go",
         cli_dimensions=None,
     )

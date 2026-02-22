@@ -214,8 +214,8 @@ def test_direct_module_coverage_smoke_signals():
     assert callable(gdscript_review.api_surface)
 
     # review dimensions and scorecard draw helpers
-    assert isinstance(review_dimensions_holistic.HOLISTIC_DIMENSIONS, list)
-    assert "cross_module_architecture" in review_dimensions_holistic.HOLISTIC_DIMENSIONS
+    assert isinstance(review_dimensions_holistic.DIMENSIONS, list)
+    assert "cross_module_architecture" in review_dimensions_holistic.DIMENSIONS
     assert callable(scorecard_draw.draw_left_panel)
     assert callable(scorecard_draw.draw_right_panel)
     assert callable(scorecard_draw.draw_ornament)

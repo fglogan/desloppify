@@ -19,10 +19,7 @@ from desloppify.core.registry import DetectorMeta, register_detector
 from desloppify.languages._framework.treesitter import PARSE_INIT_ERRORS as _TS_INIT_ERRORS
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
-from desloppify.engine._scoring.policy.core import (
-    DetectorScoringPolicy,
-    register_scoring_policy,
-)
+from desloppify.scoring import DetectorScoringPolicy, register_scoring_policy
 from desloppify.languages._framework.base.types import (
     DetectorPhase,
     FixerConfig,

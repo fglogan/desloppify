@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from desloppify.app.output.scorecard_parts.projection import scorecard_dimension_rows
 from desloppify.core.registry import dimension_action_type
 from desloppify.engine._state.schema import get_objective_score, get_overall_score, get_strict_score
 from desloppify.engine.planning.common import TIER_LABELS
@@ -106,6 +105,11 @@ def _plan_dimension_table(state: PlanState) -> list[str]:
             f"| {bold}{dim.name}{bold} | T{dim.tier} | "
             f"{checks:,} | {issues} | {score_val:.1f}% | {strict_val:.1f}% | {action} |"
         )
+
+    # Deferred import to avoid engine -> app layer dependency.
+    from desloppify.app.output.scorecard_parts.projection import (
+        scorecard_dimension_rows,
+    )
 
     scorecard_rows = scorecard_dimension_rows(state)
     scorecard_subjective_rows = [

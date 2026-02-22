@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 from desloppify.core._internal.text_utils import is_numeric
 from desloppify.engine._scoring.policy.core import SUBJECTIVE_CHECKS
 
@@ -60,23 +58,25 @@ def _primary_lang_from_findings(findings: dict) -> str | None:
 
 def _dimension_display_name(dim_name: str, *, lang_name: str | None) -> str:
     try:
-        # deferred: avoid circular import with desloppify.scoring
-        # (scoring -> _scoring/results/core -> _scoring/subjective/core -> review -> state -> scoring)
-        metadata_mod = importlib.import_module(
-            "desloppify.intelligence.review.dimensions.metadata"
+        # Deferred import to avoid circular: scoring -> _scoring/results/core
+        # -> _scoring/subjective/core -> intelligence.review -> state -> scoring
+        from desloppify.intelligence.review.dimensions.metadata import (
+            dimension_display_name,
         )
-        return str(metadata_mod.dimension_display_name(dim_name, lang_name=lang_name))
+
+        return str(dimension_display_name(dim_name, lang_name=lang_name))
     except (ImportError, AttributeError, RuntimeError, ValueError, TypeError):
         return DISPLAY_NAMES.get(dim_name, _display_fallback(dim_name))
 
 
 def _dimension_weight(dim_name: str, *, lang_name: str | None) -> float:
     try:
-        # deferred: avoid circular import with desloppify.scoring (see _dimension_display_name)
-        metadata_mod = importlib.import_module(
-            "desloppify.intelligence.review.dimensions.metadata"
+        # Deferred import to avoid circular (see _dimension_display_name).
+        from desloppify.intelligence.review.dimensions.metadata import (
+            dimension_weight,
         )
-        return float(metadata_mod.dimension_weight(dim_name, lang_name=lang_name))
+
+        return float(dimension_weight(dim_name, lang_name=lang_name))
     except (ImportError, AttributeError, RuntimeError, ValueError, TypeError):
         return 1.0
 
@@ -94,9 +94,10 @@ def append_subjective_dimensions(
     determine pass-rate, while imported assessment scores are retained as
     metadata for transparency.
     """
-    # deferred: avoid circular import with desloppify.scoring (see _dimension_display_name)
-    review_mod = importlib.import_module("desloppify.intelligence.review")
-    raw_defaults = review_mod.DIMENSIONS
+    # Deferred import to avoid circular (see _dimension_display_name).
+    from desloppify.intelligence.review.dimensions.holistic import DIMENSIONS
+
+    raw_defaults = DIMENSIONS
     allowed = (
         {_normalize_dimension_key(name) for name in allowed_dimensions}
         if allowed_dimensions is not None

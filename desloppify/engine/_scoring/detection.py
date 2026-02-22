@@ -13,6 +13,15 @@ from desloppify.engine._scoring.policy.core import (
 from desloppify.engine._state.schema import Finding
 
 
+# Tiered file-count cap thresholds for non-LOC file-based detectors.
+# Controls how many findings per file contribute to the weighted failure sum.
+_FILE_CAP_HIGH_THRESHOLD = 6     # findings in file for high cap
+_FILE_CAP_MID_THRESHOLD = 3      # findings in file for mid cap
+_FILE_CAP_HIGH = 2.0             # cap value at high concentration
+_FILE_CAP_MID = 1.5              # cap value at mid concentration
+_FILE_CAP_LOW = 1.0              # cap value at low concentration (1-2 findings)
+
+
 def merge_potentials(potentials_by_lang: dict[str, dict[str, int]]) -> dict[str, int]:
     """Sum potentials across languages per detector."""
     merged: dict[str, int] = {}
@@ -47,13 +56,13 @@ def _file_count_cap(findings_in_file: int) -> float:
     """Tiered cap for non-LOC file-based detectors.
 
     Keeps file-count denominator semantics while preserving concentration signal:
-    1-2 findings => 1.0, 3-5 findings => 1.5, 6+ findings => 2.0.
+    1-2 findings => _FILE_CAP_LOW, 3-5 => _FILE_CAP_MID, 6+ => _FILE_CAP_HIGH.
     """
-    if findings_in_file >= 6:
-        return 2.0
-    if findings_in_file >= 3:
-        return 1.5
-    return 1.0
+    if findings_in_file >= _FILE_CAP_HIGH_THRESHOLD:
+        return _FILE_CAP_HIGH
+    if findings_in_file >= _FILE_CAP_MID_THRESHOLD:
+        return _FILE_CAP_MID
+    return _FILE_CAP_LOW
 
 
 def _file_based_failures_by_mode(

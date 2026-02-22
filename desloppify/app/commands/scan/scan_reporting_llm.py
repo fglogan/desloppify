@@ -16,7 +16,14 @@ from desloppify.core._internal.text_utils import PROJECT_ROOT
 
 
 def _is_agent_environment() -> bool:
-    return bool(os.environ.get("CLAUDE_CODE") or os.environ.get("DESLOPPIFY_AGENT"))
+    return bool(
+        os.environ.get("CLAUDE_CODE")
+        or os.environ.get("DESLOPPIFY_AGENT")
+        or os.environ.get("GEMINI_CLI")
+        or os.environ.get("CODEX_SANDBOX_NETWORK_DISABLED")
+        or os.environ.get("CODEX_SANDBOX")
+        or os.environ.get("CURSOR_TRACE_ID")
+    )
 
 
 def _load_scores(state: dict) -> state_mod.ScoreSnapshot:
@@ -195,6 +202,12 @@ def _detect_agent_interface() -> str | None:
     """Detect the current agent interface from environment variables."""
     if os.environ.get("CLAUDE_CODE"):
         return "claude"
+    if os.environ.get("GEMINI_CLI"):
+        return "gemini"
+    if os.environ.get("CODEX_SANDBOX_NETWORK_DISABLED") or os.environ.get("CODEX_SANDBOX"):
+        return "codex"
+    if os.environ.get("CURSOR_TRACE_ID"):
+        return "cursor"
     return None
 
 

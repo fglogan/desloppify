@@ -23,6 +23,7 @@ from desloppify.engine._scoring.policy.core import (
     DetectorScoringPolicy,
     Dimension,
     ScoreMode,
+    register_scoring_policy,
 )
 from desloppify.engine._scoring.results.core import (
     ScoreBundle,
@@ -64,4 +65,5 @@ __all__ = [
     "compute_score_impact",
     "get_dimension_for_detector",
     "merge_potentials",
+    "register_scoring_policy",
 ]

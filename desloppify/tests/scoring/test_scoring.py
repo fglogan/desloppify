@@ -1010,9 +1010,9 @@ class TestSubjectiveScoring:
         # Build a full-weight mechanical dimension alongside subjective assessments
         potentials = {"unused": MIN_SAMPLE}  # full weight: tier 3, sample_factor 1.0
         # Set ALL default dimensions to 0 so we can predict the outcome
-        from desloppify.intelligence.review import DEFAULT_DIMENSIONS
+        from desloppify.intelligence.review import DIMENSIONS as REVIEW_DIMS
 
-        assessments = {d: {"score": 0} for d in DEFAULT_DIMENSIONS}
+        assessments = {d: {"score": 0} for d in REVIEW_DIMS}
         result = compute_dimension_scores(
             {}, potentials, subjective_assessments=assessments
         )
@@ -1193,17 +1193,10 @@ class TestSubjectiveDimensionCollision:
 
 class TestDisplayNames:
     def test_display_names_cover_all_review_dimensions(self):
-        """DISPLAY_NAMES covers all holistic and per-file review dimensions."""
-        from desloppify.intelligence.review import (
-            DEFAULT_DIMENSIONS,
-            HOLISTIC_DIMENSIONS,
-        )
+        """DISPLAY_NAMES covers all review dimensions."""
+        from desloppify.intelligence.review import DIMENSIONS as REVIEW_DIMS
 
-        for dim in HOLISTIC_DIMENSIONS:
-            assert dim in DISPLAY_NAMES, (
-                f"Missing DISPLAY_NAMES entry for holistic dim {dim!r}"
-            )
-        for dim in DEFAULT_DIMENSIONS:
+        for dim in REVIEW_DIMS:
             if dim in DISPLAY_NAMES:
                 continue
             # Dimensions without an entry use the fallback .replace("_", " ").title()

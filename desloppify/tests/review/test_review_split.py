@@ -27,8 +27,6 @@ class TestReviewImports:
             "import_review_findings",
             "select_files_for_review",
             "DIMENSIONS",
-            "DEFAULT_DIMENSIONS",
-            "HOLISTIC_DIMENSIONS",
             "generate_remediation_plan",
             "build_investigation_batches",
         ]
@@ -48,7 +46,6 @@ class TestSubmoduleImports:
     @pytest.mark.parametrize(
         "module",
         [
-            "desloppify.intelligence.review.dimensions.file",
             "desloppify.intelligence.review.dimensions.holistic",
             "desloppify.intelligence.review.dimensions.lang",
             "desloppify.intelligence.review.context",

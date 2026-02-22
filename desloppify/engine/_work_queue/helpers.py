@@ -5,9 +5,6 @@ from __future__ import annotations
 import re
 from fnmatch import fnmatch
 
-from desloppify.app.output.scorecard_parts.projection import (
-    scorecard_subjective_entries,
-)
 from desloppify.core.registry import DETECTORS
 from desloppify.intelligence.integrity import (
     is_holistic_subjective_finding,
@@ -159,14 +156,21 @@ def primary_command_for_finding(
     return f'desloppify resolve fixed "{item.get("id", "")}" --note "<what you did>" --attest "{ATTEST_EXAMPLE}"'
 
 
+def _get_scorecard_subjective_entries(state: dict, dim_scores: dict) -> list[dict]:
+    """Deferred import to avoid engine -> app layer dependency."""
+    from desloppify.app.output.scorecard_parts.projection import (
+        scorecard_subjective_entries,
+    )
+
+    return scorecard_subjective_entries(state, dim_scores=dim_scores)
+
+
 def subjective_strict_scores(state: dict) -> dict[str, float]:
     dim_scores = state.get("dimension_scores", {}) or {}
     if not dim_scores:
         return {}
 
-    entries = scorecard_subjective_entries(
-        state, dim_scores=dim_scores
-    )
+    entries = _get_scorecard_subjective_entries(state, dim_scores)
     scores: dict[str, float] = {}
     for entry in entries:
         name = str(entry.get("name", "")).strip()
@@ -197,9 +201,7 @@ def build_subjective_items(
         return []
     threshold = max(0.0, min(100.0, float(threshold)))
 
-    subjective_entries = scorecard_subjective_entries(
-        state, dim_scores=dim_scores
-    )
+    subjective_entries = _get_scorecard_subjective_entries(state, dim_scores)
     if not subjective_entries:
         return []
     unassessed_dims = {

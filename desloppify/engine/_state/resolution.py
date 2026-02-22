@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import copy
 
+__all__ = [
+    "coerce_assessment_score",
+    "match_findings",
+    "resolve_findings",
+]
+
 from desloppify.core._internal.text_utils import is_numeric
 from desloppify.engine._state.filtering import _matches_pattern
 from desloppify.engine._state.schema import (

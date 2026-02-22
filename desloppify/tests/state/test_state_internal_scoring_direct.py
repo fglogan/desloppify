@@ -22,11 +22,11 @@ def test_count_findings_tracks_status_and_tiers():
 
 
 def test_update_objective_health_verified_strict_penalizes_manual_fixed():
-    from desloppify.intelligence.review.dimensions.file import DEFAULT_DIMENSIONS
+    from desloppify.intelligence.review.dimensions.holistic import DIMENSIONS
 
     state = {
         "potentials": {"python": {"unused": 10}},
-        "subjective_assessments": {dim: {"score": 100} for dim in DEFAULT_DIMENSIONS},
+        "subjective_assessments": {dim: {"score": 100} for dim in DIMENSIONS},
     }
     findings = {
         "f1": {

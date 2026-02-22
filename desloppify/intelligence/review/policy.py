@@ -20,15 +20,6 @@ class DimensionPolicy:
     known: frozenset[str]
     allowed_custom: frozenset[str]
 
-    # Backward-compat properties
-    @property
-    def known_per_file(self) -> frozenset[str]:
-        return self.known
-
-    @property
-    def known_holistic(self) -> frozenset[str]:
-        return self.known
-
     @property
     def allowed_subjective(self) -> frozenset[str]:
         return self.known | self.allowed_custom
@@ -68,11 +59,8 @@ def build_dimension_policy(
     )
 
 
-def is_allowed_dimension(name: str, *, holistic: bool | None = None, policy: DimensionPolicy) -> bool:
-    """Check whether a normalized dimension is allowed under policy.
-
-    The *holistic* parameter is accepted for backward compatibility but ignored.
-    """
+def is_allowed_dimension(name: str, *, policy: DimensionPolicy) -> bool:
+    """Check whether a normalized dimension is allowed under policy."""
     key = normalize_dimension_name(name)
     if not key:
         return False
@@ -87,13 +75,9 @@ def is_allowed_dimension(name: str, *, holistic: bool | None = None, policy: Dim
 def normalize_dimension_inputs(
     raw_dimensions: list[str] | None,
     *,
-    holistic: bool = False,
     policy: DimensionPolicy,
 ) -> tuple[list[str], list[str]]:
-    """Normalize + validate requested dimensions against policy.
-
-    The *holistic* parameter is accepted for backward compatibility but ignored.
-    """
+    """Normalize + validate requested dimensions against policy."""
     if not raw_dimensions:
         return [], []
 

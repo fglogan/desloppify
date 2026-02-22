@@ -3,9 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import ItemsView
-from typing import Any
+from typing import TYPE_CHECKING
 
-_registry: dict[str, Any] = {}  # str → LangConfig instance
+if TYPE_CHECKING:
+    from desloppify.languages._framework.base.types import LangConfig
+
+__all__ = [
+    "register",
+    "get",
+    "all_items",
+    "all_keys",
+    "is_registered",
+    "remove",
+    "clear",
+    "set_load_attempted",
+    "was_load_attempted",
+    "record_load_error",
+    "set_load_errors",
+    "get_load_errors",
+]
+
+_registry: dict[str, LangConfig] = {}  # type: ignore[type-arg]  # runtime uses Any
 _load_attempted = False
 _load_errors: dict[str, BaseException] = {}
 
@@ -13,17 +31,17 @@ _load_errors: dict[str, BaseException] = {}
 # ── Public API ────────────────────────────────────────────
 
 
-def register(name: str, cfg: Any) -> None:
+def register(name: str, cfg: LangConfig) -> None:
     """Register a language config by name."""
     _registry[name] = cfg
 
 
-def get(name: str) -> Any | None:
+def get(name: str) -> LangConfig | None:
     """Get a language config by name, or None."""
     return _registry.get(name)
 
 
-def all_items() -> ItemsView[str, Any]:
+def all_items() -> ItemsView[str, LangConfig]:
     """Return all (name, config) pairs."""
     return _registry.items()
 

@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+__all__ = [
+    "MergeScanOptions",
+    "merge_scan",
+]
+
 from desloppify.engine._state.merge_findings import (
     _auto_resolve_disappeared,
     find_suspect_detectors,

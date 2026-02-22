@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from desloppify.core.config import load_config as _load_config
 from desloppify.intelligence.narrative._constants import STRUCTURAL_MERGE
 from desloppify.state import get_overall_score, get_strict_score, path_scoped_findings
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.intelligence.narrative.action_engine import compute_actions
-from desloppify.intelligence.narrative.action_models import ActionContext
+from desloppify.intelligence.narrative.action_models import (
+    ActionContext,
+    ActionItem,
+    ToolInventory,
+)
 from desloppify.intelligence.narrative.action_tools import compute_tools
 from desloppify.intelligence.narrative.dimensions import (
     _analyze_debt,
@@ -62,7 +66,7 @@ def _resolve_target_strict_score(config: dict | None) -> tuple[int, str | None]:
     return target, None
 
 
-def _compute_strict_target(strict_score: float | None, config: dict | None) -> dict:
+def _compute_strict_target(strict_score: float | None, config: dict | None) -> StrictTarget:
     """Build strict-target context for command rendering and agents."""
     target, warning = _resolve_target_strict_score(config)
     if not isinstance(strict_score, int | float):
@@ -216,7 +220,14 @@ def _compute_why_now(
     return phase_default.get(phase, "Address the highest-impact open findings first.")
 
 
-def _compute_verification_step(_command: str | None) -> dict[str, str]:
+class VerificationStep(TypedDict):
+    """A verification step with command and reason."""
+
+    command: str
+    reason: str
+
+
+def _compute_verification_step(_command: str | None) -> VerificationStep:
     """Verification step returned with every narrative plan."""
     return {
         "command": "desloppify scan",
@@ -224,7 +235,7 @@ def _compute_verification_step(_command: str | None) -> dict[str, str]:
     }
 
 
-def _compute_risk_flags(state: dict, debt: dict) -> list[dict]:
+def _compute_risk_flags(state: dict, debt: dict) -> list[RiskFlag]:
     """Build ordered risk flags from suppression and wontfix debt signals."""
     flags: list[dict] = []
 
@@ -293,23 +304,114 @@ def _score_snapshot(state: dict) -> tuple[float | None, float | None]:
     return get_strict_score(state), get_overall_score(state)
 
 
+class DimensionEntry(TypedDict, total=False):
+    """A single dimension summary entry (lowest, biggest gap, or stagnant)."""
+
+    name: str
+    strict: float
+    issues: int
+    impact: float
+    subjective: bool
+    impact_description: str
+    lenient: float
+    gap: float
+    wontfix_count: int
+    stuck_scans: int
+
+
+class DimensionAnalysis(TypedDict, total=False):
+    """Structured per-dimension analysis returned by _analyze_dimensions."""
+
+    lowest_dimensions: list[DimensionEntry]
+    biggest_gap_dimensions: list[DimensionEntry]
+    stagnant_dimensions: list[DimensionEntry]
+
+
+class FixerLeverage(TypedDict):
+    """Fixer automation coverage estimate."""
+
+    auto_fixable_count: int
+    total_count: int
+    coverage: float
+    impact_ratio: float
+    recommendation: str
+
+
+class LaneInfo(TypedDict):
+    """A single strategy work lane."""
+
+    actions: list[int]
+    file_count: int
+    total_impact: float
+    automation: str
+    run_first: bool
+
+
+class StrategyResult(TypedDict):
+    """Structured strategy output from compute_strategy."""
+
+    fixer_leverage: FixerLeverage
+    lanes: dict[str, LaneInfo]
+    can_parallelize: bool
+    hint: str
+
+
+class DebtAnalysis(TypedDict):
+    """Wontfix debt analysis returned by _analyze_debt."""
+
+    overall_gap: float
+    wontfix_count: int
+    worst_dimension: str | None
+    worst_gap: float
+    trend: Literal["stable", "growing", "shrinking"]
+
+
+class RiskFlag(TypedDict):
+    """A single risk flag entry."""
+
+    type: str
+    severity: str
+    message: str
+
+
+class StrictTarget(TypedDict):
+    """Strict-score target context."""
+
+    target: float
+    current: float | None
+    gap: float | None
+    state: Literal["below", "above", "at", "unavailable"]
+    warning: str | None
+
+
+class ReminderItem(TypedDict, total=False):
+    """A single contextual reminder."""
+
+    type: str
+    message: str
+    command: str | None
+    priority: int
+    severity: str
+    no_decay: bool
+
+
 class NarrativeResult(TypedDict):
     """Structured result from compute_narrative()."""
 
     phase: str
     headline: str | None
-    dimensions: dict[str, Any]
-    actions: list[dict[str, Any]]
-    strategy: dict[str, Any]
-    tools: dict[str, Any]
-    debt: dict[str, Any]
+    dimensions: DimensionAnalysis
+    actions: list[ActionItem]
+    strategy: StrategyResult
+    tools: ToolInventory
+    debt: DebtAnalysis
     milestone: str | None
     primary_action: dict[str, str] | None
     why_now: str | None
-    verification_step: dict[str, str]
-    risk_flags: list[dict[str, Any]]
-    strict_target: dict[str, Any]
-    reminders: list[dict[str, Any]]
+    verification_step: VerificationStep
+    risk_flags: list[RiskFlag]
+    strict_target: StrictTarget
+    reminders: list[ReminderItem]
     reminder_history: dict[str, int]
 
 

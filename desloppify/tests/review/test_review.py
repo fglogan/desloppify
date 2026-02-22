@@ -22,7 +22,7 @@ from desloppify.engine._state.schema import empty_state as build_empty_state
 from desloppify.intelligence.narrative.headline import _compute_headline
 from desloppify.intelligence.narrative.reminders import _compute_reminders
 from desloppify.intelligence.review import (
-    DEFAULT_DIMENSIONS,
+    DIMENSIONS as REVIEW_DIMENSIONS,
     DIMENSION_PROMPTS,
     LANG_GUIDANCE,
     REVIEW_SYSTEM_PROMPT,
@@ -1143,7 +1143,7 @@ class TestRegistry:
 
 class TestDimensionPrompts:
     def test_all_dimensions_have_prompts(self):
-        for dim in DEFAULT_DIMENSIONS:
+        for dim in REVIEW_DIMENSIONS:
             assert dim in DIMENSION_PROMPTS
             prompt = DIMENSION_PROMPTS[dim]
             assert "description" in prompt
@@ -1266,9 +1266,9 @@ class TestNewDimensions:
         assert len(dim["skip"]) >= 1
 
     def test_new_dimensions_in_default(self):
-        assert "logic_clarity" in DEFAULT_DIMENSIONS
-        assert "abstraction_fitness" in DEFAULT_DIMENSIONS
-        assert "ai_generated_debt" in DEFAULT_DIMENSIONS
+        assert "logic_clarity" in REVIEW_DIMENSIONS
+        assert "abstraction_fitness" in REVIEW_DIMENSIONS
+        assert "ai_generated_debt" in REVIEW_DIMENSIONS
 
     def test_import_accepts_new_dimensions(self, empty_state):
         data = [
@@ -1310,8 +1310,8 @@ class TestNewDimensions:
         assert len(dim["skip"]) >= 1
 
     def test_new_phase2_dimensions_in_default(self):
-        assert "ai_generated_debt" in DEFAULT_DIMENSIONS
-        assert "error_consistency" in DEFAULT_DIMENSIONS
+        assert "ai_generated_debt" in REVIEW_DIMENSIONS
+        assert "error_consistency" in REVIEW_DIMENSIONS
 
     def test_import_accepts_new_phase2_dimensions(self, empty_state):
         data = [

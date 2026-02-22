@@ -6,11 +6,6 @@ from desloppify.intelligence.review.dimensions.holistic import (
     DIMENSIONS,
     DIMENSION_PROMPTS,
     REVIEW_SYSTEM_PROMPT,
-    # Backward-compat aliases
-    DEFAULT_DIMENSIONS,
-    HOLISTIC_DIMENSION_PROMPTS,
-    HOLISTIC_DIMENSIONS,
-    HOLISTIC_REVIEW_SYSTEM_PROMPT,
 )
 from desloppify.intelligence.review.dimensions.lang import (
     HOLISTIC_DIMENSIONS_BY_LANG,
@@ -34,12 +29,8 @@ def is_custom_dimension(name: str) -> bool:
     return normalize_dimension_name(name).startswith("custom_")
 
 
-def is_known_dimension(name: str, *, holistic: bool | None = None) -> bool:
-    """Return True when *name* is a known review dimension.
-
-    The *holistic* parameter is accepted for backward compatibility but
-    ignored — per-file and holistic dimension sets are identical.
-    """
+def is_known_dimension(name: str) -> bool:
+    """Return True when *name* is a known review dimension."""
     key = normalize_dimension_name(name)
     if not key:
         return False
@@ -47,20 +38,12 @@ def is_known_dimension(name: str, *, holistic: bool | None = None) -> bool:
 
 
 __all__ = [
-    # Canonical names
     "DIMENSIONS",
     "DIMENSION_PROMPTS",
     "REVIEW_SYSTEM_PROMPT",
-    # Backward-compat aliases
-    "DEFAULT_DIMENSIONS",
-    "HOLISTIC_DIMENSIONS",
-    "HOLISTIC_DIMENSION_PROMPTS",
     "HOLISTIC_DIMENSIONS_BY_LANG",
-    "HOLISTIC_REVIEW_SYSTEM_PROMPT",
-    # Lang
     "LANG_GUIDANCE",
     "get_lang_guidance",
-    # Helpers
     "is_custom_dimension",
     "is_known_dimension",
     "normalize_dimension_name",

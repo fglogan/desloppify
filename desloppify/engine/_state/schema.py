@@ -4,9 +4,32 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, Required, TypedDict, cast
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+
+__all__ = [
+    "FindingStatus",
+    "Finding",
+    "TierStats",
+    "StateStats",
+    "DimensionScore",
+    "ScanHistoryEntry",
+    "StateModel",
+    "ScanDiff",
+    "STATE_DIR",
+    "STATE_FILE",
+    "CURRENT_VERSION",
+    "utc_now",
+    "empty_state",
+    "ensure_state_defaults",
+    "validate_state_invariants",
+    "json_default",
+    "get_overall_score",
+    "get_objective_score",
+    "get_strict_score",
+    "get_verified_strict_score",
+]
 
 FindingStatus = Literal["open", "fixed", "auto_resolved", "wontfix", "false_positive"]
 _ALLOWED_FINDING_STATUSES: set[str] = {
@@ -88,19 +111,19 @@ class ScanHistoryEntry(TypedDict, total=False):
 
 
 class StateModel(TypedDict, total=False):
-    version: int
-    created: str
-    last_scan: str | None
-    scan_count: int
-    overall_score: float
-    objective_score: float
-    strict_score: float
-    verified_strict_score: float
-    stats: StateStats
-    findings: dict[str, Finding]
+    version: Required[int]
+    created: Required[str]
+    last_scan: Required[str | None]
+    scan_count: Required[int]
+    overall_score: Required[float]
+    objective_score: Required[float]
+    strict_score: Required[float]
+    verified_strict_score: Required[float]
+    stats: Required[StateStats]
+    findings: Required[dict[str, Finding]]
     scan_history: list[ScanHistoryEntry]
-    subjective_integrity: dict[str, Any]
-    subjective_assessments: dict[str, Any]
+    subjective_integrity: Required[dict[str, Any]]
+    subjective_assessments: Required[dict[str, Any]]
     concern_dismissals: dict[str, Any]
 
 

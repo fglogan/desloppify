@@ -8,6 +8,11 @@ import shutil
 import sys
 from pathlib import Path
 
+__all__ = [
+    "load_state",
+    "save_state",
+]
+
 from desloppify.core._internal.text_utils import is_numeric
 from desloppify.engine._state.schema import (
     CURRENT_VERSION,

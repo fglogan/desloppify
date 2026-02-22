@@ -5,6 +5,15 @@ from __future__ import annotations
 import fnmatch
 import importlib
 
+__all__ = [
+    "path_scoped_findings",
+    "is_ignored",
+    "matched_ignore_pattern",
+    "remove_ignored_findings",
+    "add_ignore",
+    "make_finding",
+]
+
 from desloppify.engine._state.schema import (
     Finding,
     ensure_state_defaults,

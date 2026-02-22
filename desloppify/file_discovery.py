@@ -9,6 +9,24 @@ from pathlib import Path
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.runtime_state import current_runtime_context
 
+__all__ = [
+    "DEFAULT_EXCLUSIONS",
+    "set_exclusions",
+    "get_exclusions",
+    "matches_exclusion",
+    "rel",
+    "resolve_path",
+    "safe_write_text",
+    "enable_file_cache",
+    "disable_file_cache",
+    "is_file_cache_enabled",
+    "read_file_text",
+    "find_source_files",
+    "find_ts_files",
+    "find_tsx_files",
+    "find_py_files",
+]
+
 
 # Directories that are never useful to scan — always pruned during traversal.
 DEFAULT_EXCLUSIONS = frozenset(

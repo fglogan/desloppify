@@ -16,7 +16,7 @@ from desloppify.engine.detectors.review_coverage import (
 from desloppify.engine._state.merge import find_suspect_detectors
 from desloppify.engine._state.schema import empty_state
 from desloppify.intelligence.review import (
-    DEFAULT_DIMENSIONS,
+    DIMENSIONS as REVIEW_DIMENSIONS,
     DIMENSION_PROMPTS,
 )
 from desloppify.intelligence.review import (
@@ -385,13 +385,13 @@ class TestIDCollision:
 
 
 class TestNewDimensions:
-    """3 new dimensions present in DEFAULT_DIMENSIONS and DIMENSION_PROMPTS."""
+    """3 new dimensions present in REVIEW_DIMENSIONS and DIMENSION_PROMPTS."""
 
     def test_abstraction_fitness_in_defaults(self):
-        assert "abstraction_fitness" in DEFAULT_DIMENSIONS
+        assert "abstraction_fitness" in REVIEW_DIMENSIONS
 
     def test_error_consistency_in_defaults(self):
-        assert "error_consistency" in DEFAULT_DIMENSIONS
+        assert "error_consistency" in REVIEW_DIMENSIONS
 
     def test_type_safety_prompt(self):
         assert "type_safety" in DIMENSION_PROMPTS
