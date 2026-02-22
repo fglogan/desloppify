@@ -215,7 +215,7 @@ def _add_resolve_parser(sub) -> None:
         help=(
             "Required anti-gaming attestation. Must include BOTH keywords "
             "'I have actually' and 'not gaming'. Example: "
-            '--attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."'
+            '--attest "I have actually [DESCRIBE THE CONCRETE CHANGE YOU MADE] and I am not gaming the score by resolving without fixing."'
         ),
     )
     p_resolve.add_argument("--state", type=str, default=None)
@@ -233,7 +233,7 @@ def _add_ignore_parser(sub) -> None:
         help=(
             "Required anti-gaming attestation. Must include BOTH keywords "
             "'I have actually' and 'not gaming'. Example: "
-            '--attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."'
+            '--attest "I have actually [DESCRIBE THE CONCRETE CHANGE YOU MADE] and I am not gaming the score by resolving without fixing."'
         ),
     )
     p_ignore.add_argument("--state", type=str, default=None)

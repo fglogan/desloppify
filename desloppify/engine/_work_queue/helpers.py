@@ -8,8 +8,8 @@ from fnmatch import fnmatch
 
 ALL_STATUSES = {"open", "fixed", "wontfix", "false_positive", "auto_resolved", "all"}
 ATTEST_EXAMPLE = (
-    "I have actually improved [WHAT YOU IMPROVED EXPLICITLY] enough "
-    "to honestly justify a score of [SCORE], and I am not gaming the score."
+    "I have actually [DESCRIBE THE CONCRETE CHANGE YOU MADE] "
+    "and I am not gaming the score by resolving without fixing."
 )
 
 
@@ -134,7 +134,7 @@ def primary_command_for_finding(
 ) -> str:
     registry_mod = importlib.import_module("desloppify.core.registry")
     subjective_integrity_mod = importlib.import_module(
-        "desloppify.intelligence.integrity.review"
+        "desloppify.intelligence.integrity"
     )
 
     detector = item.get("detector", "")
@@ -201,7 +201,7 @@ def build_subjective_items(
         "desloppify.app.output.scorecard_parts.projection"
     )
     subjective_integrity_mod = importlib.import_module(
-        "desloppify.intelligence.integrity.review"
+        "desloppify.intelligence.integrity"
     )
 
     subjective_entries = scorecard_projection_mod.scorecard_subjective_entries(

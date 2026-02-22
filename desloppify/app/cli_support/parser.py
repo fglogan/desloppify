@@ -48,10 +48,10 @@ examples:
   desloppify show src/shared/components/PromptEditorModal.tsx
   desloppify show gods
   desloppify show "src/shared/components/MediaLightbox"
-  desloppify resolve fixed "unused::src/foo.tsx::React" --note "removed symbol" --attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."
-  desloppify resolve fixed "logs::src/foo.tsx::*" --note "removed debug logs" --attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."
-  desloppify resolve wontfix deprecated --note "migration in progress" --attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."
-  desloppify ignore "smells::*::async_no_await" --attest "I have actually improved how [WHAT YOU IMPROVED EXPLICITLY] enough to honestly justify a score of [SCORE] and I am not gaming the score."
+  desloppify resolve fixed "unused::src/foo.tsx::React" --note "removed unused React import" --attest "I have actually removed the unused React import from foo.tsx and I am not gaming the score by resolving without fixing."
+  desloppify resolve fixed "logs::src/foo.tsx::*" --note "removed debug logs" --attest "I have actually removed all console.log calls from foo.tsx and I am not gaming the score by resolving without fixing."
+  desloppify resolve wontfix deprecated --note "migration in progress" --attest "I have actually verified these are tracked in the migration plan and I am not gaming the score by resolving without fixing."
+  desloppify ignore "smells::*::async_no_await" --attest "I have actually verified these are intentional fire-and-forget patterns and I am not gaming the score by resolving without fixing."
   desloppify detect logs --top 10
   desloppify detect dupes --threshold 0.9
   desloppify dev scaffold-lang go --extension .go --marker go.mod --default-src .
