@@ -10,7 +10,8 @@ from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.utils import colorize
 
 from .batch import _do_run_batches
-from .import_cmd import do_import
+from .external import do_external_start, do_external_submit
+from .import_cmd import do_import, do_validate_import
 from .prepare import do_prepare
 
 
@@ -28,7 +29,52 @@ def cmd_review(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    if getattr(args, "run_batches", False):
+    run_batches = bool(getattr(args, "run_batches", False))
+    external_start = bool(getattr(args, "external_start", False))
+    external_submit = bool(getattr(args, "external_submit", False))
+    import_file = getattr(args, "import_file", None)
+    validate_import_file = getattr(args, "validate_import_file", None)
+
+    import_mode = bool(import_file) and not external_submit
+    mode_flags = [
+        run_batches,
+        external_start,
+        external_submit,
+        import_mode,
+        bool(validate_import_file),
+    ]
+    if sum(1 for enabled in mode_flags if enabled) > 1:
+        print(
+            colorize(
+                "  Error: choose one review mode per command "
+                "(--run-batches | --external-start | --external-submit | --import | --validate-import).",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if external_submit and not import_file:
+        print(
+            colorize(
+                "  Error: --external-submit requires --import FILE.",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if external_submit and not getattr(args, "session_id", None):
+        print(
+            colorize(
+                "  Error: --external-submit requires --session-id.",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if run_batches:
         _do_run_batches(
             args,
             state,
@@ -38,7 +84,40 @@ def cmd_review(args: argparse.Namespace) -> None:
         )
         return
 
-    import_file = getattr(args, "import_file", None)
+    if external_start:
+        do_external_start(
+            args,
+            state,
+            lang,
+            config=runtime.config,
+        )
+        return
+
+    if external_submit:
+        do_external_submit(
+            import_file=str(import_file),
+            session_id=str(getattr(args, "session_id")),
+            state=state,
+            lang=lang,
+            state_file=state_file,
+            config=runtime.config,
+            allow_partial=bool(getattr(args, "allow_partial", False)),
+            scan_after_import=bool(getattr(args, "scan_after_import", False)),
+            scan_path=str(getattr(args, "path", ".") or "."),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+        return
+
+    if validate_import_file:
+        do_validate_import(
+            validate_import_file,
+            lang,
+            allow_partial=bool(getattr(args, "allow_partial", False)),
+            manual_override=bool(getattr(args, "manual_override", False)),
+            attested_external=bool(getattr(args, "attested_external", False)),
+            manual_attest=getattr(args, "attest", None),
+        )
+        return
 
     if import_file:
         do_import(
@@ -47,6 +126,10 @@ def cmd_review(args: argparse.Namespace) -> None:
             lang,
             state_file,
             config=runtime.config,
+            allow_partial=bool(getattr(args, "allow_partial", False)),
+            manual_override=bool(getattr(args, "manual_override", False)),
+            attested_external=bool(getattr(args, "attested_external", False)),
+            manual_attest=getattr(args, "attest", None),
         )
     else:
         do_prepare(args, state, lang, state_file, config=runtime.config)

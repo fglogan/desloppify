@@ -433,6 +433,7 @@ class TestZonePolicies:
         """TEST zone skips expected detectors."""
         policy = ZONE_POLICIES[Zone.TEST]
         expected_skips = {
+            "boilerplate_duplication",
             "dupes",
             "single_use",
             "orphaned",
@@ -458,6 +459,7 @@ class TestZonePolicies:
         """CONFIG zone skips a broad set of detectors."""
         policy = ZONE_POLICIES[Zone.CONFIG]
         expected_skips = {
+            "boilerplate_duplication",
             "smells",
             "structural",
             "dupes",

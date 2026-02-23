@@ -17,8 +17,8 @@ from desloppify.intelligence.review.context import ReviewContext, build_review_c
 from desloppify.intelligence.review.context_holistic import build_holistic_context
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
 from desloppify.intelligence.review.dimensions.holistic import (
-    DIMENSIONS,
     DIMENSION_PROMPTS,
+    DIMENSIONS,
     REVIEW_SYSTEM_PROMPT,
 )
 from desloppify.intelligence.review.dimensions.lang import (

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from desloppify.languages._framework.runtime import LangRun
@@ -15,6 +15,11 @@ from desloppify.app.commands.helpers.lang import resolve_lang, resolve_lang_sett
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.runtime_options import resolve_lang_runtime_options
 from desloppify.app.commands.helpers.score import target_strict_score_from_config
+from desloppify.app.commands.scan.scan_coverage import (
+    coerce_int as _coerce_int,
+    persist_scan_coverage as _persist_scan_coverage,
+    seed_runtime_coverage_warnings as _seed_runtime_coverage_warnings,
+)
 from desloppify.app.commands.scan.scan_helpers import (
     _audit_excluded_dirs,
     _collect_codebase_metrics,
@@ -22,23 +27,24 @@ from desloppify.app.commands.scan.scan_helpers import (
     _resolve_scan_profile,
     _warn_explicit_lang_with_no_files,
 )
+from desloppify.app.commands.scan.scan_wontfix import (
+    augment_with_stale_wontfix_findings as _augment_stale_wontfix_impl,
+)
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.engine import work_queue as issues_mod
 from desloppify.engine.planning import core as plan_mod
 from desloppify.engine.planning.scan import PlanScanOptions
-from desloppify.engine import work_queue as issues_mod
 from desloppify.file_discovery import (
     disable_file_cache,
     enable_file_cache,
     get_exclusions,
     rel,
-    resolve_path,
 )
+from desloppify.languages._framework.base.types import DetectorCoverageRecord
 from desloppify.languages._framework.runtime import LangRunOverrides, make_lang_run
 from desloppify.utils import colorize
 
 _WONTFIX_DECAY_SCANS_DEFAULT = 20
-_STRUCTURAL_COMPLEXITY_GROWTH_THRESHOLD = 10
-_STRUCTURAL_LOC_GROWTH_THRESHOLD = 50
 
 
 def _subjective_reset_dimensions(*, lang_name: str | None = None) -> tuple[str, ...]:
@@ -56,27 +62,29 @@ class ScanRuntime:
 
     args: argparse.Namespace
     state_path: Path | None
-    state: dict
+    state: state_mod.StateModel
     path: Path
-    config: dict
+    config: dict[str, object]
     lang: LangRun | None
     lang_label: str
     profile: str
     effective_include_slow: bool
-    zone_overrides: dict | None
+    zone_overrides: dict[str, object] | None
     reset_subjective_count: int = 0
+    expired_manual_override_count: int = 0
+    coverage_warnings: list[DetectorCoverageRecord] = field(default_factory=list)
 
 
 @dataclass
 class ScanMergeResult:
     """State merge outputs and previous score snapshots."""
 
-    diff: dict
+    diff: dict[str, object]
     prev_overall: float | None
     prev_objective: float | None
     prev_strict: float | None
     prev_verified: float | None
-    prev_dim_scores: dict
+    prev_dim_scores: dict[str, object]
 
 
 @dataclass
@@ -92,8 +100,8 @@ class ScanNoiseSnapshot:
 
 def _configure_lang_runtime(
     args: argparse.Namespace,
-    config: dict,
-    state: dict,
+    config: dict[str, object],
+    state: state_mod.StateModel,
     lang: LangRun | None,
 ) -> LangRun | None:
     """Populate runtime context and threshold overrides for a selected language."""
@@ -122,7 +130,7 @@ def _configure_lang_runtime(
 
 
 def _reset_subjective_assessments_for_scan_reset(
-    state: dict,
+    state: state_mod.StateModel,
     *,
     lang_name: str | None = None,
 ) -> int:
@@ -162,15 +170,47 @@ def _reset_subjective_assessments_for_scan_reset(
     return len(reset_keys)
 
 
+def _expire_provisional_manual_override_assessments(
+    state: state_mod.StateModel,
+) -> int:
+    """Expire provisional manual-override assessments at scan start."""
+    assessments = state.get("subjective_assessments")
+    if not isinstance(assessments, dict):
+        return 0
+
+    now = state_mod.utc_now()
+    expired = 0
+    for payload in assessments.values():
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("provisional_override") is not True:
+            continue
+        payload["score"] = 0.0
+        payload["source"] = "manual_override_expired"
+        payload["assessed_at"] = now
+        payload["reset_by"] = "manual_override_expired"
+        payload["placeholder"] = True
+        payload.pop("provisional_override", None)
+        payload.pop("provisional_until_scan", None)
+        payload.pop("integrity_penalty", None)
+        payload.pop("components", None)
+        payload.pop("component_scores", None)
+        expired += 1
+    return expired
+
+
 def prepare_scan_runtime(args) -> ScanRuntime:
     """Resolve state/config/language and apply scan-time runtime settings."""
     runtime = command_runtime(args)
     state_file = runtime.state_path
-    state = runtime.state
+    state = runtime.state if isinstance(runtime.state, dict) else {}
     path = Path(args.path)
-    config = runtime.config
+    config = runtime.config if isinstance(runtime.config, dict) else {}
     lang_config = resolve_lang(args)
     reset_subjective_count = 0
+    expired_manual_override_count = _expire_provisional_manual_override_assessments(
+        state
+    )
     if getattr(args, "reset_subjective", False):
         reset_subjective_count = _reset_subjective_assessments_for_scan_reset(
             state,
@@ -182,6 +222,9 @@ def prepare_scan_runtime(args) -> ScanRuntime:
     effective_include_slow = _effective_include_slow(include_slow, profile)
 
     lang = _configure_lang_runtime(args, config, state, lang_config)
+    coverage_warnings = _seed_runtime_coverage_warnings(lang)
+    zone_overrides_raw = config.get("zone_overrides")
+    zone_overrides = zone_overrides_raw if isinstance(zone_overrides_raw, dict) else None
 
     return ScanRuntime(
         args=args,
@@ -193,15 +236,17 @@ def prepare_scan_runtime(args) -> ScanRuntime:
         lang_label=f" ({lang.name})" if lang else "",
         profile=profile,
         effective_include_slow=effective_include_slow,
-        zone_overrides=config.get("zone_overrides") or None,
+        zone_overrides=zone_overrides,
         reset_subjective_count=reset_subjective_count,
+        expired_manual_override_count=expired_manual_override_count,
+        coverage_warnings=coverage_warnings,
     )
 
 
 def _augment_with_stale_exclusion_findings(
-    findings: list[dict],
+    findings: list[dict[str, Any]],
     runtime: ScanRuntime,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Append stale exclude findings when excluded dirs are unreferenced."""
     extra_exclusions = get_exclusions()
     if not (extra_exclusions and runtime.lang and runtime.lang.file_finder):
@@ -221,168 +266,25 @@ def _augment_with_stale_exclusion_findings(
     return augmented
 
 
-def _in_scan_scope(filepath: str, scan_path: Path) -> bool:
-    if scan_path.resolve() == PROJECT_ROOT.resolve():
-        return True
-    full = Path(resolve_path(filepath))
-    root = scan_path.resolve()
-    return full == root or root in full.parents
-
-
-def _to_float(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if not isinstance(value, int | float | str):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _structural_growth_details(snapshot: dict, current: dict) -> dict:
-    """Return structural drift details for wontfix findings."""
-    snapshot_detail = (
-        snapshot.get("detail", {}) if isinstance(snapshot.get("detail"), dict) else {}
-    )
-    current_detail = current.get("detail", {}) if isinstance(current.get("detail"), dict) else {}
-    drift: dict[str, dict[str, float]] = {}
-
-    old_complexity = _to_float(snapshot_detail.get("complexity_score"))
-    new_complexity = _to_float(current_detail.get("complexity_score"))
-    if (
-        old_complexity is not None
-        and new_complexity is not None
-        and new_complexity >= old_complexity + _STRUCTURAL_COMPLEXITY_GROWTH_THRESHOLD
-    ):
-        drift["complexity_score"] = {"from": old_complexity, "to": new_complexity}
-
-    old_loc = _to_float(snapshot_detail.get("loc"))
-    new_loc = _to_float(current_detail.get("loc"))
-    if old_loc is not None and new_loc is not None and new_loc >= old_loc + _STRUCTURAL_LOC_GROWTH_THRESHOLD:
-        drift["loc"] = {"from": old_loc, "to": new_loc}
-
-    return drift
-
-
-def _wontfix_staleness_reasons(
-    previous: dict,
-    current: dict,
-    *,
-    since_scan: int,
-    decay_scans: int,
-) -> tuple[list[str], dict]:
-    """Determine why a wontfix finding is stale and compute structural drift."""
-    reasons: list[str] = []
-    if decay_scans > 0 and since_scan >= decay_scans:
-        reasons.append("scan_decay")
-
-    drift: dict = {}
-    if previous.get("detector") == "structural":
-        snapshot = previous.get("wontfix_snapshot")
-        if isinstance(snapshot, dict):
-            drift = _structural_growth_details(snapshot, current)
-            if drift:
-                reasons.append("severity_drift")
-
-    return reasons, drift
-
-
-def _format_drift_summary(drift: dict) -> str:
-    """Format structural drift metrics into a human-readable suffix."""
-    parts = []
-    if "complexity_score" in drift:
-        comp = drift["complexity_score"]
-        parts.append(f"complexity {comp['from']:.0f}->{comp['to']:.0f}")
-    if "loc" in drift:
-        loc = drift["loc"]
-        parts.append(f"loc {loc['from']:.0f}->{loc['to']:.0f}")
-    return f"; drift: {', '.join(parts)}" if parts else ""
-
-
-def _build_stale_wontfix_finding(
-    finding_id: str,
-    previous: dict,
-    *,
-    reasons: list[str],
-    drift: dict,
-    since_scan: int,
-) -> dict:
-    """Construct a stale_wontfix finding from staleness metadata."""
-    tier = 4 if "severity_drift" in reasons else 3
-    confidence = "high" if "severity_drift" in reasons else "medium"
-    reason_text = " + ".join(reasons)
-    summary = (
-        f"Stale wontfix ({reason_text}): re-triage `{finding_id}` "
-        f"(last reviewed {since_scan} scans ago)"
-    )
-    summary += _format_drift_summary(drift)
-
-    return state_mod.make_finding(
-        "stale_wontfix",
-        previous.get("file", ""),
-        finding_id,
-        tier=tier,
-        confidence=confidence,
-        summary=summary,
-        detail={
-            "subtype": "stale_wontfix",
-            "original_finding_id": finding_id,
-            "original_detector": previous.get("detector"),
-            "reasons": reasons,
-            "scans_since_wontfix": since_scan,
-            "drift": drift,
-        },
-    )
-
-
 def _augment_with_stale_wontfix_findings(
-    findings: list[dict],
+    findings: list[dict[str, Any]],
     runtime: ScanRuntime,
     *,
     decay_scans: int,
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict[str, Any]], int]:
     """Append re-triage findings for stale/worsening wontfix debt."""
-    existing = runtime.state.get("findings", {})
-    if not isinstance(existing, dict):
-        return findings, 0
-
-    current_by_id = {finding.get("id"): finding for finding in findings if finding.get("id")}
-    augmented = list(findings)
-    monitored = 0
-
-    for finding_id, previous in existing.items():
-        if previous.get("status") != "wontfix":
-            continue
-        if finding_id not in current_by_id:
-            continue
-        if not _in_scan_scope(previous.get("file", ""), runtime.path):
-            continue
-
-        monitored += 1
-        since_scan = int(runtime.state.get("scan_count", 0) or 0) - int(
-            previous.get("wontfix_scan_count", runtime.state.get("scan_count", 0) or 0)
-        )
-        since_scan = max(since_scan, 0)
-
-        reasons, drift = _wontfix_staleness_reasons(
-            previous, current_by_id[finding_id],
-            since_scan=since_scan, decay_scans=decay_scans,
-        )
-        if not reasons:
-            continue
-
-        augmented.append(
-            _build_stale_wontfix_finding(
-                finding_id, previous,
-                reasons=reasons, drift=drift, since_scan=since_scan,
-            )
-        )
-
-    return augmented, monitored
+    return _augment_stale_wontfix_impl(
+        findings,
+        state=runtime.state,
+        scan_path=runtime.path,
+        project_root=PROJECT_ROOT,
+        decay_scans=decay_scans,
+    )
 
 
-def run_scan_generation(runtime: ScanRuntime) -> tuple[list[dict], dict, dict | None]:
+def run_scan_generation(
+    runtime: ScanRuntime,
+) -> tuple[list[dict[str, Any]], dict[str, object], dict[str, object] | None]:
     """Run detector pipeline and return findings, potentials, and codebase metrics."""
     from desloppify.languages._framework.treesitter import (
         disable_parse_cache,
@@ -410,8 +312,9 @@ def run_scan_generation(runtime: ScanRuntime) -> tuple[list[dict], dict, dict | 
         runtime.args, runtime.lang, runtime.path, codebase_metrics
     )
     findings = _augment_with_stale_exclusion_findings(findings, runtime)
-    decay_scans = int(
-        runtime.config.get("wontfix_decay_scans", _WONTFIX_DECAY_SCANS_DEFAULT)
+    decay_scans = _coerce_int(
+        runtime.config.get("wontfix_decay_scans"),
+        default=_WONTFIX_DECAY_SCANS_DEFAULT,
     )
     findings, monitored_wontfix = _augment_with_stale_wontfix_findings(
         findings,
@@ -424,9 +327,9 @@ def run_scan_generation(runtime: ScanRuntime) -> tuple[list[dict], dict, dict | 
 
 def merge_scan_results(
     runtime: ScanRuntime,
-    findings: list[dict],
-    potentials: dict,
-    codebase_metrics: dict | None,
+    findings: list[dict[str, Any]],
+    potentials: dict[str, object],
+    codebase_metrics: dict[str, object] | None,
 ) -> ScanMergeResult:
     """Merge findings into persistent state and return diff + previous score snapshot."""
     scan_path_rel = rel(str(runtime.path))
@@ -443,6 +346,7 @@ def merge_scan_results(
 
     if runtime.lang and runtime.lang.zone_map is not None:
         runtime.state["zone_distribution"] = runtime.lang.zone_map.counts()
+    _persist_scan_coverage(runtime.state, runtime.lang)
 
     target_score = target_strict_score_from_config(runtime.config, fallback=95.0)
 
@@ -481,15 +385,21 @@ def merge_scan_results(
     )
 
 
-def resolve_noise_snapshot(state: dict, config: dict) -> ScanNoiseSnapshot:
+def resolve_noise_snapshot(
+    state: state_mod.StateModel,
+    config: dict[str, object],
+) -> ScanNoiseSnapshot:
     """Resolve noise budget settings and hidden finding counters."""
     noise_budget, global_noise_budget, budget_warning = (
         state_mod.resolve_finding_noise_settings(config)
     )
+    findings_by_id = state.get("findings", {})
+    if not isinstance(findings_by_id, dict):
+        findings_by_id = {}
     open_findings = [
         finding
         for finding in state_mod.path_scoped_findings(
-            state["findings"], state.get("scan_path")
+            findings_by_id, state.get("scan_path")
         ).values()
         if finding.get("status") == "open"
     ]
@@ -508,7 +418,10 @@ def resolve_noise_snapshot(state: dict, config: dict) -> ScanNoiseSnapshot:
     )
 
 
-def persist_reminder_history(runtime: ScanRuntime, narrative: dict) -> None:
+def persist_reminder_history(
+    runtime: ScanRuntime,
+    narrative: dict[str, object],
+) -> None:
     """Persist reminder history emitted by narrative computation."""
     if not (narrative and "reminder_history" in narrative):
         return

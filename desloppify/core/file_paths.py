@@ -1,0 +1,80 @@
+"""Path resolution and exclusion matching helpers."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from pathlib import Path
+
+from desloppify.core._internal.text_utils import get_project_root
+
+
+def matches_exclusion(rel_path: str, exclusion: str) -> bool:
+    """Check if a relative path matches an exclusion pattern."""
+    parts = Path(rel_path).parts
+    if exclusion in parts:
+        return True
+    if "*" in exclusion:
+        import fnmatch
+
+        if any(fnmatch.fnmatch(part, exclusion) for part in parts):
+            return True
+    if "/" in exclusion or os.sep in exclusion:
+        normalized = exclusion.rstrip("/").rstrip(os.sep)
+        return rel_path.startswith(normalized + "/") or rel_path.startswith(
+            normalized + os.sep
+        )
+    return False
+
+
+def normalize_path_separators(path: str) -> str:
+    return path.replace("\\", "/")
+
+
+def safe_relpath(path: str | Path, start: str | Path) -> str:
+    try:
+        return os.path.relpath(str(path), str(start))
+    except ValueError:
+        return str(Path(path).resolve())
+
+
+def rel(path: str) -> str:
+    root = get_project_root()
+    resolved = Path(path).resolve()
+    try:
+        return normalize_path_separators(str(resolved.relative_to(root)))
+    except ValueError:
+        return normalize_path_separators(safe_relpath(resolved, root))
+
+
+def resolve_path(filepath: str) -> str:
+    """Resolve a filepath to absolute, handling both relative and absolute."""
+    p = Path(filepath)
+    if p.is_absolute():
+        return str(p.resolve())
+    return str((get_project_root() / filepath).resolve())
+
+
+def safe_write_text(filepath: str | Path, content: str) -> None:
+    """Atomically write text to a file using temp+rename."""
+    p = Path(filepath)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp, str(p))
+    except OSError:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+__all__ = [
+    "matches_exclusion",
+    "normalize_path_separators",
+    "rel",
+    "resolve_path",
+    "safe_relpath",
+    "safe_write_text",
+]

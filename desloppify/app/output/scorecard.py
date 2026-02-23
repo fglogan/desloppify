@@ -8,15 +8,15 @@ import os
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 
-from desloppify.app.output.scorecard_parts.meta import (
-    resolve_package_version,
-    resolve_project_name,
-)
 from desloppify.app.output.scorecard_parts.dimensions import (
     collapse_elegance_dimensions,
     limit_scorecard_dimensions,
     prepare_scorecard_dimensions,
     resolve_scorecard_lang,
+)
+from desloppify.app.output.scorecard_parts.meta import (
+    resolve_package_version,
+    resolve_project_name,
 )
 from desloppify.app.output.scorecard_parts.theme import (
     ACCENT,

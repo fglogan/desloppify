@@ -7,7 +7,12 @@ from typing import Any
 
 from desloppify.file_discovery import safe_write_text
 from desloppify.scoring import CONFIDENCE_WEIGHTS, HOLISTIC_MULTIPLIER
-from desloppify.state import get_objective_score, get_overall_score, get_strict_score, utc_now
+from desloppify.state import (
+    get_objective_score,
+    get_overall_score,
+    get_strict_score,
+    utc_now,
+)
 
 
 def _score_snapshot(state: dict[str, Any]) -> tuple[float, float, float]:

@@ -38,6 +38,9 @@ workflow:
   zone set <file> <zone>        Override zone for a file
   review --prepare              Prepare holistic codebase review data
   review --import FILE          Import review findings from JSON
+  review --validate-import FILE Validate import payload/trust mode without mutating state
+  review --external-start       Start external blind review session (Claude cloud)
+  review --external-submit      Submit external session results with canonical provenance
   issues                        Review findings work queue
   plan                          Generate prioritized markdown plan
 
@@ -55,6 +58,9 @@ examples:
   desloppify ignore "smells::*::async_no_await" --attest "I have actually verified these are intentional fire-and-forget patterns and I am not gaming the score by resolving without fixing."
   desloppify detect logs --top 10
   desloppify detect dupes --threshold 0.9
+  desloppify review --validate-import findings.json --attested-external --attest "I validated this review was completed without awareness of overall score and is unbiased."
+  desloppify review --external-start --external-runner claude
+  desloppify review --external-submit --session-id <session_id> --import findings.json
   desloppify dev scaffold-lang go --extension .go --marker go.mod --default-src .
   desloppify move src/shared/hooks/useFoo.ts src/shared/hooks/video/useFoo.ts --dry-run
   desloppify move scripts/foo/bar.py scripts/foo/baz/bar.py

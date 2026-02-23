@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from desloppify.hook_registry import get_lang_hook
 from desloppify.file_discovery import read_file_text, rel, resolve_path
+from desloppify.hook_registry import get_lang_hook
 
 _LOW_VALUE_NAMES = re.compile(
     r"(?:^|/)(?:types|constants|enums|index)\.[a-z]+$|(?:^|/).+\.d\.[a-z]+$"
@@ -64,7 +64,7 @@ def detect_review_coverage(
     Returns:
         (entries, potential) where potential = count of reviewable production files.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries: list[dict] = []
     potential = 0
 
@@ -210,7 +210,7 @@ def detect_holistic_review_staleness(
     if max_age_days == 0:
         return []
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check age
     reviewed_at = holistic.get("reviewed_at", "")

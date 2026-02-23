@@ -6,10 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from desloppify.languages.csharp.deps.cli import cmd_cycles, cmd_deps
-
 
 # ---------------------------------------------------------------------------
 # Helpers

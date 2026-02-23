@@ -22,11 +22,14 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from desloppify.engine.policy.zones import FileZoneMap, Zone
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.engine.policy.zones import FileZoneMap, Zone
 from desloppify.file_discovery import rel
+from desloppify.languages._framework.base.types import DetectorCoverageStatus
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,84 @@ _CROSS_LANG_OVERLAP = frozenset(
         "B505",  # weak_cryptographic_key
     }
 )
+
+_BANDIT_IMPACT_TEXT = (
+    "Python-specific security checks were skipped; this can miss shell injection, "
+    "unsafe deserialization, and risky SQL/subprocess patterns."
+)
+
+
+BanditRunState = Literal["ok", "missing_tool", "timeout", "error", "parse_error"]
+
+
+@dataclass(frozen=True)
+class BanditRunStatus:
+    """Typed execution status for a Bandit adapter invocation."""
+
+    state: BanditRunState
+    detail: str = ""
+    tool: str = "bandit"
+
+    def coverage(self) -> DetectorCoverageStatus | None:
+        """Convert non-success statuses into detector coverage metadata."""
+        if self.state == "ok":
+            return None
+
+        if self.state == "missing_tool":
+            return DetectorCoverageStatus(
+                detector="security",
+                status="reduced",
+                confidence=0.6,
+                summary="bandit is not installed — Python-specific security checks were skipped.",
+                impact=_BANDIT_IMPACT_TEXT,
+                remediation="Install Bandit: pip install bandit",
+                tool=self.tool,
+                reason="missing_dependency",
+            )
+
+        if self.state == "timeout":
+            return DetectorCoverageStatus(
+                detector="security",
+                status="reduced",
+                confidence=0.75,
+                summary="bandit timed out — Python-specific security checks were skipped this scan.",
+                impact=_BANDIT_IMPACT_TEXT,
+                remediation="Rerun scan or run `bandit -r -f json --quiet <path>` manually.",
+                tool=self.tool,
+                reason="timeout",
+            )
+
+        if self.state == "parse_error":
+            return DetectorCoverageStatus(
+                detector="security",
+                status="reduced",
+                confidence=0.75,
+                summary="bandit output could not be parsed — Python-specific security checks were skipped this scan.",
+                impact=_BANDIT_IMPACT_TEXT,
+                remediation="Update/reinstall Bandit and rerun scan.",
+                tool=self.tool,
+                reason="parse_error",
+            )
+
+        return DetectorCoverageStatus(
+            detector="security",
+            status="reduced",
+            confidence=0.75,
+            summary="bandit failed to execute — Python-specific security checks were skipped this scan.",
+            impact=_BANDIT_IMPACT_TEXT,
+            remediation="Verify Bandit is runnable and rerun scan.",
+            tool=self.tool,
+            reason="execution_error",
+        )
+
+
+@dataclass(frozen=True)
+class BanditScanResult:
+    """Bandit findings plus typed execution status."""
+
+    entries: list[dict]
+    files_scanned: int
+    status: BanditRunStatus
 
 
 def _to_security_entry(
@@ -105,12 +186,8 @@ def detect_with_bandit(
     path: Path,
     zone_map: FileZoneMap | None,
     timeout: int = 120,
-) -> tuple[list[dict], int] | None:
-    """Run bandit on *path* and return (entries, files_scanned), or None on failure.
-
-    Returns None when bandit is not installed, so the caller knows to skip
-    Python-specific security checks.
-    """
+) -> BanditScanResult:
+    """Run bandit on *path* and return findings + typed execution status."""
     try:
         result = subprocess.run(
             [
@@ -128,24 +205,44 @@ def detect_with_bandit(
         )
     except FileNotFoundError:
         logger.debug("bandit: not installed — Python-specific security checks will be skipped")
-        return None
+        return BanditScanResult(
+            entries=[],
+            files_scanned=0,
+            status=BanditRunStatus(state="missing_tool"),
+        )
     except subprocess.TimeoutExpired:
         logger.debug("bandit: timed out after %ds", timeout)
-        return None
+        return BanditScanResult(
+            entries=[],
+            files_scanned=0,
+            status=BanditRunStatus(state="timeout", detail=f"timeout={timeout}s"),
+        )
     except OSError as exc:
         logger.debug("bandit: OSError: %s", exc)
-        return None
+        return BanditScanResult(
+            entries=[],
+            files_scanned=0,
+            status=BanditRunStatus(state="error", detail=str(exc)),
+        )
 
     stdout = result.stdout.strip()
     if not stdout:
         # Bandit exits 0 with no output when there's nothing to scan.
-        return [], 0
+        return BanditScanResult(
+            entries=[],
+            files_scanned=0,
+            status=BanditRunStatus(state="ok"),
+        )
 
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError as exc:
         logger.debug("bandit: JSON parse error: %s", exc)
-        return None
+        return BanditScanResult(
+            entries=[],
+            files_scanned=0,
+            status=BanditRunStatus(state="parse_error", detail=str(exc)),
+        )
 
     raw_results: list[dict] = data.get("results", [])
     metrics: dict = data.get("metrics", {})
@@ -164,4 +261,8 @@ def detect_with_bandit(
             entries.append(entry)
 
     logger.debug("bandit: %d findings from %d files", len(entries), files_scanned)
-    return entries, files_scanned
+    return BanditScanResult(
+        entries=entries,
+        files_scanned=files_scanned,
+        status=BanditRunStatus(state="ok"),
+    )

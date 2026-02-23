@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import pytest
 
-from desloppify.state import empty_state as empty_state_factory
 from desloppify.intelligence.narrative.action_engine import (
     _fixer_has_applicable_findings,
+)
+from desloppify.intelligence.narrative.action_engine import (
     compute_actions as _compute_actions,
 )
 from desloppify.intelligence.narrative.action_models import ActionContext
 from desloppify.intelligence.narrative.action_tools import (
     compute_tools as _compute_tools,
 )
+from desloppify.state import empty_state as empty_state_factory
 
 
 @pytest.fixture

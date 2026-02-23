@@ -7,8 +7,7 @@ import re
 from pathlib import Path
 
 from desloppify.engine.detectors.base import FunctionInfo
-from desloppify.file_discovery import resolve_path
-from desloppify.file_discovery import find_source_files
+from desloppify.file_discovery import find_source_files, resolve_path
 
 GDSCRIPT_FILE_EXCLUSIONS = [
     ".godot",

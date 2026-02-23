@@ -16,7 +16,64 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from desloppify.file_discovery import DEFAULT_EXCLUSIONS, get_exclusions
+
 logger = logging.getLogger(__name__)
+
+_BASE_IGNORES = (
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/__pycache__/**",
+    "**/.venv*/**",
+    "**/venv/**",
+    "**/.desloppify/**",
+    "**/.claude/**",
+)
+
+_ARTIFACT_PREFIXES = ("build/", "dist/", ".desloppify/", ".claude/")
+_BUILD_MIRROR_PREFIX = "build/lib/"
+
+
+def _to_scan_relative(path_resolved: Path, name: str) -> str | None:
+    """Return scan-relative path, or None when file is outside scan path."""
+    if not name:
+        return None
+    try:
+        rel = Path(name).resolve().relative_to(path_resolved)
+    except (ValueError, OSError):
+        return None
+    return str(rel).replace("\\", "/")
+
+
+def _is_artifact_path(rel_path: str) -> bool:
+    return rel_path.startswith(_ARTIFACT_PREFIXES)
+
+
+def _is_build_mirror_pair(first_rel: str, second_rel: str) -> bool:
+    if first_rel.startswith(_BUILD_MIRROR_PREFIX):
+        return first_rel[len(_BUILD_MIRROR_PREFIX):] == second_rel
+    if second_rel.startswith(_BUILD_MIRROR_PREFIX):
+        return second_rel[len(_BUILD_MIRROR_PREFIX):] == first_rel
+    return False
+
+
+def _as_jscpd_globs(pattern: str) -> list[str]:
+    raw = pattern.strip().replace("\\", "/").strip("/")
+    if not raw:
+        return []
+    globs = [f"**/{raw}/**"]
+    basename = raw.rsplit("/", 1)[-1]
+    if "." in basename or "*" in basename:
+        globs.append(f"**/{raw}")
+    return globs
+
+
+def _jscpd_ignore_arg() -> str:
+    """Build jscpd ignore globs from defaults + runtime excludes."""
+    patterns = set(_BASE_IGNORES)
+    for pattern in (*DEFAULT_EXCLUSIONS, *get_exclusions()):
+        patterns.update(_as_jscpd_globs(pattern))
+    return ",".join(sorted(patterns))
 
 
 def _parse_jscpd_report(report: dict, scan_path: Path) -> list[dict]:
@@ -46,20 +103,16 @@ def _parse_jscpd_report(report: dict, scan_path: Path) -> list[dict]:
         first_name = first.get("name", "")
         second_name = second.get("name", "")
 
-        # Skip pairs where either file is outside the scan path
-        valid_pair = True
-        for name in (first_name, second_name):
-            if not name:
-                valid_pair = False
-                break
-            try:
-                if not Path(name).resolve().is_relative_to(path_resolved):
-                    valid_pair = False
-                    break
-            except (ValueError, OSError):
-                valid_pair = False
-                break
-        if not valid_pair:
+        first_rel = _to_scan_relative(path_resolved, first_name)
+        second_rel = _to_scan_relative(path_resolved, second_name)
+        if first_rel is None or second_rel is None:
+            continue
+        if (
+            first_rel == second_rel
+            or _is_artifact_path(first_rel)
+            or _is_artifact_path(second_rel)
+            or _is_build_mirror_pair(first_rel, second_rel)
+        ):
             continue
 
         lines = dup.get("lines", 0)
@@ -72,13 +125,15 @@ def _parse_jscpd_report(report: dict, scan_path: Path) -> list[dict]:
             }
 
         cluster = clusters[fragment_key]
-        for name, info in [(first_name, first), (second_name, second)]:
+        for name, info in [(first_rel, first), (second_rel, second)]:
             if name not in cluster["files"]:
                 cluster["files"][name] = info.get("start", 0)
 
     entries: list[dict] = []
-    for fragment_key, cluster in clusters.items():
+    for cluster in clusters.values():
         files = cluster["files"]
+        if len(files) < 2:
+            continue
         locations = [
             {"file": f, "line": line}
             for f, line in sorted(files.items(), key=lambda kv: kv[0])
@@ -116,7 +171,7 @@ def detect_with_jscpd(path: Path) -> list[dict] | None:
                     "--min-tokens",
                     "50",
                     "--ignore",
-                    "**/node_modules/**,**/.git/**,**/__pycache__/**,**/.venv*/**,**/venv/**",
+                    _jscpd_ignore_arg(),
                     "--silent",
                 ],
                 capture_output=True,

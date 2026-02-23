@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from datetime import datetime as _dt
-from datetime import timezone as _tz
 
 from desloppify.core.fallbacks import log_best_effort_failure
 from desloppify.intelligence.narrative._constants import (
@@ -115,7 +115,7 @@ def _wontfix_debt_reminders(state: StateModel, debt: dict, command: str | None) 
         if not resolved_at:
             continue
         try:
-            age_days = (_dt.now(_tz.utc) - _dt.fromisoformat(resolved_at)).days
+            age_days = (_dt.now(UTC) - _dt.fromisoformat(resolved_at)).days
         except (ValueError, TypeError) as exc:
             log_best_effort_failure(
                 logger, f"parse wontfix timestamp {resolved_at!r}", exc
@@ -309,7 +309,7 @@ def _review_staleness_reminder(state: StateModel, config: dict | None) -> list[d
             if review.get("reviewed_at")
         )
         oldest = _dt.fromisoformat(oldest_str)
-        age_days = (_dt.now(_tz.utc) - oldest).days
+        age_days = (_dt.now(UTC) - oldest).days
     except (ValueError, TypeError) as exc:
         log_best_effort_failure(logger, "parse oldest review timestamp", exc)
         return []

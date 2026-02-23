@@ -6,7 +6,10 @@ import copy
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
-from desloppify.languages._framework.base.types import LangConfig
+from desloppify.languages._framework.base.types import (
+    DetectorCoverageRecord,
+    LangConfig,
+)
 
 if TYPE_CHECKING:
     from desloppify.engine.policy.zones import FileZoneMap
@@ -27,6 +30,8 @@ class LangRuntimeState:
     runtime_options: dict[str, Any] = field(default_factory=dict)
     large_threshold_override: int = 0
     props_threshold_override: int = 0
+    detector_coverage: dict[str, DetectorCoverageRecord] = field(default_factory=dict)
+    coverage_warnings: list[DetectorCoverageRecord] = field(default_factory=list)
 
 
 @dataclass
@@ -42,6 +47,8 @@ class LangRunOverrides:
     runtime_options: dict[str, Any] | None = _UNSET
     large_threshold_override: int | None = _UNSET
     props_threshold_override: int | None = _UNSET
+    detector_coverage: dict[str, DetectorCoverageRecord] | None = _UNSET
+    coverage_warnings: list[DetectorCoverageRecord] | None = _UNSET
 
 
 @dataclass
@@ -128,6 +135,22 @@ class LangRun:
             return copy.deepcopy(spec.default)
         return default
 
+    @property
+    def detector_coverage(self) -> dict[str, DetectorCoverageRecord]:
+        return self.state.detector_coverage
+
+    @detector_coverage.setter
+    def detector_coverage(self, value: dict[str, DetectorCoverageRecord]) -> None:
+        self.state.detector_coverage = value
+
+    @property
+    def coverage_warnings(self) -> list[DetectorCoverageRecord]:
+        return self.state.coverage_warnings
+
+    @coverage_warnings.setter
+    def coverage_warnings(self, value: list[DetectorCoverageRecord]) -> None:
+        self.state.coverage_warnings = value
+
 
 def make_lang_run(
     lang: LangConfig | LangRun,
@@ -170,6 +193,10 @@ def make_lang_run(
         runtime.state.props_threshold_override = int(
             resolved.props_threshold_override or 0
         )
+    if resolved.detector_coverage is not _UNSET:
+        runtime.state.detector_coverage = resolved.detector_coverage or {}
+    if resolved.coverage_warnings is not _UNSET:
+        runtime.state.coverage_warnings = resolved.coverage_warnings or []
 
     return runtime
 

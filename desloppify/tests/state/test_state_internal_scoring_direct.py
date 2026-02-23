@@ -126,3 +126,34 @@ def test_update_objective_health_warns_single_target_matched_subjective_dimensio
     assert state["subjective_integrity"]["status"] == "warn"
     assert state["subjective_integrity"]["matched_count"] == 1
     assert state["subjective_integrity"]["reset_dimensions"] == []
+
+
+def test_update_objective_health_applies_scan_coverage_confidence_metadata():
+    state = {
+        "lang": "python",
+        "potentials": {"python": {"security": 10}},
+        "scan_coverage": {
+            "python": {
+                "detectors": {
+                    "security": {
+                        "status": "reduced",
+                        "confidence": 0.6,
+                        "summary": "bandit missing",
+                        "impact": "Python-specific security checks skipped.",
+                        "remediation": "Install Bandit: pip install bandit",
+                    }
+                }
+            }
+        },
+    }
+
+    scoring_mod._update_objective_health(state, findings={})
+
+    security_dim = state["dimension_scores"]["Security"]
+    detector_meta = security_dim["detectors"]["security"]
+    assert detector_meta["coverage_status"] == "reduced"
+    assert detector_meta["coverage_confidence"] == 0.6
+    assert security_dim["coverage_status"] == "reduced"
+    assert security_dim["coverage_confidence"] == 0.6
+    assert state["score_confidence"]["status"] == "reduced"
+    assert "Security" in state["score_confidence"]["dimensions"]

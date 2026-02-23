@@ -5,19 +5,17 @@ from __future__ import annotations
 import argparse
 
 from desloppify.languages._framework.commands_base import (
+    build_standard_detect_registry,
+    make_cmd_complexity,
     make_cmd_cycles,
     make_cmd_deps,
     make_cmd_dupes,
+    make_cmd_large,
     make_cmd_orphaned,
 )
 from desloppify.languages.dart.detectors.deps import build_dep_graph
 from desloppify.languages.dart.extractors import extract_functions, find_dart_files
 from desloppify.languages.dart.phases import DART_COMPLEXITY_SIGNALS
-from desloppify.languages._framework.commands_base import (
-    build_standard_detect_registry,
-    make_cmd_complexity,
-    make_cmd_large,
-)
 
 _cmd_large_impl = make_cmd_large(find_dart_files, default_threshold=500)
 _cmd_complexity_impl = make_cmd_complexity(

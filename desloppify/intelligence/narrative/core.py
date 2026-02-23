@@ -5,16 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.config import load_config as _load_config
 from desloppify.intelligence.narrative._constants import STRUCTURAL_MERGE
-from desloppify.state import (
-    Finding,
-    StateModel,
-    get_overall_score,
-    get_strict_score,
-    path_scoped_findings,
-)
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.intelligence.narrative.action_engine import compute_actions
 from desloppify.intelligence.narrative.action_models import (
     ActionContext,
@@ -30,18 +23,18 @@ from desloppify.intelligence.narrative.reminders import _compute_reminders
 from desloppify.intelligence.narrative.strategy_engine import compute_strategy
 from desloppify.intelligence.narrative.types import (
     BadgeStatus,
-    DebtAnalysis,
-    DimensionAnalysis,
-    DimensionEntry,
-    FixerLeverage,
-    LaneInfo,
     NarrativeResult,
     PrimaryAction,
-    ReminderItem,
     RiskFlag,
     StrictTarget,
-    StrategyResult,
     VerificationStep,
+)
+from desloppify.state import (
+    Finding,
+    StateModel,
+    get_overall_score,
+    get_strict_score,
+    path_scoped_findings,
 )
 
 _RISK_SEVERITY_ORDER = {

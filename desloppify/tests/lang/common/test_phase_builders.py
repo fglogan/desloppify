@@ -15,7 +15,6 @@ from desloppify.languages._framework.base.phase_builders import (
 )
 from desloppify.languages._framework.base.types import DetectorPhase
 
-
 # ── Individual factory functions ──────────────────────────────
 
 
@@ -92,7 +91,7 @@ def test_shared_tail_default_has_three_phases():
 
 def test_shared_tail_with_pre_duplicates_inserts_in_middle():
     """Extra phases go between subjective review and boilerplate duplication."""
-    custom = DetectorPhase("Custom detector", lambda p, l: ([], {}))
+    custom = DetectorPhase("Custom detector", lambda p, lang: ([], {}))
     phases = shared_subjective_duplicates_tail(pre_duplicates=[custom])
     assert len(phases) == 4
     assert phases[0].label == "Subjective review"
@@ -103,8 +102,8 @@ def test_shared_tail_with_pre_duplicates_inserts_in_middle():
 
 def test_shared_tail_with_multiple_pre_duplicates():
     """Multiple pre_duplicates are inserted in order."""
-    custom_a = DetectorPhase("Alpha", lambda p, l: ([], {}))
-    custom_b = DetectorPhase("Beta", lambda p, l: ([], {}))
+    custom_a = DetectorPhase("Alpha", lambda p, lang: ([], {}))
+    custom_b = DetectorPhase("Beta", lambda p, lang: ([], {}))
     phases = shared_subjective_duplicates_tail(pre_duplicates=[custom_a, custom_b])
     assert len(phases) == 5
     labels = [p.label for p in phases]
@@ -154,7 +153,9 @@ def test_make_cohesion_phase_label():
 
 
 def test_make_unused_imports_phase_label():
-    from desloppify.languages._framework.treesitter.phases import make_unused_imports_phase
+    from desloppify.languages._framework.treesitter.phases import (
+        make_unused_imports_phase,
+    )
 
     spec = MagicMock()
     phase = make_unused_imports_phase(spec)
@@ -247,7 +248,9 @@ def test_make_cohesion_phase_run_with_entries():
 
 def test_make_unused_imports_phase_run_with_entries():
     """Run an unused imports phase that finds unused imports."""
-    from desloppify.languages._framework.treesitter.phases import make_unused_imports_phase
+    from desloppify.languages._framework.treesitter.phases import (
+        make_unused_imports_phase,
+    )
 
     spec = MagicMock()
     phase = make_unused_imports_phase(spec)
@@ -279,7 +282,9 @@ def test_all_treesitter_phases_returns_empty_when_unavailable():
         "desloppify.languages._framework.treesitter.is_available",
         return_value=False,
     ):
-        from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
+        from desloppify.languages._framework.treesitter.phases import (
+            all_treesitter_phases,
+        )
         result = all_treesitter_phases("go")
     assert result == []
 
@@ -293,7 +298,9 @@ def test_all_treesitter_phases_returns_empty_for_unknown_spec():
         "desloppify.languages._framework.treesitter._specs.TREESITTER_SPECS",
         {},
     ):
-        from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
+        from desloppify.languages._framework.treesitter.phases import (
+            all_treesitter_phases,
+        )
         result = all_treesitter_phases("nonexistent_lang")
     assert result == []
 
@@ -311,7 +318,9 @@ def test_all_treesitter_phases_includes_imports_when_import_query():
         "desloppify.languages._framework.treesitter._specs.TREESITTER_SPECS",
         {"test_lang": mock_spec},
     ):
-        from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
+        from desloppify.languages._framework.treesitter.phases import (
+            all_treesitter_phases,
+        )
         result = all_treesitter_phases("test_lang")
 
     assert len(result) == 3
@@ -334,7 +343,9 @@ def test_all_treesitter_phases_excludes_imports_when_no_import_query():
         "desloppify.languages._framework.treesitter._specs.TREESITTER_SPECS",
         {"test_lang": mock_spec},
     ):
-        from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
+        from desloppify.languages._framework.treesitter.phases import (
+            all_treesitter_phases,
+        )
         result = all_treesitter_phases("test_lang")
 
     assert len(result) == 2

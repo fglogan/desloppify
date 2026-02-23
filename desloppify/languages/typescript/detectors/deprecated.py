@@ -10,9 +10,8 @@ from typing import Any
 
 from desloppify.core.fallbacks import log_best_effort_failure
 from desloppify.core.signal_patterns import DEPRECATION_MARKER_RE
+from desloppify.file_discovery import find_ts_files, rel, resolve_path
 from desloppify.languages.typescript.detectors.contracts import DetectorResult
-from desloppify.file_discovery import rel, resolve_path
-from desloppify.file_discovery import find_ts_files
 from desloppify.utils import (
     colorize,
     grep_count_files,

@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from desloppify.core.issues_render import finding_weight, render_issue_detail
+from desloppify.intelligence.review._prepare.remediation_engine import (
+    empty_plan,
+)
 from desloppify.intelligence.review.importing.holistic import (
     parse_holistic_import_payload,
 )
@@ -14,9 +17,6 @@ from desloppify.intelligence.review.importing.per_file import (
 from desloppify.intelligence.review.importing.shared import (
     extract_reviewed_files,
     store_assessments,
-)
-from desloppify.intelligence.review._prepare.remediation_engine import (
-    empty_plan,
 )
 
 

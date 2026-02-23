@@ -4,7 +4,10 @@ import re
 from collections import defaultdict
 from typing import NamedTuple
 
-from desloppify.languages.typescript.fixers.common import apply_fixer, collapse_blank_lines
+from desloppify.languages.typescript.fixers.common import (
+    apply_fixer,
+    collapse_blank_lines,
+)
 
 _DESTR_MEMBER_RE = re.compile(r"^\s*(\w+)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 _REST_ELEMENT_RE = re.compile(r"\.\.\.\w+")

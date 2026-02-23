@@ -80,7 +80,7 @@ def ts_build_dep_graph(
                 graph[resolved]["importers"].add(filepath)
 
     # Finalize: add counts.
-    for f, data in graph.items():
+    for data in graph.values():
         data["import_count"] = len(data["imports"])
         data["importer_count"] = len(data["importers"])
 

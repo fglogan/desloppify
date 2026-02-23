@@ -15,7 +15,6 @@ from desloppify.intelligence.review.policy import (
     normalize_dimension_inputs,
 )
 
-
 # ---------------------------------------------------------------------------
 # _normalized_custom_allowlist
 # ---------------------------------------------------------------------------

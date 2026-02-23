@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
-import pytest
-
 from desloppify.engine.detectors.security.detector import detect_security_issues
 from desloppify.engine.detectors.security.filters import (
     _EXCLUDED_SECURITY_ZONES,
@@ -14,7 +10,6 @@ from desloppify.engine.detectors.security.filters import (
     _should_skip_line,
 )
 from desloppify.engine.policy.zones import FileZoneMap, Zone, ZoneRule
-
 
 # ── Helpers ───────────────────────────────────────────────────────────
 

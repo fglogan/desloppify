@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from desloppify.engine.planning.common import CONFIDENCE_ORDER
-from desloppify.state import path_scoped_findings
 from desloppify.engine._work_queue.helpers import (
+    detail_dict,
     is_review_finding,
     is_subjective_finding,
     primary_command_for_finding,
@@ -15,11 +14,13 @@ from desloppify.engine._work_queue.helpers import (
     subjective_strict_scores,
     supported_fixers_for_item,
 )
+from desloppify.engine.planning.common import CONFIDENCE_ORDER
+from desloppify.state import path_scoped_findings
 
 
 def subjective_score_value(item: dict) -> float:
     if item.get("kind") == "subjective_dimension":
-        detail = item.get("detail", {})
+        detail = detail_dict(item)
         return float(detail.get("strict_score", item.get("subjective_score", 100.0)))
     return float(item.get("subjective_score", 100.0))
 
@@ -61,7 +62,7 @@ def build_finding_items(
         )
         subjective_score = None
         if item["is_subjective"]:
-            detail = finding.get("detail", {})
+            detail = detail_dict(finding)
             dim_name = detail.get("dimension_name", "")
             dim_key = detail.get("dimension", "") or slugify(dim_name)
             subjective_score = subjective_scores.get(
@@ -99,7 +100,7 @@ def item_sort_key(item: dict) -> tuple:
             item.get("id", ""),
         )
 
-    detail = item.get("detail", {})
+    detail = detail_dict(item)
     return (
         int(item.get("effective_tier", item.get("tier", 3))),
         0,
@@ -142,7 +143,7 @@ def item_explain(item: dict) -> dict:
             "ranking_factors": ["tier asc", "subjective_score asc", "id asc"],
         }
 
-    detail = item.get("detail", {})
+    detail = detail_dict(item)
     confidence = item.get("confidence", "low")
     is_subjective = bool(item.get("is_subjective"))
     ranking_factors = (

@@ -31,6 +31,14 @@ from desloppify.engine._work_queue.helpers import (
     supported_fixers_for_item,
 )
 
+# --- issues: review-finding work queue -------------------------------------
+from desloppify.engine._work_queue.issues import (
+    expire_stale_holistic,
+    impact_label,
+    list_open_review_findings,
+    update_investigation,
+)
+
 # --- ranking: sort keys, tier counts, grouping -----------------------------
 from desloppify.engine._work_queue.ranking import (
     build_finding_items,
@@ -39,14 +47,6 @@ from desloppify.engine._work_queue.ranking import (
     item_sort_key,
     subjective_score_value,
     tier_counts,
-)
-
-# --- issues: review-finding work queue -------------------------------------
-from desloppify.engine._work_queue.issues import (
-    expire_stale_holistic,
-    impact_label,
-    list_open_review_findings,
-    update_investigation,
 )
 
 __all__ = [

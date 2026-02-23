@@ -5,6 +5,7 @@ import logging
 import re
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.languages.typescript.extractors_components import (
     detect_passthrough_components,
@@ -12,7 +13,6 @@ from desloppify.languages.typescript.extractors_components import (
     extract_ts_components,
     tsx_passthrough_pattern,
 )
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 

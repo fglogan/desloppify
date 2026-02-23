@@ -107,6 +107,48 @@ def _add_review_parser(sub) -> None:
         help="Import review findings from JSON file",
     )
     p_review.add_argument(
+        "--validate-import",
+        dest="validate_import_file",
+        type=str,
+        metavar="FILE",
+        help="Validate review import payload and selected trust mode without mutating state",
+    )
+    p_review.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help=(
+            "Allow partial review import when invalid findings are skipped "
+            "(default: fail on any skipped finding)"
+        ),
+    )
+    p_review.add_argument(
+        "--manual-override",
+        action="store_true",
+        help=(
+            "Allow untrusted assessment score imports. Findings always import; "
+            "scores require trusted blind provenance unless this override is set."
+        ),
+    )
+    p_review.add_argument(
+        "--attested-external",
+        action="store_true",
+        help=(
+            "Accept external blind-run assessments as durable scores when "
+            "paired with --attest and valid blind packet provenance "
+            "(intended for cloud Claude subagent workflows)."
+        ),
+    )
+    p_review.add_argument(
+        "--attest",
+        type=str,
+        default=None,
+        help=(
+            "Required with --manual-override or --attested-external. "
+            "For attested external imports include both phrases "
+            "'without awareness' and 'unbiased'."
+        ),
+    )
+    p_review.add_argument(
         "--max-age",
         type=int,
         default=None,
@@ -140,6 +182,40 @@ def _add_review_parser(sub) -> None:
         "--run-batches",
         action="store_true",
         help="Run holistic investigation batches with subagents and merge/import output",
+    )
+    p_review.add_argument(
+        "--external-start",
+        action="store_true",
+        help=(
+            "Start a cloud external review session (generates blind packet, "
+            "session id/token, and reviewer template)"
+        ),
+    )
+    p_review.add_argument(
+        "--external-submit",
+        action="store_true",
+        help=(
+            "Submit external reviewer JSON via a started session; "
+            "CLI injects canonical provenance before import"
+        ),
+    )
+    p_review.add_argument(
+        "--session-id",
+        type=str,
+        default=None,
+        help="External review session id for --external-submit",
+    )
+    p_review.add_argument(
+        "--external-runner",
+        choices=["claude"],
+        default="claude",
+        help="External reviewer runner for --external-start (default: claude)",
+    )
+    p_review.add_argument(
+        "--session-ttl-hours",
+        type=int,
+        default=24,
+        help="External review session expiration in hours (default: 24)",
     )
     p_review.add_argument(
         "--runner",
@@ -316,5 +392,3 @@ def _add_update_skill_parser(sub) -> None:
         help="Agent interface (claude, codex, cursor, copilot, windsurf, gemini). "
         "Auto-detected on updates if omitted.",
     )
-
-

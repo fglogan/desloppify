@@ -40,6 +40,7 @@ from desloppify.app.commands.scan.scan_reporting_summary import (  # noqa: F401
     show_score_delta,
     show_strict_target_progress,
 )
+from desloppify.app.commands.scan.scan_orchestrator import ScanOrchestrator
 from desloppify.app.commands.scan.scan_workflow import (
     merge_scan_results,
     persist_reminder_history,
@@ -87,9 +88,38 @@ def _show_scan_visibility(noise, effective_include_slow: bool) -> None:
         )
 
 
+def _show_coverage_preflight(runtime) -> None:
+    """Print preflight warnings when scan coverage confidence is reduced."""
+    warnings = getattr(runtime, "coverage_warnings", []) or []
+    if not isinstance(warnings, list) or not warnings:
+        return
+
+    for entry in warnings:
+        if not isinstance(entry, dict):
+            continue
+        summary = str(entry.get("summary", "")).strip()
+        impact = str(entry.get("impact", "")).strip()
+        remediation = str(entry.get("remediation", "")).strip()
+        detector = str(entry.get("detector", "")).strip() or "detector"
+
+        headline = summary or f"Coverage reduced for `{detector}`."
+        print(colorize(f"  * Coverage preflight: {headline}", "yellow"))
+        if impact:
+            print(colorize(f"    Repercussion: {impact}", "dim"))
+        if remediation:
+            print(colorize(f"    Fix: {remediation}", "dim"))
+
+
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run all detectors, update persistent state, show diff."""
     runtime = prepare_scan_runtime(args)
+    orchestrator = ScanOrchestrator(
+        runtime,
+        run_scan_generation_fn=run_scan_generation,
+        merge_scan_results_fn=merge_scan_results,
+        resolve_noise_snapshot_fn=resolve_noise_snapshot,
+        persist_reminder_history_fn=persist_reminder_history,
+    )
     _print_scan_header(runtime.lang_label)
     if runtime.reset_subjective_count > 0:
         print(
@@ -99,12 +129,22 @@ def cmd_scan(args: argparse.Namespace) -> None:
                 "yellow",
             )
         )
+    if runtime.expired_manual_override_count > 0:
+        print(
+            colorize(
+                "  * Expired provisional manual-override assessments: "
+                f"{runtime.expired_manual_override_count} dimension(s) reset to 0. "
+                "Use trusted `review --run-batches --runner codex --parallel --scan-after-import` to replace them.",
+                "yellow",
+            )
+        )
+    _show_coverage_preflight(runtime)
 
-    findings, potentials, codebase_metrics = run_scan_generation(runtime)
-    merge = merge_scan_results(runtime, findings, potentials, codebase_metrics)
+    findings, potentials, codebase_metrics = orchestrator.generate()
+    merge = orchestrator.merge(findings, potentials, codebase_metrics)
     _print_scan_complete_banner()
 
-    noise = resolve_noise_snapshot(runtime.state, runtime.config)
+    noise = orchestrator.noise_snapshot()
 
     show_diff_summary(merge.diff)
     show_score_delta(
@@ -140,7 +180,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
         runtime.lang,
         target_strict_score=target_value,
     )
-    persist_reminder_history(runtime, narrative)
+    orchestrator.persist_reminders(narrative)
 
     write_query(
         build_scan_query_payload(

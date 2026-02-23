@@ -13,18 +13,10 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# ── Module 1: engine._state.merge ─────────────────────────────────────
-import desloppify.engine._state.merge as merge_mod
-from desloppify.engine._state.merge import MergeScanOptions, merge_scan
-
-# ── Module 2: readers ─────────────────────────────────────────────────
-import desloppify.intelligence.review.context_holistic.readers as readers_mod
 
 # ── Module 3: parser_groups_admin ─────────────────────────────────────
 import desloppify.app.cli_support.parser_groups_admin as parser_admin_mod
@@ -32,9 +24,15 @@ import desloppify.app.cli_support.parser_groups_admin as parser_admin_mod
 # ── Module 4: move_apply ──────────────────────────────────────────────
 import desloppify.app.commands.move.move_apply as move_apply_mod
 
+# ── Module 1: engine._state.merge ─────────────────────────────────────
+import desloppify.engine._state.merge as merge_mod
+
+# ── Module 2: readers ─────────────────────────────────────────────────
+import desloppify.intelligence.review.context_holistic.readers as readers_mod
+
 # ── Module 5: shared_phases ───────────────────────────────────────────
 import desloppify.languages._framework.base.shared_phases as shared_phases_mod
-
+from desloppify.engine._state.merge import MergeScanOptions, merge_scan
 
 # =====================================================================
 # Module 1: merge.py
@@ -392,6 +390,13 @@ class TestReviewParser:
         assert args.state is None
         assert args.prepare is False
         assert args.import_file is None
+        assert args.validate_import_file is None
+        assert args.external_start is False
+        assert args.external_submit is False
+        assert args.session_id is None
+        assert args.external_runner == "claude"
+        assert args.session_ttl_hours == 24
+        assert args.allow_partial is False
         assert args.dimensions is None
         assert args.run_batches is False
         assert args.runner == "codex"
@@ -417,6 +422,51 @@ class TestReviewParser:
 
         args = parser.parse_args(["review", "--import", "results.json"])
         assert args.import_file == "results.json"
+
+    def test_review_validate_import_file(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        parser_admin_mod._add_review_parser(sub)
+
+        args = parser.parse_args(["review", "--validate-import", "results.json"])
+        assert args.validate_import_file == "results.json"
+
+    def test_review_external_start_flag(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        parser_admin_mod._add_review_parser(sub)
+
+        args = parser.parse_args(
+            ["review", "--external-start", "--external-runner", "claude"]
+        )
+        assert args.external_start is True
+        assert args.external_runner == "claude"
+
+    def test_review_external_submit_flag(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        parser_admin_mod._add_review_parser(sub)
+
+        args = parser.parse_args(
+            [
+                "review",
+                "--external-submit",
+                "--session-id",
+                "ext_20260223_000000_deadbeef",
+                "--import",
+                "results.json",
+            ]
+        )
+        assert args.external_submit is True
+        assert args.session_id == "ext_20260223_000000_deadbeef"
+
+    def test_review_allow_partial_flag(self):
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="command")
+        parser_admin_mod._add_review_parser(sub)
+
+        args = parser.parse_args(["review", "--import", "results.json", "--allow-partial"])
+        assert args.allow_partial is True
 
 
 class TestZoneParser:

@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from desloppify.core._internal.text_utils import get_area
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
+from desloppify.languages._framework.base.phase_builders import (
+    detector_phase_security,
+    detector_phase_signature,
+    detector_phase_test_coverage,
+    shared_subjective_duplicates_tail,
+)
+from desloppify.languages._framework.base.types import DetectorPhase, LangConfig
+from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
 from desloppify.languages.dart import test_coverage as dart_test_coverage_hooks
 from desloppify.languages.dart.commands import get_detect_commands
 from desloppify.languages.dart.detectors.deps import (
@@ -25,16 +34,6 @@ from desloppify.languages.dart.review import (
     api_surface,
     module_patterns,
 )
-from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
-from desloppify.languages._framework.base.phase_builders import (
-    detector_phase_security,
-    detector_phase_signature,
-    detector_phase_test_coverage,
-    shared_subjective_duplicates_tail,
-)
-from desloppify.core._internal.text_utils import get_area
-from desloppify.languages._framework.base.types import DetectorPhase, LangConfig
-
 
 DART_ENTRY_PATTERNS = [
     "/main.dart",

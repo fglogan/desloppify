@@ -20,6 +20,7 @@ from desloppify.app.commands.status_parts.summary import (
 from desloppify.app.output.scorecard_parts.projection import (
     scorecard_subjective_entries,
 )
+from desloppify.core._internal.text_utils import get_area
 from desloppify.core.registry import dimension_action_type
 from desloppify.scoring import (
     DIMENSIONS,
@@ -27,7 +28,6 @@ from desloppify.scoring import (
     compute_score_impact,
     merge_potentials,
 )
-from desloppify.core._internal.text_utils import get_area
 from desloppify.utils import colorize, print_table
 
 

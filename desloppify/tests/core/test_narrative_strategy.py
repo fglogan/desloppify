@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from desloppify.state import empty_state as empty_state_factory
 from desloppify.intelligence.narrative.dimensions import (
     _analyze_debt,
     _analyze_dimensions,
@@ -25,6 +24,7 @@ from desloppify.intelligence.narrative.strategy_engine import (
 from desloppify.intelligence.narrative.strategy_engine import (
     open_files_by_detector as _open_files_by_detector,
 )
+from desloppify.state import empty_state as empty_state_factory
 
 
 @pytest.fixture

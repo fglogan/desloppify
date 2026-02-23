@@ -13,13 +13,13 @@ from desloppify.app.commands.scan.scan import (
     _effective_include_slow,
     _format_delta,
     _resolve_scan_profile,
+    _warn_explicit_lang_with_no_files,
+    cmd_scan,
     show_diff_summary,
     show_dimension_deltas,
     show_post_scan_analysis,
     show_score_delta,
     show_strict_target_progress,
-    _warn_explicit_lang_with_no_files,
-    cmd_scan,
 )
 from desloppify.scoring import DIMENSIONS
 
@@ -50,6 +50,7 @@ class TestCmdScanExecution:
         runtime = SimpleNamespace(
             lang_label=" (python)",
             reset_subjective_count=0,
+            expired_manual_override_count=0,
             state={"dimension_scores": {}},
             config={},
             effective_include_slow=True,
@@ -134,6 +135,84 @@ class TestCmdScanExecution:
 
         assert captured["query"] == {"command": "scan", "ok": True}
         assert captured["llm_summary_called"] is True
+
+    def test_cmd_scan_prints_coverage_preflight_warning(self, monkeypatch, capsys):
+        args = SimpleNamespace(path=".")
+        runtime = SimpleNamespace(
+            lang_label=" (python)",
+            reset_subjective_count=0,
+            expired_manual_override_count=0,
+            state={"dimension_scores": {}},
+            config={},
+            effective_include_slow=True,
+            profile="full",
+            lang=SimpleNamespace(name="python"),
+            coverage_warnings=[
+                {
+                    "detector": "security",
+                    "summary": "bandit is not installed.",
+                    "impact": "Python-specific security checks are skipped.",
+                    "remediation": "Install Bandit: pip install bandit",
+                }
+            ],
+        )
+        merge = SimpleNamespace(
+            diff={"new": 0, "auto_resolved": 0, "reopened": 0},
+            prev_overall=None,
+            prev_objective=None,
+            prev_strict=None,
+            prev_verified=None,
+            prev_dim_scores={},
+        )
+        noise = SimpleNamespace(
+            budget_warning=None,
+            hidden_total=0,
+            global_noise_budget=0,
+            noise_budget=0,
+            hidden_by_detector={},
+        )
+
+        monkeypatch.setattr(scan_cmd_mod, "prepare_scan_runtime", lambda _args: runtime)
+        monkeypatch.setattr(
+            scan_cmd_mod, "run_scan_generation", lambda _runtime: ([], {}, None)
+        )
+        monkeypatch.setattr(
+            scan_cmd_mod,
+            "merge_scan_results",
+            lambda _runtime, _findings, _potentials, _metrics: merge,
+        )
+        monkeypatch.setattr(
+            scan_cmd_mod, "resolve_noise_snapshot", lambda _state, _config: noise
+        )
+        monkeypatch.setattr(scan_cmd_mod, "show_diff_summary", lambda _diff: None)
+        monkeypatch.setattr(scan_cmd_mod, "show_score_delta", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(scan_cmd_mod, "show_scorecard_subjective_measures", lambda _state: None)
+        monkeypatch.setattr(scan_cmd_mod, "show_score_model_breakdown", lambda _state: None)
+        monkeypatch.setattr(
+            scan_cmd_mod, "target_strict_score_from_config", lambda _config, fallback=95.0: fallback
+        )
+        monkeypatch.setattr(scan_cmd_mod, "show_score_integrity", lambda _state, _diff: None)
+        monkeypatch.setattr(
+            scan_cmd_mod,
+            "show_post_scan_analysis",
+            lambda *_args, **_kwargs: ([], {"headline": None, "actions": []}),
+        )
+        monkeypatch.setattr(scan_cmd_mod, "persist_reminder_history", lambda _runtime, _narrative: None)
+        monkeypatch.setattr(
+            scan_cmd_mod,
+            "build_scan_query_payload",
+            lambda *_args, **_kwargs: {"command": "scan", "ok": True},
+        )
+        monkeypatch.setattr(scan_cmd_mod, "write_query", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(scan_cmd_mod, "emit_scorecard_badge", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(scan_cmd_mod, "_print_llm_summary", lambda *_args, **_kwargs: None)
+
+        cmd_scan(args)
+
+        out = capsys.readouterr().out
+        assert "Coverage preflight:" in out
+        assert "Repercussion:" in out
+        assert "Install Bandit" in out
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +679,11 @@ class TestShowPostScanAnalysis:
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
         assert "Subjective scores below 90" in out
-        assert "You can run the subjective scoring with `desloppify review --prepare`" in out
+        assert (
+            "You can run the subjective scoring with "
+            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
+            in out
+        )
         assert "`desloppify status`" in out
         assert "`desloppify issues`" in out
 
@@ -629,7 +712,11 @@ class TestShowPostScanAnalysis:
         }
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
-        assert "You can rerun the subjective scoring with `desloppify review --prepare`" in out
+        assert (
+            "You can rerun the subjective scoring with "
+            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
+            in out
+        )
 
     def test_no_subjective_rerun_nudge_when_scores_high(self, monkeypatch, capsys):
         import desloppify.intelligence.narrative as narrative_mod
@@ -655,7 +742,11 @@ class TestShowPostScanAnalysis:
         }
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
-        assert "You can rerun the subjective scoring with `desloppify review --prepare`" not in out
+        assert (
+            "You can rerun the subjective scoring with "
+            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
+            not in out
+        )
 
     def test_shows_filtered_narrative_reminders(self, monkeypatch, capsys):
         import desloppify.intelligence.narrative as narrative_mod

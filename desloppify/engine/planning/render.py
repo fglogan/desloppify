@@ -6,11 +6,11 @@ from collections import defaultdict
 from datetime import date
 
 from desloppify.core.registry import dimension_action_type
-from desloppify.state import get_objective_score, get_overall_score, get_strict_score
 from desloppify.engine.planning.common import TIER_LABELS
 from desloppify.engine.planning.types import PlanState
 from desloppify.engine.work_queue import QueueBuildOptions, build_work_queue
 from desloppify.scoring import DIMENSIONS, DISPLAY_NAMES
+from desloppify.state import get_objective_score, get_overall_score, get_strict_score
 from desloppify.utils import LOC_COMPACT_THRESHOLD
 
 

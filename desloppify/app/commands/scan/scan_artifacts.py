@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 
+from desloppify.app.commands.scan.scan_contracts import ScanQueryPayload
 from desloppify.app.commands.scan.scan_workflow import (
     ScanMergeResult,
     ScanNoiseSnapshot,
 )
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.config import config_for_query
 from desloppify.scoring import compute_health_breakdown
 from desloppify.state import score_snapshot
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.utils import colorize
 
 
@@ -25,7 +27,7 @@ def build_scan_query_payload(
     narrative: dict[str, object],
     merge: ScanMergeResult,
     noise: ScanNoiseSnapshot,
-) -> dict[str, object]:
+) -> ScanQueryPayload:
     """Build the canonical query payload persisted after a scan."""
     scores = score_snapshot(state)
     return {
@@ -49,7 +51,9 @@ def build_scan_query_payload(
         "dimension_scores": state.get("dimension_scores"),
         "score_breakdown": compute_health_breakdown(state.get("dimension_scores", {})),
         "subjective_integrity": state.get("subjective_integrity"),
+        "score_confidence": state.get("score_confidence"),
         "potentials": state.get("potentials"),
+        "scan_coverage": state.get("scan_coverage"),
         "zone_distribution": state.get("zone_distribution"),
         "narrative": narrative,
         "config": config_for_query(config),
@@ -76,6 +80,18 @@ def emit_scorecard_badge(
     """Generate a scorecard image badge and print usage hints."""
     generate_scorecard, get_badge_config = _load_scorecard_helpers()
     if not callable(generate_scorecard) or not callable(get_badge_config):
+        explicit_badge_request = bool(
+            getattr(args, "badge_path", None)
+            or config.get("badge_path")
+            or os.environ.get("DESLOPPIFY_BADGE_PATH")
+        )
+        if explicit_badge_request:
+            print(
+                colorize(
+                    "  Scorecard support not installed. Install with: pip install \"desloppify[scorecard]\"",
+                    "yellow",
+                )
+            )
         return None
 
     try:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 
 from desloppify import state as state_mod
-from desloppify.app.commands import next_output as next_output_mod
-from desloppify.app.commands import next_render as next_render_mod
+from desloppify.app.commands.next_parts import output as next_output_mod
+from desloppify.app.commands.next_parts import render as next_render_mod
 from desloppify.app.commands.helpers.lang import resolve_lang
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
@@ -19,8 +19,8 @@ from desloppify.engine.work_queue import (
     QueueBuildOptions,
     build_work_queue,
 )
-from desloppify.intelligence.narrative import NarrativeContext, compute_narrative
 from desloppify.file_discovery import safe_write_text
+from desloppify.intelligence.narrative import NarrativeContext, compute_narrative
 from desloppify.utils import check_skill_version, check_tool_staleness, colorize
 
 

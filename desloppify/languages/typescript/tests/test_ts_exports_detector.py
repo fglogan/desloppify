@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 import desloppify.languages.typescript.detectors.exports as exports_mod
-
 
 # ── detect_dead_exports ─────────────────────────────────────────────
 

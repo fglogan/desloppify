@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from desloppify import state as state_mod
-from desloppify.state import Finding
 from desloppify.engine.detectors import complexity as complexity_detector_mod
 from desloppify.engine.detectors import flat_dirs as flat_dirs_detector_mod
 from desloppify.engine.detectors import gods as gods_detector_mod
@@ -19,7 +18,6 @@ from desloppify.languages._framework.base.structural import (
     add_structural_signal,
     merge_structural_signals,
 )
-from desloppify.languages._framework.runtime import LangRun
 from desloppify.languages._framework.finding_factories import (
     make_cycle_findings,
     make_facade_findings,
@@ -28,15 +26,16 @@ from desloppify.languages._framework.finding_factories import (
     make_single_use_findings,
     make_unused_findings,
 )
+from desloppify.languages._framework.runtime import LangRun
 from desloppify.languages.python.detectors import (
     coupling_contracts as coupling_contracts_detector_mod,
 )
-from desloppify.languages.python.detectors import uncalled as uncalled_detector_mod
 from desloppify.languages.python.detectors import deps as deps_detector_mod
 from desloppify.languages.python.detectors import facade as facade_detector_mod
 from desloppify.languages.python.detectors import (
     responsibility_cohesion as cohesion_detector_mod,
 )
+from desloppify.languages.python.detectors import uncalled as uncalled_detector_mod
 from desloppify.languages.python.detectors import unused as unused_detector_mod
 from desloppify.languages.python.detectors.complexity import (
     compute_long_functions,
@@ -46,15 +45,12 @@ from desloppify.languages.python.detectors.complexity import (
 from desloppify.languages.python.extractors import detect_passthrough_functions
 from desloppify.languages.python.extractors_classes import extract_py_classes
 from desloppify.languages.python.phases_quality import (
-    phase_dict_keys as _phase_dict_keys,
+    phase_dict_keys,
+    phase_layer_violation,
+    phase_mutable_state,
+    phase_smells,
 )
-from desloppify.languages.python.phases_quality import (
-    phase_layer_violation as _phase_layer_violation,
-)
-from desloppify.languages.python.phases_quality import (
-    phase_mutable_state as _phase_mutable_state,
-)
-from desloppify.languages.python.phases_quality import phase_smells as _phase_smells
+from desloppify.state import Finding
 from desloppify.utils import log
 
 # ── Config data (single source of truth) ──────────────────
@@ -128,14 +124,14 @@ PY_ENTRY_PATTERNS = [
 ]
 
 
-def _phase_unused(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_unused(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     entries, total_files = unused_detector_mod.detect_unused(path)
     return make_unused_findings(entries, log), {
         "unused": adjust_potential(lang.zone_map, total_files),
     }
 
 
-def _phase_structural(
+def phase_structural(
     path: Path, lang: LangRun
 ) -> tuple[list[Finding], dict[str, int]]:
     """Merge large + complexity + god classes into structural findings."""
@@ -205,7 +201,7 @@ def _phase_structural(
     return results, potentials
 
 
-def _phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     graph = deps_detector_mod.build_dep_graph(path)
     lang.dep_graph = graph
     zm = lang.zone_map
@@ -283,7 +279,7 @@ def _phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str,
     return results, potentials
 
 
-def _phase_responsibility_cohesion(
+def phase_responsibility_cohesion(
     path: Path, lang: LangRun
 ) -> tuple[list[Finding], dict[str, int]]:
     entries, candidates = cohesion_detector_mod.detect_responsibility_cohesion(path)
@@ -324,7 +320,7 @@ def _phase_responsibility_cohesion(
         "responsibility_cohesion": adjust_potential(lang.zone_map, candidates)
     }
 
-def _phase_uncalled_functions(
+def phase_uncalled_functions(
     path: Path, lang: LangRun
 ) -> tuple[list[Finding], dict[str, int]]:
     """Detect underscore-prefixed top-level functions with zero references."""
@@ -353,18 +349,30 @@ def _phase_uncalled_functions(
     return results, {"uncalled_functions": adjust_potential(zm, total)}
 
 
+# Backward-compatible aliases for internal callers/tests.
+_phase_unused = phase_unused
+_phase_structural = phase_structural
+_phase_coupling = phase_coupling
+_phase_responsibility_cohesion = phase_responsibility_cohesion
+_phase_uncalled_functions = phase_uncalled_functions
+_phase_smells = phase_smells
+_phase_mutable_state = phase_mutable_state
+_phase_layer_violation = phase_layer_violation
+_phase_dict_keys = phase_dict_keys
+
+
 __all__ = [
     "PY_COMPLEXITY_SIGNALS",
     "PY_ENTRY_PATTERNS",
     "PY_GOD_RULES",
     "PY_SKIP_NAMES",
-    "_phase_coupling",
-    "_phase_dict_keys",
-    "_phase_layer_violation",
-    "_phase_mutable_state",
-    "_phase_responsibility_cohesion",
-    "_phase_smells",
-    "_phase_structural",
-    "_phase_uncalled_functions",
-    "_phase_unused",
+    "phase_coupling",
+    "phase_dict_keys",
+    "phase_layer_violation",
+    "phase_mutable_state",
+    "phase_responsibility_cohesion",
+    "phase_smells",
+    "phase_structural",
+    "phase_uncalled_functions",
+    "phase_unused",
 ]

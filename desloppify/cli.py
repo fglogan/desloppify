@@ -11,11 +11,11 @@ from desloppify.app.cli_support.parser import create_parser as _create_parser
 from desloppify.app.commands.helpers.lang import LangResolutionError, resolve_lang
 from desloppify.app.commands.helpers.runtime import CommandRuntime
 from desloppify.app.commands.helpers.state import state_path
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.config import load_config
 from desloppify.core.runtime_state import runtime_scope
 from desloppify.languages import available_langs
 from desloppify.state import load_state
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.utils import DEFAULT_PATH, colorize
 
 _DETECTOR_NAMES: list[str] | None = None

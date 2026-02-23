@@ -106,11 +106,7 @@ def __getattr__(name: str):  # noqa: N807
         "make_unused_imports_phase",
     }
     if name in _PHASE_EXPORTS:
-        from desloppify.languages._framework.treesitter.phases import (
-            all_treesitter_phases,
-            make_ast_smells_phase,
-            make_cohesion_phase,
-            make_unused_imports_phase,
-        )
-        return locals()[name]
+        from desloppify.languages._framework.treesitter import phases as phases_mod
+
+        return getattr(phases_mod, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

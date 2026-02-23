@@ -11,6 +11,12 @@ from desloppify.engine.detectors.orphaned import (
     OrphanedDetectionOptions,
     detect_orphaned_files,
 )
+from desloppify.file_discovery import rel
+from desloppify.languages._framework.commands_base import (
+    build_standard_detect_registry,
+    make_cmd_complexity,
+    make_cmd_large,
+)
 from desloppify.languages.csharp.detectors.deps import (
     build_dep_graph,
     resolve_roslyn_cmd_from_args,
@@ -22,12 +28,6 @@ from desloppify.languages.csharp.extractors import (
     find_csharp_files,
 )
 from desloppify.languages.csharp.phases import CSHARP_COMPLEXITY_SIGNALS
-from desloppify.languages._framework.commands_base import (
-    build_standard_detect_registry,
-    make_cmd_complexity,
-    make_cmd_large,
-)
-from desloppify.file_discovery import rel
 from desloppify.utils import colorize, print_table
 
 _cmd_large_impl = make_cmd_large(find_csharp_files, default_threshold=500)

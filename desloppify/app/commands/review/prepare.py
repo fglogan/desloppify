@@ -50,7 +50,9 @@ def do_prepare(
     )
     data["config"] = _redacted_review_config(config)
     data["narrative"] = narrative
-    data["next_command"] = "desloppify review --import .desloppify/findings.json"
+    data["next_command"] = (
+        "desloppify review --run-batches --runner codex --parallel --scan-after-import"
+    )
     total = data.get("total_files", 0)
     if total == 0:
         print(
@@ -103,21 +105,45 @@ def do_prepare(
     print(colorize("\n  AGENT PLAN:", "yellow"))
     print(
         colorize(
-            "  1. Run each investigation batch independently (parallel-friendly)", "dim"
+            "  1. Preferred: `desloppify review --run-batches --runner codex --parallel --scan-after-import`",
+            "dim",
         )
     )
-    print(colorize("  2. Capture findings in .desloppify/findings.json", "dim"))
-    print(colorize("  3. Import and rescan", "dim"))
     print(
         colorize(
-            "  Next command to improve subjective scores: `desloppify review --import .desloppify/findings.json`",
+            "  2. Cloud/manual fallback: run external reviewers, merge to findings.json, then import",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  3. Claude cloud durable path: `desloppify review --external-start --external-runner claude` then run the printed `--external-submit` command",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  4. Findings-only fallback: `desloppify review --import findings.json`",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  5. Emergency only: `--manual-override --attest \"<why>\"` (provisional; expires on next scan)",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  Next command to improve subjective scores: "
+            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`",
             "dim",
         )
     )
     print(
         colorize(
             "\n  → query.json updated. "
-            "Review codebase, then: desloppify review --import .desloppify/findings.json",
+            "Preferred next step: desloppify review --run-batches --runner codex --parallel --scan-after-import",
             "cyan",
         )
     )

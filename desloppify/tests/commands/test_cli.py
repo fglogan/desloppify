@@ -306,10 +306,87 @@ class TestCreateParser:
         assert args.command == "review"
         assert args.prepare is False
         assert args.import_file is None
+        assert args.validate_import_file is None
+        assert args.external_start is False
+        assert args.external_submit is False
+        assert args.session_id is None
+        assert args.external_runner == "claude"
+        assert args.session_ttl_hours == 24
+        assert args.allow_partial is False
+        assert args.manual_override is False
+        assert args.attested_external is False
+        assert args.attest is None
 
     def test_review_prepare_flag(self, parser):
         args = parser.parse_args(["review", "--prepare"])
         assert args.prepare is True
+
+    def test_review_allow_partial_flag(self, parser):
+        args = parser.parse_args(["review", "--import", "findings.json", "--allow-partial"])
+        assert args.import_file == "findings.json"
+        assert args.allow_partial is True
+
+    def test_review_validate_import_flag(self, parser):
+        args = parser.parse_args(["review", "--validate-import", "findings.json"])
+        assert args.validate_import_file == "findings.json"
+
+    def test_review_external_start_flag(self, parser):
+        args = parser.parse_args(
+            [
+                "review",
+                "--external-start",
+                "--external-runner",
+                "claude",
+                "--session-ttl-hours",
+                "12",
+            ]
+        )
+        assert args.external_start is True
+        assert args.external_runner == "claude"
+        assert args.session_ttl_hours == 12
+
+    def test_review_external_submit_flag(self, parser):
+        args = parser.parse_args(
+            [
+                "review",
+                "--external-submit",
+                "--session-id",
+                "ext_20260223_000000_deadbeef",
+                "--import",
+                "findings.json",
+            ]
+        )
+        assert args.external_submit is True
+        assert args.session_id == "ext_20260223_000000_deadbeef"
+        assert args.import_file == "findings.json"
+
+    def test_review_manual_override_flag(self, parser):
+        args = parser.parse_args(
+            [
+                "review",
+                "--import",
+                "findings.json",
+                "--manual-override",
+                "--attest",
+                "manual calibration justified by independent reviewer output",
+            ]
+        )
+        assert args.manual_override is True
+        assert isinstance(args.attest, str)
+
+    def test_review_attested_external_flag(self, parser):
+        args = parser.parse_args(
+            [
+                "review",
+                "--import",
+                "findings.json",
+                "--attested-external",
+                "--attest",
+                "I validated this review was completed without awareness of overall score and is unbiased.",
+            ]
+        )
+        assert args.attested_external is True
+        assert isinstance(args.attest, str)
 
     def test_issues_command_defaults(self, parser):
         args = parser.parse_args(["issues"])

@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
-from desloppify.state import StateModel
-
 from desloppify.engine._work_queue.helpers import (
     ALL_STATUSES,
     ATTEST_EXAMPLE,
@@ -21,6 +19,7 @@ from desloppify.engine._work_queue.ranking import (
     item_sort_key,
     tier_counts,
 )
+from desloppify.state import StateModel
 
 
 @dataclass(frozen=True)

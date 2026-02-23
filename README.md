@@ -28,6 +28,8 @@ a health score — state is cumulative, so each scan builds on previous progress
 Requires Python 3.11+. Install from PyPI:
 
 pip install --upgrade desloppify
+# Recommended for deepest coverage (tree-sitter + Python security adapter):
+pip install --upgrade "desloppify[full]"
 desloppify update-skill claude    # pick yours: claude, cursor, codex, copilot, windsurf, gemini
 desloppify scan --path .
 desloppify status
@@ -66,7 +68,7 @@ The hope is that anyone can use this to build something a seasoned engineer woul
 
 If you'd like to join a community of vibe engineers who want to build beautiful things, [come hang out](https://discord.gg/aZdzbZrHaY).
 
-<img src="docs/engineering.png" width="100%">
+<img src="assets/engineering.png" width="100%">
 
 ---
 
@@ -84,7 +86,9 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
 | `resolve <status> <patterns>` | Mark fixed / wontfix / false_positive / ignore |
 | `fix <fixer> [--dry-run]` | Auto-fix mechanical issues |
 | `review --prepare` | Generate subjective review packet (`query.json`) |
-| `review --import <file>` | Import subjective review findings |
+| `review --import <file> [--allow-partial]` | Import subjective review findings (fails closed on invalid findings by default) |
+| `review --external-start --external-runner claude` | Start Claude cloud blind-review session (creates session/token/template) |
+| `review --external-submit --session-id <id> --import <file>` | Submit Claude session output (from generated template); CLI injects canonical provenance |
 | `issues` | Review findings queue (list/show/update) |
 | `zone` | Show/set/clear zone classifications |
 | `config` | Show/set/unset project configuration |
@@ -94,6 +98,13 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
 | `tree` | Annotated codebase tree |
 | `viz` | Interactive HTML treemap |
 | `dev scaffold-lang` | Generate a standardized language plugin scaffold |
+
+#### Subjective Import Guardrails
+
+- Findings must match `query.json` / packet `system_prompt` schema exactly:
+  `dimension`, `identifier`, `summary`, `related_files`, `evidence`, `suggestion`, `confidence`.
+- `desloppify review --import` is fail-closed: if any finding is invalid/skipped, the import aborts and state is not saved.
+- Use `--allow-partial` only when you explicitly want to accept skipped findings.
 
 #### Detectors
 
@@ -189,3 +200,11 @@ Outside these zones, use static imports.
 - command modules may read/write state through state APIs, but should not define ad-hoc persisted fields
 
 </details>
+
+### Optional Dependencies (Coverage)
+
+- `pip install "desloppify[python-security]"` installs `bandit` for Python-specific security checks.
+- `pip install "desloppify[treesitter]"` installs tree-sitter language-pack for deeper AST analysis in generic plugins.
+- `pip install "desloppify[full]"` installs both.
+
+If optional tools are missing, scan now warns at start and end, and marks score confidence as reduced for affected detectors.

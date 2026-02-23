@@ -48,7 +48,7 @@ def _is_entry_file(filepath: str) -> bool:
 
 def _is_candidate(node: ast.AST) -> bool:
     """True if an AST node is a top-level private function worth flagging."""
-    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         return False
     name = node.name
     if not name.startswith("_"):
@@ -98,7 +98,7 @@ def detect_uncalled_functions(
                 refs.add(node.id)
             elif isinstance(node, ast.Attribute):
                 refs.add(node.attr)
-            elif isinstance(node, (ast.ImportFrom, ast.Import)):
+            elif isinstance(node, ast.ImportFrom | ast.Import):
                 for alias in node.names or []:
                     refs.add(alias.name)
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from desloppify.intelligence.review.dimensions.holistic import (
-    DIMENSIONS,
     DIMENSION_PROMPTS,
+    DIMENSIONS,
     REVIEW_SYSTEM_PROMPT,
 )
 from desloppify.intelligence.review.dimensions.lang import (

@@ -6,10 +6,10 @@ import pytest
 
 from desloppify.scoring import (
     SCORING_MODES,
+    compute_score_bundle,
     detector_pass_rate,
     detector_stats_by_mode,
 )
-from desloppify.scoring import compute_score_bundle
 
 
 def _finding(

@@ -8,7 +8,11 @@ from typing import Any
 from desloppify.intelligence.narrative._constants import DETECTOR_TOOLS
 from desloppify.intelligence.narrative.action_models import ActionContext, ActionItem
 from desloppify.languages import get_lang
-from desloppify.scoring import compute_score_impact, get_dimension_for_detector, merge_potentials
+from desloppify.scoring import (
+    compute_score_impact,
+    get_dimension_for_detector,
+    merge_potentials,
+)
 from desloppify.state import StateModel
 
 

@@ -10,7 +10,6 @@ from desloppify.engine._scoring.policy.core import (
     DETECTOR_SCORING_POLICIES,
     DIMENSIONS,
     DIMENSIONS_BY_NAME,
-    Dimension,
     FAILURE_STATUSES_BY_MODE,
     MECHANICAL_DIMENSION_WEIGHTS,
     MECHANICAL_WEIGHT_FRACTION,
@@ -18,6 +17,7 @@ from desloppify.engine._scoring.policy.core import (
     SCORING_MODES,
     SUBJECTIVE_DIMENSION_WEIGHTS,
     SUBJECTIVE_WEIGHT_FRACTION,
+    Dimension,
     ScoreMode,
 )
 from desloppify.engine._scoring.subjective.core import (

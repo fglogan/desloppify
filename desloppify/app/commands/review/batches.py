@@ -20,13 +20,33 @@ def _validate_runner(runner: str, *, colorize_fn) -> None:
     sys.exit(2)
 
 
-def _require_batches(packet: dict, *, colorize_fn) -> list[dict]:
+def _require_batches(
+    packet: dict,
+    *,
+    colorize_fn,
+    suggested_prepare_cmd: str | None = None,
+) -> list[dict]:
     """Return investigation batches or exit with a clear error."""
     batches = packet.get("investigation_batches", [])
     if isinstance(batches, list) and batches:
         return batches
     print(
-        colorize_fn("  Error: packet has no investigation_batches", "red"),
+        colorize_fn("  Error: packet has no investigation_batches.", "red"),
+        file=sys.stderr,
+    )
+    if isinstance(suggested_prepare_cmd, str) and suggested_prepare_cmd.strip():
+        print(
+            colorize_fn(
+                f"  Regenerate review context first: `{suggested_prepare_cmd}`",
+                "yellow",
+            ),
+            file=sys.stderr,
+        )
+    print(
+        colorize_fn(
+            "  Happy path: `desloppify review --run-batches --runner codex --parallel --scan-after-import`.",
+            "dim",
+        ),
         file=sys.stderr,
     )
     sys.exit(1)
@@ -78,6 +98,7 @@ def do_run_batches(
     collect_batch_results_fn,
     print_failures_and_exit_fn,
     merge_batch_results_fn,
+    build_import_provenance_fn,
     do_import_fn,
     run_followup_scan_fn,
     safe_write_text_fn,
@@ -91,7 +112,7 @@ def do_run_batches(
     _validate_runner(runner, colorize_fn=colorize_fn)
 
     stamp = run_stamp_fn()
-    packet, packet_path = load_or_prepare_packet_fn(
+    packet, immutable_packet_path, prompt_packet_path = load_or_prepare_packet_fn(
         args,
         state=state,
         lang=lang,
@@ -99,14 +120,20 @@ def do_run_batches(
         stamp=stamp,
     )
 
-    batches = _require_batches(packet, colorize_fn=colorize_fn)
+    scan_path = str(getattr(args, "path", ".") or ".")
+    suggested_prepare_cmd = f"desloppify review --prepare --path {scan_path}"
+    batches = _require_batches(
+        packet,
+        colorize_fn=colorize_fn,
+        suggested_prepare_cmd=suggested_prepare_cmd,
+    )
 
     selected_indexes = selected_batch_indexes_fn(args, batch_count=len(batches))
     run_dir, logs_dir, prompt_files, output_files, log_files = prepare_run_artifacts_fn(
         stamp=stamp,
         selected_indexes=selected_indexes,
         batches=batches,
-        packet_path=packet_path,
+        packet_path=prompt_packet_path,
         run_root=subagent_runs_dir,
         repo_root=project_root,
     )
@@ -117,7 +144,8 @@ def do_run_batches(
                 "  Dry run only: prompts generated, runner execution skipped.", "yellow"
             )
         )
-        print(colorize_fn(f"  Packet: {packet_path}", "dim"))
+        print(colorize_fn(f"  Immutable packet: {immutable_packet_path}", "dim"))
+        print(colorize_fn(f"  Blind packet: {prompt_packet_path}", "dim"))
         print(colorize_fn(f"  Prompts: {run_dir / 'prompts'}", "dim"))
         return
 
@@ -152,17 +180,31 @@ def do_run_batches(
     if failures:
         print_failures_and_exit_fn(
             failures=failures,
-            packet_path=packet_path,
+            packet_path=immutable_packet_path,
             logs_dir=logs_dir,
             colorize_fn=colorize_fn,
         )
 
     merged = merge_batch_results_fn(batch_results)
+    merged["provenance"] = build_import_provenance_fn(
+        runner=runner,
+        blind_packet_path=prompt_packet_path,
+        run_stamp=stamp,
+        batch_indexes=selected_indexes,
+    )
     merged_path = run_dir / "holistic_findings_merged.json"
     safe_write_text_fn(merged_path, json.dumps(merged, indent=2) + "\n")
     print(colorize_fn(f"\n  Merged outputs: {merged_path}", "bold"))
     _print_review_quality(merged.get("review_quality", {}), colorize_fn=colorize_fn)
-    do_import_fn(str(merged_path), state, lang, state_file, config=config)
+    do_import_fn(
+        str(merged_path),
+        state,
+        lang,
+        state_file,
+        config=config,
+        trusted_assessment_source=True,
+        trusted_assessment_label="trusted internal run-batches import",
+    )
 
     if getattr(args, "scan_after_import", False):
         followup_code = run_followup_scan_fn(

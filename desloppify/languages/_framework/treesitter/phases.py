@@ -14,7 +14,6 @@ from desloppify.languages._framework.base.types import DetectorPhase
 from desloppify.state import make_finding
 from desloppify.utils import log
 
-
 # ── Phase factories ────────────────────────────────────────
 
 

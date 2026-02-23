@@ -11,6 +11,7 @@ from desloppify.engine.detectors import dupes as dupes_detector_mod
 from desloppify.engine.detectors import gods as gods_detector_mod
 from desloppify.engine.detectors import graph as graph_detector_mod
 from desloppify.engine.detectors import orphaned as orphaned_detector_mod
+from desloppify.file_discovery import find_py_files, rel
 from desloppify.languages.python.detectors import deps as deps_detector_mod
 from desloppify.languages.python.detectors import facade as facade_detector_mod
 from desloppify.languages.python.detectors import smells as smells_detector_mod
@@ -20,8 +21,6 @@ from desloppify.languages.python.extractors import (
     extract_py_functions,
 )
 from desloppify.languages.python.extractors_classes import extract_py_classes
-from desloppify.file_discovery import rel
-from desloppify.file_discovery import find_py_files
 from desloppify.utils import colorize, display_entries, print_table
 
 if TYPE_CHECKING:

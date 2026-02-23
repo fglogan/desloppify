@@ -9,13 +9,13 @@ from desloppify.engine.detectors.passthrough import (
     classify_params,
     classify_passthrough_tier,
 )
+from desloppify.file_discovery import find_py_files
 from desloppify.languages.python.extractors_classes import extract_py_classes
 from desloppify.languages.python.extractors_shared import (
     extract_py_params,
     find_block_end,
     read_file,
 )
-from desloppify.file_discovery import find_py_files
 
 
 def _find_signature_end(lines: list[str], start: int) -> int | None:

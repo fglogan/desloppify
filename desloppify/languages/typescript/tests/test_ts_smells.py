@@ -35,6 +35,15 @@ def test_detect_any_type(tmp_path):
     assert any_entry["count"] == 1
 
 
+def test_detect_generic_any_type(tmp_path):
+    """Detects explicit `any` inside generic type arguments."""
+
+    _write(tmp_path, "bad.ts", "type T = Promise<any>;\n")
+    entries, _ = detect_smells(tmp_path)
+    ids = {e["id"] for e in entries}
+    assert "any_type" in ids
+
+
 def test_detect_ts_ignore(tmp_path):
     """Detects @ts-ignore and @ts-expect-error comments."""
 
@@ -180,6 +189,67 @@ def test_detect_voided_symbol(tmp_path):
     assert "voided_symbol" in ids
     voided = next(e for e in entries if e["id"] == "voided_symbol")
     assert voided["count"] == 2
+
+
+def test_detect_css_monolith(tmp_path):
+    """Detects very large stylesheet files."""
+
+    big_css = "\n".join(f".c{i} {{ color: red; }}" for i in range(320)) + "\n"
+    _write(tmp_path, "styles/index.css", big_css)
+    entries, _ = detect_smells(tmp_path)
+    ids = {e["id"] for e in entries}
+    assert "css_monolith" in ids
+
+
+def test_detect_css_important_overuse(tmp_path):
+    """Detects excessive !important declarations in stylesheets."""
+
+    css = "\n".join(f".c{i} {{ color: red !important; }}" for i in range(10)) + "\n"
+    _write(tmp_path, "styles/index.css", css)
+    entries, _ = detect_smells(tmp_path)
+    ids = {e["id"] for e in entries}
+    assert "css_important_overuse" in ids
+
+
+def test_detect_docs_script_drift(tmp_path):
+    """Detects when README omits key package scripts."""
+
+    _write(tmp_path, "README.md", "# Project\n\nInstall deps.\n")
+    _write(
+        tmp_path,
+        "package.json",
+        (
+            '{"scripts": {"dev": "vite", "build": "vite build", '
+            '"test": "vitest", "lint": "eslint ."}}'
+        ),
+    )
+    entries, _ = detect_smells(tmp_path)
+    ids = {e["id"] for e in entries}
+    assert "docs_scripts_drift" in ids
+
+
+def test_docs_script_drift_not_flagged_when_readme_mentions_scripts(tmp_path):
+    """README command docs should suppress docs drift finding."""
+
+    _write(
+        tmp_path,
+        "README.md",
+        (
+            "# Project\n\n"
+            "Use `npm run dev`, `npm run build`, `npm test`, and `npm run lint`.\n"
+        ),
+    )
+    _write(
+        tmp_path,
+        "package.json",
+        (
+            '{"scripts": {"dev": "vite", "build": "vite build", '
+            '"test": "vitest", "lint": "eslint ."}}'
+        ),
+    )
+    entries, _ = detect_smells(tmp_path)
+    ids = {e["id"] for e in entries}
+    assert "docs_scripts_drift" not in ids
 
 
 # ── detect_smells: multi-line smells ─────────────────────────

@@ -12,7 +12,6 @@ import desloppify.intelligence.review.dimensions.lang as dimensions_mod
 import desloppify.intelligence.review.dimensions.metadata as dimensions_metadata_mod
 import desloppify.intelligence.review.dimensions.selection as dimensions_selection_mod
 import desloppify.intelligence.review.dimensions.validation as dimensions_validation_mod
-import desloppify.languages as lang_mod
 from desloppify.intelligence.review.dimensions.holistic import DIMENSIONS
 
 

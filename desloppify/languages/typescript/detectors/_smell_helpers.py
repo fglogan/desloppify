@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Generator
 
+from desloppify.core._internal.text_utils import strip_c_style_comments
 from desloppify.languages.typescript.detectors._smell_effects import (
     detect_dead_useeffects as _detect_dead_useeffects_impl,
 )
@@ -26,7 +27,6 @@ from desloppify.languages.typescript.detectors._smell_effects import (
 from desloppify.languages.typescript.detectors._smell_effects import (
     track_brace_body as _track_brace_body_impl,
 )
-from desloppify.core._internal.text_utils import strip_c_style_comments
 
 
 def scan_code(

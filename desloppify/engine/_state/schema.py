@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, NotRequired, Required, TypedDict, cast
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.languages._framework.base.types import ScanCoverageRecord
 
 __all__ = [
     "ConcernDismissal",
@@ -53,7 +54,7 @@ class Finding(TypedDict):
     tier: int
     confidence: str
     summary: str
-    detail: dict
+    detail: dict[str, Any]
     status: FindingStatus
     note: str | None
     first_seen: str
@@ -111,6 +112,7 @@ class ScanHistoryEntry(TypedDict, total=False):
     ignore_patterns: int
     subjective_integrity: dict[str, Any] | None
     dimension_scores: dict[str, dict[str, float]] | None
+    score_confidence: dict[str, Any] | None
 
 
 class SubjectiveIntegrity(TypedDict, total=False):
@@ -128,6 +130,8 @@ class SubjectiveAssessment(TypedDict, total=False):
 
     score: float
     integrity_penalty: str | None
+    provisional_override: bool
+    provisional_until_scan: int
     needs_review_refresh: bool
     refresh_reason: str | None
     stale_since: str | None
@@ -152,6 +156,8 @@ class StateModel(TypedDict, total=False):
     verified_strict_score: Required[float]
     stats: Required[StateStats]
     findings: Required[dict[str, Finding]]
+    scan_coverage: dict[str, ScanCoverageRecord]
+    score_confidence: dict[str, Any]
     scan_history: list[ScanHistoryEntry]
     subjective_integrity: Required[SubjectiveIntegrity]
     subjective_assessments: Required[dict[str, SubjectiveAssessment]]
@@ -182,7 +188,7 @@ CURRENT_VERSION = 1
 
 def utc_now() -> str:
     """Return current UTC timestamp with second-level precision."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def empty_state() -> StateModel:
@@ -198,6 +204,8 @@ def empty_state() -> StateModel:
         "verified_strict_score": 0,
         "stats": {},
         "findings": {},
+        "scan_coverage": {},
+        "score_confidence": {},
         "subjective_integrity": {},
         "subjective_assessments": {},
     }
@@ -222,6 +230,10 @@ def ensure_state_defaults(state: StateModel | dict) -> StateModel:
         state["stats"] = {}
     if not isinstance(state.get("scan_history"), list):
         state["scan_history"] = []
+    if not isinstance(state.get("scan_coverage"), dict):
+        state["scan_coverage"] = {}
+    if not isinstance(state.get("score_confidence"), dict):
+        state["score_confidence"] = {}
     if not isinstance(state.get("subjective_integrity"), dict):
         state["subjective_integrity"] = {}
 

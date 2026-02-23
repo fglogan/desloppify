@@ -7,27 +7,51 @@ gracefully degrades when the tool is not installed or times out.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from desloppify.core.registry import DetectorMeta, register_detector
-from desloppify.languages._framework.treesitter import PARSE_INIT_ERRORS as _TS_INIT_ERRORS
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
-from desloppify.scoring import DetectorScoringPolicy, register_scoring_policy
+from desloppify.file_discovery import find_source_files
 from desloppify.languages._framework.base.types import (
     DetectorPhase,
     FixerConfig,
-    FixResult,
     LangConfig,
 )
-from desloppify.state import make_finding
-from desloppify.file_discovery import find_source_files
+from desloppify.languages._framework.generic_parts.parsers import (
+    PARSERS as _PARSERS,
+)
+from desloppify.languages._framework.generic_parts.parsers import (
+    parse_cargo,
+    parse_eslint,
+    parse_gnu,
+    parse_golangci,
+    parse_json,
+    parse_rubocop,
+)
+from desloppify.languages._framework.generic_parts.tool_factories import (
+    make_detect_fn_with_runner as _make_detect_fn_with_runner,
+)
+from desloppify.languages._framework.generic_parts.tool_factories import (
+    make_generic_fixer_with_runner as _make_generic_fixer_with_runner,
+)
+from desloppify.languages._framework.generic_parts.tool_factories import (
+    make_tool_phase,
+)
+from desloppify.languages._framework.generic_parts.tool_runner import (
+    resolve_command_argv as _resolve_command_argv_impl,
+)
+from desloppify.languages._framework.generic_parts.tool_runner import (
+    run_tool as _run_tool_impl,
+)
+from desloppify.languages._framework.treesitter import (
+    PARSE_INIT_ERRORS as _TS_INIT_ERRORS,
+)
+from desloppify.scoring import DetectorScoringPolicy, register_scoring_policy
 
 logger = logging.getLogger(__name__)
 
@@ -39,222 +63,33 @@ SHARED_PHASE_LABELS = frozenset({
 })
 
 
-# ── Output parsers ────────────────────────────────────────
+# Parser and tool execution helpers are composed from smaller modules to keep
+# this file focused on plugin assembly.
 
 
-def parse_gnu(output: str, scan_path: Path) -> list[dict]:
-    """Parse `file:line: message` or `file:line:col: message` format.
-
-    Used by: go vet, cppcheck, shellcheck, compilers.
-    """
-    entries: list[dict] = []
-    for line in output.splitlines():
-        m = re.match(r"^(.+?):(\d+)(?::\d+)?:\s*(.+)$", line)
-        if m:
-            entries.append(
-                {"file": m.group(1).strip(), "line": int(m.group(2)), "message": m.group(3).strip()}
-            )
-    return entries
+def _subprocess_run(*args: Any, **kwargs: Any):
+    """Call subprocess.run via this module for stable monkeypatch targets."""
+    return subprocess.run(*args, **kwargs)
 
 
-def parse_golangci(output: str, scan_path: Path) -> list[dict]:
-    """Parse golangci-lint JSON output: `{"Issues": [...]}`."""
-    entries: list[dict] = []
-    try:
-        data = json.loads(output)
-    except (json.JSONDecodeError, ValueError):
-        return entries
-    for issue in data.get("Issues") or []:
-        pos = issue.get("Pos") or {}
-        filename = pos.get("Filename", "")
-        line = pos.get("Line", 0)
-        text = issue.get("Text", "")
-        if filename and text:
-            entries.append({"file": filename, "line": line, "message": text})
-    return entries
+def _resolve_command_argv(cmd: str) -> list[str]:
+    """Compatibility wrapper around command argument resolution."""
+    return _resolve_command_argv_impl(cmd)
 
 
-def parse_json(output: str, scan_path: Path) -> list[dict]:
-    """Parse flat JSON array with field aliases.
-
-    Accepts: file/filename/path, line/line_no/row, message/text/reason.
-    Used by: swiftlint, phpstan, credo, ktlint, hlint, clj-kondo.
-    """
-    entries: list[dict] = []
-    try:
-        data = json.loads(output)
-    except (json.JSONDecodeError, ValueError):
-        return entries
-    items = data if isinstance(data, list) else []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        filename = item.get("file") or item.get("filename") or item.get("path") or ""
-        line = item.get("line") or item.get("line_no") or item.get("row") or 0
-        message = item.get("message") or item.get("text") or item.get("reason") or ""
-        if filename and message:
-            entries.append({"file": str(filename), "line": int(line), "message": str(message)})
-    return entries
+def _run_tool(cmd: str, path: Path, parser: Callable[[str, Path], list[dict]]) -> list[dict]:
+    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
+    return _run_tool_impl(cmd, path, parser, run_subprocess=_subprocess_run)
 
 
-def parse_rubocop(output: str, scan_path: Path) -> list[dict]:
-    """Parse RuboCop JSON: `{"files": [{"path": ..., "offenses": [...]}]}`."""
-    entries: list[dict] = []
-    try:
-        data = json.loads(output)
-    except (json.JSONDecodeError, ValueError):
-        return entries
-    for fobj in data.get("files") or []:
-        filepath = fobj.get("path", "")
-        for offense in fobj.get("offenses") or []:
-            loc = offense.get("location") or {}
-            line = loc.get("line", 0)
-            message = offense.get("message", "")
-            if filepath and message:
-                entries.append({"file": filepath, "line": int(line), "message": message})
-    return entries
+def _make_detect_fn(cmd: str, parser: Callable[[str, Path], list[dict]]) -> Callable:
+    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
+    return _make_detect_fn_with_runner(cmd, parser, run_subprocess=_subprocess_run)
 
 
-def parse_cargo(output: str, scan_path: Path) -> list[dict]:
-    """Parse cargo clippy/check JSON Lines output.
-
-    Each line: `{"reason": "compiler-message", "message": {"spans": [...], "rendered": ...}}`
-    """
-    entries: list[dict] = []
-    for line in output.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except (json.JSONDecodeError, ValueError) as exc:
-            logger.debug("Skipping unparseable cargo output line: %s", exc)
-            continue
-        if data.get("reason") != "compiler-message":
-            continue
-        msg = data.get("message") or {}
-        spans = msg.get("spans") or []
-        rendered = msg.get("rendered") or msg.get("message") or ""
-        if not spans or not rendered:
-            continue
-        span = spans[0]
-        filename = span.get("file_name", "")
-        line_no = span.get("line_start", 0)
-        summary = rendered.split("\n")[0].strip() if rendered else ""
-        if filename and summary:
-            entries.append({"file": filename, "line": int(line_no), "message": summary})
-    return entries
-
-
-def parse_eslint(output: str, scan_path: Path) -> list[dict]:
-    """Parse ESLint JSON: `[{"filePath": ..., "messages": [...]}]`.
-
-    ESLint --format json produces a nested per-file structure.
-    """
-    entries: list[dict] = []
-    try:
-        data = json.loads(output)
-    except (json.JSONDecodeError, ValueError):
-        return entries
-    for fobj in data if isinstance(data, list) else []:
-        if not isinstance(fobj, dict):
-            continue
-        filepath = fobj.get("filePath", "")
-        for msg in fobj.get("messages") or []:
-            line = msg.get("line", 0)
-            message = msg.get("message", "")
-            if filepath and message:
-                entries.append({"file": str(filepath), "line": int(line), "message": str(message)})
-    return entries
-
-
-_PARSERS: dict[str, Callable] = {
-    "gnu": parse_gnu,
-    "golangci": parse_golangci,
-    "json": parse_json,
-    "rubocop": parse_rubocop,
-    "cargo": parse_cargo,
-    "eslint": parse_eslint,
-}
-
-
-# ── Shared tool runner ────────────────────────────────────
-
-
-def _run_tool(cmd: str, path: Path, parser: Callable) -> list[dict]:
-    """Run an external tool and parse its output. Returns [] on failure."""
-    try:
-        result = subprocess.run(
-            cmd, shell=True, cwd=str(path),
-            capture_output=True, text=True, timeout=120,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
-    output = (result.stdout or "") + (result.stderr or "")
-    if not output.strip():
-        return []
-    return parser(output, path)
-
-
-# ── Phase + detect + fixer factories ─────────────────────
-
-
-def make_tool_phase(
-    label: str, cmd: str, fmt: str, smell_id: str, tier: int
-) -> DetectorPhase:
-    """Create a DetectorPhase that runs an external tool and parses output into findings."""
-    parser = _PARSERS[fmt]
-
-    def run(path: Path, lang: object) -> tuple[list, dict]:
-        entries = _run_tool(cmd, path, parser)
-        if not entries:
-            return [], {}
-        findings = [
-            make_finding(
-                smell_id, e["file"], f"{smell_id}::{e['line']}",
-                tier=tier, confidence="medium", summary=e["message"],
-            )
-            for e in entries
-        ]
-        return findings, {smell_id: len(entries)}
-
-    return DetectorPhase(label, run)
-
-
-def _make_detect_fn(cmd: str, parser: Callable) -> Callable:
-    """Create a detect function that runs a tool and returns parsed entries."""
-    def detect(path, **kwargs):
-        return _run_tool(cmd, path, parser)
-    return detect
-
-
-def _make_generic_fixer(tool: dict) -> FixerConfig:
-    """Create a FixerConfig from a tool spec with fix_cmd."""
-    smell_id = tool["id"]
-    fix_cmd = tool["fix_cmd"]
-    detect = _make_detect_fn(tool["cmd"], _PARSERS[tool["fmt"]])
-
-    def fix(entries, dry_run=False, path=None, **kwargs):
-        if dry_run or not path:
-            return FixResult(entries=[{"file": e["file"], "line": e["line"]} for e in entries])
-        try:
-            subprocess.run(
-                fix_cmd, shell=True, cwd=str(path),
-                capture_output=True, text=True, timeout=120,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return FixResult(entries=[], skip_reasons={"tool_unavailable": len(entries)})
-        remaining = detect(path)
-        fixed_count = max(0, len(entries) - len(remaining))
-        return FixResult(
-            entries=[{"file": e["file"], "fixed": True} for e in entries[:fixed_count]]
-        )
-
-    return FixerConfig(
-        label=f"Fix {tool['label']} issues",
-        detect=detect, fix=fix, detector=smell_id,
-        verb="Fixed", dry_verb="Would fix",
-    )
+def _make_generic_fixer(tool: dict[str, Any]) -> FixerConfig:
+    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
+    return _make_generic_fixer_with_runner(tool, run_subprocess=_subprocess_run)
 
 
 # ── Stubs for generic configs ─────────────────────────────
@@ -542,13 +377,16 @@ def _make_structural_phase(treesitter_spec=None) -> DetectorPhase:
         ]
 
     def run(path, lang):
-        from desloppify.languages._framework.base.shared_phases import run_structural_phase
+        from desloppify.languages._framework.base.shared_phases import (
+            run_structural_phase,
+        )
 
         god_extractor_fn = None
         if god_rules and has_class_query:
-            god_extractor_fn = lambda p: _extract_ts_classes(
-                p, treesitter_spec, lang.file_finder,
-            )
+            def god_extractor_fn(p):
+                return _extract_ts_classes(
+                    p, treesitter_spec, lang.file_finder,
+                )
 
         return run_structural_phase(
             path, lang,
@@ -601,7 +439,9 @@ def _make_coupling_phase(dep_graph_fn) -> DetectorPhase:
     from desloppify.utils import log
 
     def run(path, lang):
-        from desloppify.languages._framework.base.shared_phases import run_coupling_phase
+        from desloppify.languages._framework.base.shared_phases import (
+            run_coupling_phase,
+        )
 
         return run_coupling_phase(
             path, lang, build_dep_graph_fn=dep_graph_fn, log_fn=log,
@@ -610,3 +450,21 @@ def _make_coupling_phase(dep_graph_fn) -> DetectorPhase:
     return DetectorPhase("Coupling + cycles + orphaned", run)
 
 
+__all__ = [
+    "SHARED_PHASE_LABELS",
+    "_make_detect_fn",
+    "_make_generic_fixer",
+    "_resolve_command_argv",
+    "_run_tool",
+    "capability_report",
+    "generic_lang",
+    "generic_zone_rules",
+    "make_file_finder",
+    "make_tool_phase",
+    "parse_cargo",
+    "parse_eslint",
+    "parse_gnu",
+    "parse_golangci",
+    "parse_json",
+    "parse_rubocop",
+]

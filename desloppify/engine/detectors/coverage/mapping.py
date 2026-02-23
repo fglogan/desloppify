@@ -8,9 +8,9 @@ import re
 from collections import deque
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.fallbacks import log_best_effort_failure
 from desloppify.hook_registry import get_lang_hook
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,17 @@ def _import_based_mapping(
 
     for tf in test_files:
         entry = graph.get(tf)
+        graph_mapped = set()
         if entry is not None:
             for imp in entry.get("imports", set()):
                 if imp in production_files:
-                    tested.add(imp)
-        else:
+                    graph_mapped.add(imp)
+            tested |= graph_mapped
+
+        # Parse source imports as a supplement when graph imports are absent,
+        # or always for TypeScript where dynamic import('...') is common in
+        # coverage smoke tests and may be missed by static graph building.
+        if not graph_mapped or lang_name == "typescript":
             tested |= _parse_test_imports(
                 tf, production_files, prod_by_module, lang_name
             )
@@ -352,14 +358,58 @@ def _get_test_files_for_prod(
     test_files: set[str],
     graph: dict,
     lang_name: str,
+    parsed_imports_by_test: dict[str, set[str]] | None = None,
 ) -> list[str]:
     """Find which test files exercise a given production file."""
+    parsed_imports_by_test = parsed_imports_by_test or {}
+    root_str = str(PROJECT_ROOT) + os.sep
+    rel_prod = prod_file[len(root_str):] if prod_file.startswith(root_str) else prod_file
+    module_name = rel_prod.replace("/", ".").replace("\\", ".")
+    if "." in module_name:
+        module_name = module_name.rsplit(".", 1)[0]
+    prod_by_module: dict[str, str] = {module_name: prod_file}
+    parts = module_name.split(".")
+    if parts:
+        prod_by_module[parts[-1]] = prod_file
+
     result = []
     for tf in test_files:
         entry = graph.get(tf)
         if entry and prod_file in entry.get("imports", set()):
             result.append(tf)
             continue
+        parsed = parsed_imports_by_test.get(tf)
+        if parsed is None:
+            parsed = _parse_test_imports(tf, {prod_file}, prod_by_module, lang_name)
+        if prod_file in parsed:
+            result.append(tf)
+            continue
         if _map_test_to_source(tf, {prod_file}, lang_name) == prod_file:
             result.append(tf)
     return result
+
+
+def _build_test_import_index(
+    test_files: set[str],
+    production_files: set[str],
+    lang_name: str,
+) -> dict[str, set[str]]:
+    """Parse test import sources once, producing a test->production import index."""
+    root_str = str(PROJECT_ROOT) + os.sep
+    prod_by_module: dict[str, str] = {}
+    for pf in production_files:
+        rel_pf = pf[len(root_str):] if pf.startswith(root_str) else pf
+        module_name = rel_pf.replace("/", ".").replace("\\", ".")
+        if "." in module_name:
+            module_name = module_name.rsplit(".", 1)[0]
+        prod_by_module[module_name] = pf
+        if module_name.endswith(".__init__"):
+            prod_by_module[module_name[: -len(".__init__")]] = pf
+        parts = module_name.split(".")
+        if parts:
+            prod_by_module[parts[-1]] = pf
+
+    index: dict[str, set[str]] = {}
+    for tf in test_files:
+        index[tf] = _parse_test_imports(tf, production_files, prod_by_module, lang_name)
+    return index

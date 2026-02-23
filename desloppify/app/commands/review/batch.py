@@ -11,11 +11,11 @@ from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.review import batch_core as batch_core_mod
 from desloppify.app.commands.review import batches as review_batches_mod
 from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.fallbacks import print_error
+from desloppify.file_discovery import safe_write_text
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import safe_write_text
 from desloppify.utils import colorize, log
 
 from .import_cmd import do_import as _do_import
@@ -63,7 +63,7 @@ def _load_or_prepare_packet(
     lang,
     config: dict,
     stamp: str,
-) -> tuple[dict, Path]:
+) -> tuple[dict, Path, Path]:
     """Load packet override or prepare a fresh packet snapshot."""
     packet_override = getattr(args, "packet", None)
     if packet_override:
@@ -76,7 +76,12 @@ def _load_or_prepare_packet(
         except (OSError, json.JSONDecodeError) as exc:
             print_error(f"reading packet: {exc}")
             sys.exit(1)
-        return packet, packet_path
+        blind_path = PROJECT_ROOT / ".desloppify" / "review_packet_blind.json"
+        blind_packet = runner_helpers_mod.build_blind_packet(packet)
+        safe_write_text(blind_path, json.dumps(blind_packet, indent=2) + "\n")
+        print(colorize(f"  Immutable packet: {packet_path}", "dim"))
+        print(colorize(f"  Blind packet: {blind_path}", "dim"))
+        return packet, packet_path, blind_path
 
     path = Path(args.path)
     dims_str = getattr(args, "dimensions", None)
@@ -110,7 +115,7 @@ def _load_or_prepare_packet(
     )
     print(colorize(f"  Immutable packet: {packet_path}", "dim"))
     print(colorize(f"  Blind packet: {blind_saved}", "dim"))
-    return packet, packet_path
+    return packet, packet_path, blind_saved
 
 
 def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -> None:
@@ -175,6 +180,7 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
         collect_batch_results_fn=_collect_batch_results,
         print_failures_and_exit_fn=runner_helpers_mod.print_failures_and_exit,
         merge_batch_results_fn=_merge_batch_results,
+        build_import_provenance_fn=runner_helpers_mod.build_batch_import_provenance,
         do_import_fn=_do_import,
         run_followup_scan_fn=lambda *, lang_name, scan_path: runner_helpers_mod.run_followup_scan(
             lang_name=lang_name,

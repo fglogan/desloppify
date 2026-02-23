@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from desloppify.intelligence.review.context import file_excerpt, importer_count
+from desloppify.file_discovery import rel, resolve_path
 from desloppify.intelligence.review._context.patterns import (
     ERROR_PATTERNS as _ERROR_PATTERNS,
 )
@@ -17,7 +17,7 @@ from desloppify.intelligence.review._context.patterns import (
 from desloppify.intelligence.review._context.patterns import (
     extract_imported_names as _extract_imported_names,
 )
-from desloppify.file_discovery import rel, resolve_path
+from desloppify.intelligence.review.context import file_excerpt, importer_count
 
 logger = logging.getLogger(__name__)
 

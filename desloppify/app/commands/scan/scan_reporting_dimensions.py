@@ -146,7 +146,7 @@ def show_scorecard_subjective_measures(state: dict) -> None:
         print(
             colorize(
                 f"  {n} stale subjective dimension{'s' if n != 1 else ''}"
-                f" — run `desloppify review --prepare --dimensions {dims_arg}` to re-review",
+                f" — run `desloppify review --run-batches --runner codex --parallel --scan-after-import --dimensions {dims_arg}` to re-review",
                 "yellow",
             )
         )

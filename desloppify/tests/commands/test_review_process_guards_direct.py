@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from desloppify.app.commands.review.import_helpers import load_import_findings_data
+from desloppify.app.commands.review.batches import _require_batches
+from desloppify.app.commands.review.import_helpers import (
+    assessment_mode_label,
+    load_import_findings_data,
+    print_assessment_mode_banner,
+)
 from desloppify.app.commands.review.prepare import do_prepare
 from desloppify.app.commands.review.runner_helpers import write_packet_snapshot
 
@@ -17,7 +24,31 @@ def _colorize(text: str, _style: str) -> str:
     return text
 
 
-def test_import_rejects_sub100_assessment_without_feedback(tmp_path, capsys):
+def test_assessment_mode_label_mappings():
+    assert assessment_mode_label({"mode": "trusted_internal"}) == (
+        "trusted internal (durable scores)"
+    )
+    assert assessment_mode_label({"mode": "attested_external"}) == (
+        "attested external (durable scores)"
+    )
+    assert assessment_mode_label({"mode": "manual_override"}) == (
+        "manual override (provisional scores)"
+    )
+    assert assessment_mode_label({"mode": "findings_only"}) == (
+        "findings-only (assessments skipped)"
+    )
+
+
+def test_print_assessment_mode_banner_for_findings_only(capsys):
+    print_assessment_mode_banner(
+        {"mode": "findings_only", "assessments_present": True},
+        colorize_fn=_colorize,
+    )
+    out = capsys.readouterr().out
+    assert "Assessment import mode: findings-only (assessments skipped)" in out
+
+
+def test_import_untrusted_assessments_are_dropped_by_default(tmp_path):
     payload = {
         "findings": [],
         "assessments": {
@@ -28,16 +59,323 @@ def test_import_rejects_sub100_assessment_without_feedback(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
+    parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    assert "assessments" not in parsed
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "findings_only"
+    assert policy["trusted"] is False
+
+
+def test_import_manual_override_requires_attestation(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 95},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
     with pytest.raises(SystemExit) as exc:
-        load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            manual_override=True,
+        )
     assert exc.value.code == 1
     err = capsys.readouterr().err
-    assert "assessments below 100 must include explicit feedback" in err
-    assert "naming_quality (95.0)" in err
-    assert "logic_clarity (92.0)" in err
+    assert "--manual-override requires --attest" in err
 
 
-def test_import_accepts_sub100_assessment_with_dimension_feedback(tmp_path):
+def test_import_manual_override_allows_untrusted_assessments(tmp_path):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 95},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(
+        str(findings_path),
+        colorize_fn=_colorize,
+        manual_override=True,
+        manual_attest="Manual review calibrated after independent audit.",
+    )
+    assert parsed["assessments"]["naming_quality"] == 95
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "manual_override"
+
+
+def test_import_manual_override_rejects_allow_partial_combo(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 95},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            allow_partial=True,
+            manual_override=True,
+            manual_attest="operator note",
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "--manual-override cannot be combined with --allow-partial" in err
+
+
+def test_import_attested_external_requires_attest_phrases(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            attested_external=True,
+            manual_attest="looks good",
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "--attested-external requires --attest containing both" in err
+    assert "Hint: rerun with the required attestation template" in err
+    assert "review --validate-import" in err
+
+
+def test_import_attested_external_rejects_untrusted_provenance(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            attested_external=True,
+            manual_attest=(
+                "I validated this review was completed without awareness of overall score "
+                "and is unbiased."
+            ),
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "--attested-external requires valid blind packet provenance" in err
+    assert "Hint: if provenance is valid, rerun with" in err
+    assert "Findings-only fallback" in err
+
+
+def test_import_attested_external_accepts_claude_blind_provenance(tmp_path):
+    blind_packet = tmp_path / "review_packet_blind.json"
+    blind_packet.write_text(json.dumps({"command": "review", "dimensions": ["naming_quality"]}))
+    packet_hash = hashlib.sha256(blind_packet.read_bytes()).hexdigest()
+
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+        "provenance": {
+            "kind": "blind_review_batch_import",
+            "blind": True,
+            "runner": "claude",
+            "packet_path": str(blind_packet),
+            "packet_sha256": packet_hash,
+        },
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(
+        str(findings_path),
+        colorize_fn=_colorize,
+        attested_external=True,
+        manual_attest=(
+            "I validated this review was completed without awareness of overall score "
+            "and is unbiased."
+        ),
+    )
+    assert parsed["assessments"]["naming_quality"] == 100
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "attested_external"
+    assert policy["trusted"] is True
+
+
+def test_import_attested_external_rejects_non_claude_runner(tmp_path, capsys):
+    blind_packet = tmp_path / "review_packet_blind.json"
+    blind_packet.write_text(json.dumps({"command": "review", "dimensions": ["naming_quality"]}))
+    packet_hash = hashlib.sha256(blind_packet.read_bytes()).hexdigest()
+
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+        "provenance": {
+            "kind": "blind_review_batch_import",
+            "blind": True,
+            "runner": "codex",
+            "packet_path": str(blind_packet),
+            "packet_sha256": packet_hash,
+        },
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            attested_external=True,
+            manual_attest=(
+                "I validated this review was completed without awareness of overall score "
+                "and is unbiased."
+            ),
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "supports runner='claude'" in err
+    assert "Hint: if provenance is valid, rerun with" in err
+
+
+def test_import_attested_external_rejects_allow_partial_combo(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            attested_external=True,
+            manual_attest=(
+                "I validated this review was completed without awareness of overall score "
+                "and is unbiased."
+            ),
+            allow_partial=True,
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "--attested-external cannot be combined with --allow-partial" in err
+
+
+def test_import_external_trusted_provenance_still_defaults_to_findings_only(tmp_path):
+    blind_packet = tmp_path / "review_packet_blind.json"
+    blind_packet.write_text(json.dumps({"command": "review", "dimensions": ["naming_quality"]}))
+    packet_hash = hashlib.sha256(blind_packet.read_bytes()).hexdigest()
+
+    payload = {
+        "findings": [
+            {
+                "dimension": "naming_quality",
+                "identifier": "process_data",
+                "summary": "Function name is generic for a payment-reconciliation path.",
+                "related_files": ["src/service.ts"],
+                "evidence": ["Name does not describe side effects or domain operation."],
+                "suggestion": "Rename to reconcile_customer_payment.",
+                "confidence": "high",
+            }
+        ],
+        "assessments": {"naming_quality": 95},
+        "provenance": {
+            "kind": "blind_review_batch_import",
+            "blind": True,
+            "runner": "codex",
+            "packet_path": str(blind_packet),
+            "packet_sha256": packet_hash,
+        },
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    assert "assessments" not in parsed
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "findings_only"
+    assert policy["trusted"] is False
+    assert "cannot self-attest trust" in policy["reason"]
+
+
+def test_import_trusted_internal_source_applies_assessments(tmp_path):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 100},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(
+        str(findings_path),
+        colorize_fn=_colorize,
+        trusted_assessment_source=True,
+        trusted_assessment_label="internal batch import test",
+    )
+    assert parsed["assessments"]["naming_quality"] == 100
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "trusted_internal"
+    assert policy["trusted"] is True
+    assert policy["reason"] == "internal batch import test"
+
+
+def test_import_hash_mismatch_falls_back_to_findings_only(tmp_path):
+    blind_packet = tmp_path / "review_packet_blind.json"
+    blind_packet.write_text(json.dumps({"command": "review"}))
+    wrong_hash = "0" * 64
+
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 95},
+        "provenance": {
+            "kind": "blind_review_batch_import",
+            "blind": True,
+            "runner": "codex",
+            "packet_path": str(blind_packet),
+            "packet_sha256": wrong_hash,
+        },
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    assert "assessments" not in parsed
+    policy = parsed.get("_assessment_policy", {})
+    assert policy["mode"] == "findings_only"
+    assert "hash mismatch" in policy["reason"]
+    assert "cannot self-attest trust" in policy["reason"]
+
+
+def test_import_dimension_feedback_without_trusted_provenance_still_drops_assessment(
+    tmp_path,
+):
+    payload = {
+        "findings": [
+            {
+                "dimension": "naming_quality",
+                "identifier": "processData",
+                "summary": "Generic name",
+                "related_files": ["src/example.ts"],
+                "evidence": ["Function name is ambiguous across invoice flow"],
+                "suggestion": "Rename to reconcile_invoice",
+                "confidence": "medium",
+            }
+        ],
+        "assessments": {"naming_quality": 95},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    assert "assessments" not in parsed
+    assert parsed["_assessment_policy"]["mode"] == "findings_only"
+
+
+def test_import_rejects_findings_missing_schema_fields(tmp_path, capsys):
     payload = {
         "findings": [
             {
@@ -53,8 +391,43 @@ def test_import_accepts_sub100_assessment_with_dimension_feedback(tmp_path):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert parsed["assessments"]["naming_quality"] == 95
+    with pytest.raises(SystemExit) as exc:
+        load_import_findings_data(
+            str(findings_path),
+            colorize_fn=_colorize,
+            lang_name="typescript",
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "schema validation failed" in err
+    assert "related_files" in err
+    assert "evidence" in err
+
+
+def test_import_allow_partial_bypasses_schema_gate(tmp_path):
+    payload = {
+        "findings": [
+            {
+                "dimension": "naming_quality",
+                "identifier": "processData",
+                "summary": "Generic name",
+                "suggestion": "Rename to reconcile_invoice",
+                "confidence": "medium",
+            }
+        ],
+        "assessments": {"naming_quality": 95},
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    parsed = load_import_findings_data(
+        str(findings_path),
+        colorize_fn=_colorize,
+        lang_name="typescript",
+        allow_partial=True,
+    )
+    assert "assessments" not in parsed
+    assert parsed["_assessment_policy"]["mode"] == "findings_only"
 
 
 def test_import_accepts_perfect_assessment_without_feedback(tmp_path):
@@ -66,13 +439,16 @@ def test_import_accepts_perfect_assessment_without_feedback(tmp_path):
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert parsed["assessments"]["naming_quality"] == 100
+    assert "assessments" not in parsed
+    assert parsed["_assessment_policy"]["mode"] == "findings_only"
 
 
 def test_write_packet_snapshot_redacts_target_from_blind_packet(tmp_path):
     packet = {
         "command": "review",
         "config": {"target_strict_score": 98, "noise_budget": 10},
+        "narrative": {"headline": "target score pressure"},
+        "next_command": "desloppify scan",
         "dimensions": ["high_level_elegance"],
     }
     review_packet_dir = tmp_path / "review_packets"
@@ -96,9 +472,8 @@ def test_write_packet_snapshot_redacts_target_from_blind_packet(tmp_path):
     assert immutable_payload["config"]["target_strict_score"] == 98
     assert "target_strict_score" not in blind_payload["config"]
     assert blind_payload["config"]["noise_budget"] == 10
-
-
-from unittest.mock import patch
+    assert "narrative" not in blind_payload
+    assert "next_command" not in blind_payload
 
 
 _P_SETUP = "desloppify.app.commands.review.prepare.review_runtime_mod.setup_lang_concrete"
@@ -167,3 +542,17 @@ def test_review_prepare_query_redacts_target_score():
     assert isinstance(config, dict)
     assert "target_strict_score" not in config
     assert config.get("noise_budget") == 10
+
+
+def test_require_batches_guides_rebuild_when_packet_has_no_batches(capsys):
+    with pytest.raises(SystemExit) as exc:
+        _require_batches(
+            {"investigation_batches": []},
+            colorize_fn=_colorize,
+            suggested_prepare_cmd="desloppify review --prepare --path src",
+        )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "no investigation_batches" in err
+    assert "Regenerate review context first" in err
+    assert "review --run-batches --runner codex --parallel --scan-after-import" in err

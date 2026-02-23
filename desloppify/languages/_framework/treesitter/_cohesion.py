@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from . import PARSE_INIT_ERRORS
 from ._cache import _PARSE_CACHE
-from ._extractors import _get_parser, _make_query, _run_query, _unwrap_node, _node_text
+from ._extractors import _get_parser, _make_query, _node_text, _run_query, _unwrap_node
 
 if TYPE_CHECKING:
     from desloppify.languages._framework.treesitter import TreeSitterLangSpec

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,12 +12,10 @@ import desloppify.core._internal.text_utils as _utils_text_mod
 import desloppify.file_discovery as _file_discovery_mod
 from desloppify import utils as _u
 from desloppify.engine.detectors.review_coverage import detect_holistic_review_staleness
-from desloppify.state import path_scoped_findings
-from desloppify.state import empty_state
 from desloppify.intelligence.narrative.core import _count_open_by_detector
 from desloppify.intelligence.review import (
-    DIMENSIONS,
     DIMENSION_PROMPTS,
+    DIMENSIONS,
     HOLISTIC_DIMENSIONS_BY_LANG,
     REVIEW_SYSTEM_PROMPT,
     build_holistic_context,
@@ -29,22 +27,23 @@ from desloppify.intelligence.review import (
 from desloppify.intelligence.review import (
     prepare_holistic_review as _prepare_holistic_review_impl,
 )
-from desloppify.intelligence.review.context import file_excerpt
 from desloppify.intelligence.review._context.patterns import (
     extract_imported_names,
 )
+from desloppify.intelligence.review._prepare.helpers import (
+    HOLISTIC_WORKFLOW as _HOLISTIC_WORKFLOW,
+)
+from desloppify.intelligence.review.context import file_excerpt
 from desloppify.intelligence.review.prepare import HolisticReviewPrepareOptions
 from desloppify.intelligence.review.prepare_batches import (
     build_investigation_batches as _build_investigation_batches,
 )
 from desloppify.intelligence.review.prepare_batches import filter_batches_to_dimensions
-from desloppify.intelligence.review._prepare.helpers import (
-    HOLISTIC_WORKFLOW as _HOLISTIC_WORKFLOW,
-)
 from desloppify.scoring import (
     HOLISTIC_POTENTIAL,
     detector_pass_rate,
 )
+from desloppify.state import empty_state, path_scoped_findings
 
 
 @pytest.fixture
@@ -707,7 +706,7 @@ class TestHolisticStaleness:
         assert entries[0]["name"] == "holistic_unreviewed"
 
     def test_fresh_cache_returns_empty(self):
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             "holistic": {
                 "reviewed_at": now,
@@ -719,7 +718,7 @@ class TestHolisticStaleness:
         assert len(entries) == 0
 
     def test_stale_cache_returns_stale(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat(
+        old = (datetime.now(UTC) - timedelta(days=45)).isoformat(
             timespec="seconds"
         )
         cache = {
@@ -735,7 +734,7 @@ class TestHolisticStaleness:
         assert "45 days" in entries[0]["summary"]
 
     def test_drift_returns_stale(self):
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             "holistic": {
                 "reviewed_at": now,
@@ -751,7 +750,7 @@ class TestHolisticStaleness:
         assert "80" in entries[0]["summary"]
 
     def test_small_drift_returns_empty(self):
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             "holistic": {
                 "reviewed_at": now,

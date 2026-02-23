@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
-
-import tomllib
 
 import pytest
 
@@ -15,11 +14,11 @@ try:
 except ImportError:
     setuptools = None  # type: ignore[assignment]
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.policy.zones import FileZoneMap, Zone
+from desloppify.file_discovery import rel
 from desloppify.languages import available_langs, get_lang
 from desloppify.languages._framework.structure_validation import validate_lang_structure
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import rel
 from desloppify.utils import compute_tool_hash
 
 

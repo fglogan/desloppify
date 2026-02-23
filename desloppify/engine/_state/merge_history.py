@@ -66,6 +66,24 @@ def _subjective_integrity_snapshot(integrity: dict | None) -> dict[str, object] 
     }
 
 
+def _score_confidence_snapshot(confidence: dict | None) -> dict[str, object] | None:
+    if not isinstance(confidence, dict):
+        return None
+    status = confidence.get("status")
+    if status is None:
+        return None
+    detectors = confidence.get("detectors", [])
+    detector_count = len(detectors) if isinstance(detectors, list) else 0
+    dimensions = confidence.get("dimensions", [])
+    dimension_count = len(dimensions) if isinstance(dimensions, list) else 0
+    return {
+        "status": status,
+        "confidence": confidence.get("confidence"),
+        "detector_count": detector_count,
+        "dimension_count": dimension_count,
+    }
+
+
 def _append_scan_history(
     state: StateModel,
     *,
@@ -96,6 +114,9 @@ def _append_scan_history(
             "ignore_patterns": ignore_pattern_count,
             "subjective_integrity": _subjective_integrity_snapshot(
                 state.get("subjective_integrity")
+            ),
+            "score_confidence": _score_confidence_snapshot(
+                state.get("score_confidence")
             ),
             "dimension_scores": {
                 name: {"score": ds["score"], "strict": ds.get("strict", ds["score"])}

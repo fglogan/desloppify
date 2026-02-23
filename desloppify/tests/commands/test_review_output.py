@@ -76,6 +76,8 @@ def test_load_import_findings_data_valid_file(tmp_path):
                 "dimension": "code_quality",
                 "identifier": "processData",
                 "summary": "Generic name",
+                "related_files": ["src/foo.py"],
+                "evidence": ["Name obscures invoice-reconciliation behavior"],
                 "suggestion": "Rename",
                 "confidence": "medium",
             }
@@ -114,6 +116,21 @@ def test_load_import_findings_data_passes_override_flags(tmp_path):
         assessment_note="Reviewed carefully, score is justified",
     )
     assert result["assessments"]["naming_quality"] == 90
+
+
+def test_load_import_findings_data_untrusted_assessments_default_to_findings_only(
+    tmp_path,
+):
+    payload = {
+        "findings": [],
+        "assessments": {"naming_quality": 90},
+    }
+    findings_file = tmp_path / "findings.json"
+    findings_file.write_text(json.dumps(payload))
+
+    result = review_output_mod._load_import_findings_data(str(findings_file))
+    assert "assessments" not in result
+    assert result["_assessment_policy"]["mode"] == "findings_only"
 
 
 # ── _print_skipped_validation_details ────────────────────────────────

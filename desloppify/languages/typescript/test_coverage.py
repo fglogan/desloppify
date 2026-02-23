@@ -7,11 +7,14 @@ import os
 import re
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT, strip_c_style_comments
 from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.core._internal.text_utils import strip_c_style_comments
 from desloppify.utils import SRC_PATH
 
-TS_IMPORT_RE = re.compile(r"""(?:from|import)\s+['\"]([^'\"]+)['\"]""", re.MULTILINE)
+TS_IMPORT_RE = re.compile(
+    r"""(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(?:type\s+)?['\"]([^'\"]+)['\"]""",
+    re.MULTILINE,
+)
 TS_REEXPORT_RE = re.compile(
     r"""^export\s+(?:\{[^}]*\}|\*)\s+from\s+['\"]([^'\"]+)['\"]""", re.MULTILINE
 )
@@ -59,10 +62,19 @@ PLACEHOLDER_LABEL_PATTERNS = [
 EXPECT_COMPARISON_RE = re.compile(
     r"""expect\(\s*(?P<left>[^)]+?)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\(\s*(?P<right>[^)]+?)\s*\)"""
 )
+EXPECT_TO_BE_DEFINED_RE = re.compile(r"""\.toBeDefined\s*\(""")
 
 BARREL_BASENAMES = {"index.ts", "index.tsx"}
 _TS_EXTENSIONS = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]
 logger = logging.getLogger(__name__)
+
+
+def _relative_if_under_root(path_str: str) -> str:
+    """Return project-relative path when possible; else return original."""
+    try:
+        return str(Path(path_str).resolve().relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except (OSError, ValueError):
+        return path_str
 
 
 def has_testable_logic(filepath: str, content: str) -> bool:
@@ -158,10 +170,16 @@ def resolve_import_spec(
         candidate = str(Path(str(base) + ext))
         if candidate in production_files:
             return candidate
+        rel_candidate = _relative_if_under_root(candidate)
+        if rel_candidate in production_files:
+            return rel_candidate
         try:
             resolved = str(Path(str(base) + ext).resolve())
             if resolved in production_files:
                 return resolved
+            rel_resolved = _relative_if_under_root(resolved)
+            if rel_resolved in production_files:
+                return rel_resolved
         except OSError as exc:
             log_best_effort_failure(
                 logger,
@@ -259,21 +277,29 @@ def is_placeholder_test(
         return False
 
     tautological = 0
+    weak_to_be_defined = 0
     for line in content.splitlines():
         match = EXPECT_COMPARISON_RE.search(line)
         if not match:
+            if EXPECT_TO_BE_DEFINED_RE.search(line):
+                weak_to_be_defined += 1
             continue
         left = _normalize_tautology_token(match.group("left"))
         right = _normalize_tautology_token(match.group("right"))
         if left is not None and left == right:
             tautological += 1
 
-    if tautological == 0:
+    if tautological == 0 and weak_to_be_defined == 0:
         return False
 
     has_placeholder_label = any(p.search(content) for p in PLACEHOLDER_LABEL_PATTERNS)
-    if tautological >= assertions and (has_placeholder_label or assertions <= test_functions):
-        return True
-    if has_placeholder_label and (tautological / max(assertions, 1)) >= 0.5:
-        return True
+    if tautological > 0:
+        if tautological >= assertions and (has_placeholder_label or assertions <= test_functions):
+            return True
+        if has_placeholder_label and (tautological / max(assertions, 1)) >= 0.5:
+            return True
+    if weak_to_be_defined >= assertions:
+        dynamic_import_calls = len(re.findall(r"\bimport\s*\(", content))
+        if has_placeholder_label or dynamic_import_calls >= 3:
+            return True
     return False

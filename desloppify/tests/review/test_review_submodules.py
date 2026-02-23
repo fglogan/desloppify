@@ -7,13 +7,15 @@ so the test_coverage detector recognizes them as directly tested.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from desloppify.state import empty_state as build_empty_state
+from desloppify.intelligence.review._prepare.remediation_engine import (
+    empty_plan as _empty_plan,
+)
 from desloppify.intelligence.review.importing.holistic import (
     import_holistic_findings,
     update_holistic_review_cache,
@@ -40,9 +42,6 @@ from desloppify.intelligence.review.prepare import (
 from desloppify.intelligence.review.prepare import (
     prepare_review as _prepare_review_impl,
 )
-from desloppify.intelligence.review._prepare.remediation_engine import (
-    empty_plan as _empty_plan,
-)
 from desloppify.intelligence.review.remediation import (
     generate_remediation_plan,
 )
@@ -59,6 +58,7 @@ from desloppify.intelligence.review.selection import (
 from desloppify.intelligence.review.selection import (
     select_files_for_review as _select_files_for_review_impl,
 )
+from desloppify.state import empty_state as build_empty_state
 from desloppify.state import make_finding
 
 # ── Fixtures ──────────────────────────────────────────────────────
@@ -123,18 +123,18 @@ class TestCountFreshStale:
         assert count_fresh(empty_state, 30) == 0
 
     def test_count_fresh_with_recent(self, empty_state):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         empty_state["review_cache"] = {"files": {"src/a.ts": {"reviewed_at": now}}}
         assert count_fresh(empty_state, 30) == 1
 
     def test_count_fresh_with_old(self, empty_state):
-        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=60)).isoformat()
         empty_state["review_cache"] = {"files": {"src/a.ts": {"reviewed_at": old}}}
         assert count_fresh(empty_state, 30) == 0
 
     def test_count_stale(self, empty_state):
-        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
-        now = datetime.now(timezone.utc).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=60)).isoformat()
+        now = datetime.now(UTC).isoformat()
         empty_state["review_cache"] = {
             "files": {
                 "src/a.ts": {"reviewed_at": old},
@@ -209,7 +209,7 @@ class TestSelectFilesForReview:
         assert result == []
 
     def test_skips_cached_fresh(self, mock_lang, empty_state):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         content_hash = hashlib.sha256(b"hello").hexdigest()[:16]
         empty_state["review_cache"] = {
             "files": {

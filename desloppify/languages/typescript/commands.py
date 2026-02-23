@@ -12,6 +12,7 @@ from desloppify.engine.detectors import coupling as coupling_detector_mod
 from desloppify.engine.detectors import dupes as dupes_detector_mod
 from desloppify.engine.detectors import gods as gods_detector_mod
 from desloppify.engine.detectors import orphaned as orphaned_detector_mod
+from desloppify.file_discovery import find_ts_files, rel
 from desloppify.languages._framework.commands_base import (
     make_cmd_complexity,
     make_cmd_facade,
@@ -35,8 +36,6 @@ from desloppify.languages.typescript.phases import (
     TS_SKIP_DIRS,
     TS_SKIP_NAMES,
 )
-from desloppify.file_discovery import rel
-from desloppify.file_discovery import find_ts_files
 from desloppify.utils import (
     SRC_PATH,
     colorize,

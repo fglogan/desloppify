@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Callable, Protocol
-
+from collections.abc import Callable
+from typing import Protocol
 
 # ---------------------------------------------------------------------------
 # Protocol stubs for dependency-injected modules
@@ -197,7 +197,7 @@ def show_low_dimension_hints(
             hint = (
                 mechanical_hints.get(name, "run `desloppify show` for details")
                 if name in static_names
-                else "run `desloppify review --prepare` to assess"
+                else "run `desloppify review --run-batches --runner codex --parallel --scan-after-import` to assess"
             )
             low.append((name, strict, hint))
 

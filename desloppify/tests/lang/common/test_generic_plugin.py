@@ -367,9 +367,9 @@ class TestDynamicRegistration:
 
     def test_register_detector_appends_to_display_order(self):
         from desloppify.core.registry import (
+            _DISPLAY_ORDER,
             DETECTORS,
             DetectorMeta,
-            _DISPLAY_ORDER,
             register_detector,
         )
 
@@ -386,8 +386,8 @@ class TestDynamicRegistration:
         from desloppify.scoring import (
             DETECTOR_SCORING_POLICIES,
             DIMENSIONS,
-            DetectorScoringPolicy,
             FILE_BASED_DETECTORS,
+            DetectorScoringPolicy,
             register_scoring_policy,
         )
 

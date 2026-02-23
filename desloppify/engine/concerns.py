@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any, Literal, TypedDict, cast
 
 from desloppify.core.registry import JUDGMENT_DETECTORS
 
@@ -28,6 +29,29 @@ class Concern:
     question: str  # specific question for LLM to evaluate
     fingerprint: str  # stable hash for dismissal tracking
     source_findings: tuple[str, ...]  # finding IDs that triggered this
+
+
+class ConcernSignals(TypedDict, total=False):
+    """Typed signal payload extracted from mechanical findings."""
+
+    max_params: float
+    max_nesting: float
+    loc: float
+    function_count: float
+    monster_loc: float
+    monster_funcs: list[str]
+
+
+_NUMERIC_SIGNAL_KEYS = ("max_params", "max_nesting", "loc", "function_count")
+SignalKey = Literal["max_params", "max_nesting", "loc", "function_count", "monster_loc"]
+
+
+def _update_max_signal(signals: ConcernSignals, key: SignalKey, value: object) -> None:
+    """Update numeric signal key with max(existing, value) when value is valid."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return
+    current = float(signals.get(key, 0.0))
+    signals[key] = max(current, float(value))
 
 
 def _fingerprint(concern_type: str, file: str, key_signals: tuple[str, ...]) -> str:
@@ -47,7 +71,7 @@ def _is_dismissed(
     return prev_sources == set(source_finding_ids)
 
 
-def _open_findings(state: dict) -> list[dict]:
+def _open_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
     """Return all open findings from state."""
     findings = state.get("findings", {})
     return [
@@ -56,9 +80,9 @@ def _open_findings(state: dict) -> list[dict]:
     ]
 
 
-def _group_by_file(state: dict) -> dict[str, list[dict]]:
+def _group_by_file(state: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """Group open findings by file, excluding holistic (file='.')."""
-    by_file: dict[str, list[dict]] = defaultdict(list)
+    by_file: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for f in _open_findings(state):
         file = f.get("file", "")
         if file and file != ".":
@@ -69,29 +93,26 @@ def _group_by_file(state: dict) -> dict[str, list[dict]]:
 # ── Signal extraction ────────────────────────────────────────────────
 
 
-def _extract_signals(findings: list[dict]) -> dict:
+def _extract_signals(findings: list[dict[str, Any]]) -> ConcernSignals:
     """Extract key quantitative signals from a file's findings."""
-    signals: dict = {}
+    signals: ConcernSignals = {}
     monster_funcs: list[str] = []
 
     for f in findings:
         det = f.get("detector", "")
-        detail = f.get("detail", {})
+        detail_raw = f.get("detail", {})
+        detail = detail_raw if isinstance(detail_raw, dict) else {}
 
         if det == "structural":
             s = detail.get("signals", {})
             if isinstance(s, dict):
-                for key in ("max_params", "max_nesting", "loc", "function_count"):
-                    val = s.get(key, 0)
-                    if isinstance(val, int | float) and val > 0:
-                        signals[key] = max(signals.get(key, 0), val)
+                for key in _NUMERIC_SIGNAL_KEYS:
+                    _update_max_signal(signals, cast(SignalKey, key), s.get(key, 0))
 
         if det == "smells" and detail.get("smell_id") == "monster_function":
-            loc = detail.get("loc", 0)
-            if isinstance(loc, int | float) and loc > 0:
-                signals["monster_loc"] = max(signals.get("monster_loc", 0), loc)
+            _update_max_signal(signals, "monster_loc", detail.get("loc", 0))
             func = detail.get("function", "")
-            if func:
+            if isinstance(func, str) and func:
                 monster_funcs.append(func)
 
     if monster_funcs:
@@ -99,7 +120,7 @@ def _extract_signals(findings: list[dict]) -> dict:
     return signals
 
 
-def _has_elevated_signals(findings: list[dict]) -> bool:
+def _has_elevated_signals(findings: list[dict[str, Any]]) -> bool:
     """Does any finding have signals strong enough to flag on its own?"""
     for f in findings:
         det = f.get("detector", "")
@@ -128,7 +149,7 @@ def _has_elevated_signals(findings: list[dict]) -> bool:
 # ── Concern classification ───────────────────────────────────────────
 
 
-def _classify(detectors: set[str], signals: dict) -> str:
+def _classify(detectors: set[str], signals: ConcernSignals) -> str:
     """Pick the most specific concern type from what's present."""
     if len(detectors) >= 3:
         return "mixed_responsibilities"
@@ -147,7 +168,11 @@ def _classify(detectors: set[str], signals: dict) -> str:
     return "design_concern"
 
 
-def _build_summary(concern_type: str, detectors: set[str], signals: dict) -> str:
+def _build_summary(
+    concern_type: str,
+    detectors: set[str],
+    signals: ConcernSignals,
+) -> str:
     """Human-readable one-liner."""
     if concern_type == "mixed_responsibilities":
         return (
@@ -177,7 +202,10 @@ def _build_summary(concern_type: str, detectors: set[str], signals: dict) -> str
     return f"Design signals from {', '.join(sorted(detectors))}"
 
 
-def _build_evidence(findings: list[dict], signals: dict) -> tuple[str, ...]:
+def _build_evidence(
+    findings: list[dict[str, Any]],
+    signals: ConcernSignals,
+) -> tuple[str, ...]:
     """Build evidence tuple from all findings and extracted signals."""
     evidence: list[str] = []
 
@@ -209,7 +237,7 @@ def _build_evidence(findings: list[dict], signals: dict) -> tuple[str, ...]:
 
 
 def _build_question(
-    detectors: set[str], signals: dict
+    detectors: set[str], signals: ConcernSignals
 ) -> str:
     """Build targeted question from dominant signals."""
     parts: list[str] = []
@@ -276,7 +304,7 @@ def _build_question(
 # ── Generators ───────────────────────────────────────────────────────
 
 
-def _file_concerns(state: dict, dismissals: dict) -> list[Concern]:
+def _file_concerns(state: dict[str, Any], dismissals: dict[str, Any]) -> list[Concern]:
     """Per-file design concerns from aggregated mechanical signals.
 
     Flags a file if it has 2+ judgment-needed detectors OR a single
@@ -330,7 +358,7 @@ def _file_concerns(state: dict, dismissals: dict) -> list[Concern]:
     return concerns
 
 
-def _cross_file_patterns(state: dict, dismissals: dict) -> list[Concern]:
+def _cross_file_patterns(state: dict[str, Any], dismissals: dict[str, Any]) -> list[Concern]:
     """Systemic patterns: same judgment detector combo across 3+ files.
 
     When multiple files share the same combination of detector types,
@@ -403,7 +431,8 @@ _GENERATORS = [_file_concerns, _cross_file_patterns]
 
 
 def generate_concerns(
-    state: dict, lang_name: str | None = None
+    state: dict[str, Any],
+    lang_name: str | None = None,
 ) -> list[Concern]:
     """Run all concern generators against current state.
 
@@ -425,7 +454,7 @@ def generate_concerns(
     return concerns
 
 
-def cleanup_stale_dismissals(state: dict) -> int:
+def cleanup_stale_dismissals(state: dict[str, Any]) -> int:
     """Remove dismissals whose source findings all disappeared.
 
     Returns the number of stale entries removed.  Dismissals without

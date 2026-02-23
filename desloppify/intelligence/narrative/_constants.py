@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from desloppify.core.registry import (
     detector_tools as _detector_tools,
+)
+from desloppify.core.registry import (
     on_detector_registered,
 )
 

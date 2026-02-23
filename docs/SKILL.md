@@ -55,16 +55,20 @@ desloppify plan                            # prioritized plan
 desloppify fix <fixer> --dry-run           # auto-fix (dry-run first!)
 desloppify move <src> <dst> --dry-run      # move + update imports
 desloppify resolve fixed|wontfix|false_positive "<pat>"   # classify finding outcome
-desloppify review --prepare                # generate subjective review data
+desloppify review --run-batches --runner codex --parallel --scan-after-import  # preferred blind review path
+desloppify review --prepare                # generate subjective review data (cloud/manual path)
+desloppify review --external-start --external-runner claude  # recommended cloud durable path
+desloppify review --external-submit --session-id <id> --import review_result.json  # submit cloud session output with canonical provenance
 desloppify review --import file.json       # import review results
+desloppify review --validate-import file.json  # validate payload/mode without mutating state
 ```
 
 ## 4. Subjective Reviews (biggest score lever)
 
 Score = 40% mechanical + 60% subjective. Subjective starts at 0% until reviewed.
 
-1. `desloppify review --prepare` — writes dimension definitions and codebase context
-   to `query.json`.
+1. Preferred local path: `desloppify review --run-batches --runner codex --parallel --scan-after-import`.
+   This prepares blind packets, runs isolated subagent batches, merges, imports, and rescans in one flow.
 
 2. **Review each dimension independently.** For best results, review dimensions in
    isolation so scores don't bleed across concerns. If your agent supports parallel
@@ -75,15 +79,32 @@ Score = 40% mechanical + 60% subjective. Subjective starts at 0% until reviewed.
    - The output format (below)
    - Nothing else — let them decide what to read and how
 
-3. Merge assessments (average scores if multiple reviewers cover the same dimension)
+3. Cloud/manual path: run `desloppify review --prepare`, perform isolated reviews,
+   merge assessments (average scores if multiple reviewers cover the same dimension)
    and findings, then import:
    ```bash
    desloppify review --import findings.json
    ```
+   Import is fail-closed by default: if any finding is invalid/skipped, import aborts.
+   Use `--allow-partial` only for explicit exceptions.
+   External imports ingest findings by default. For durable cloud-subagent scores,
+   prefer the session flow:
+   `desloppify review --external-start --external-runner claude` then use the generated
+   `claude_launch_prompt.md` + `review_result.template.json`, and run the printed
+   `desloppify review --external-submit --session-id <id> --import <file>` command.
+   Legacy durable import remains available via
+   `--attested-external --attest "I validated this review was completed without awareness of overall score and is unbiased."`
+   (with valid blind packet provenance in the payload).
+   Use `desloppify review --validate-import findings.json ...` to preflight schema
+   and import mode before mutating state.
+   Manual override cannot be combined with `--allow-partial`, and those manual
+   assessment scores are provisional: they expire on the next `scan` unless
+   replaced by trusted internal or attested-external imports.
 
    Required output format per reviewer:
    ```json
    {
+     "session": { "id": "<session_id_from_template>", "token": "<session_token_from_template>" },
      "assessments": { "naming_quality": 75.0, "logic_clarity": 82.0 },
      "findings": [{
        "dimension": "naming_quality",
@@ -91,10 +112,12 @@ Score = 40% mechanical + 60% subjective. Subjective starts at 0% until reviewed.
        "summary": "one line",
        "related_files": ["path/to/file.py"],
        "evidence": ["specific observation"],
-       "suggestion": "concrete action"
+       "suggestion": "concrete action",
+       "confidence": "high|medium|low"
      }]
    }
    ```
+   For non-session legacy imports (`review --import ... --attested-external`), `session` may be omitted.
 
 Need a clean subjective rerun from zero? Run `desloppify scan --path src/ --reset-subjective` before preparing/importing fresh review data.
 

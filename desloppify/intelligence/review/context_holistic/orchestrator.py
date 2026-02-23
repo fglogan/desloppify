@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from desloppify.file_discovery import (
+    disable_file_cache,
+    enable_file_cache,
+    is_file_cache_enabled,
+    rel,
+)
 from desloppify.intelligence.review._context.structure import (
     compute_structure_context,
 )
@@ -11,12 +17,6 @@ from desloppify.intelligence.review.context_signals.ai import gather_ai_debt_sig
 from desloppify.intelligence.review.context_signals.auth import gather_auth_context
 from desloppify.intelligence.review.context_signals.migration import (
     gather_migration_signals,
-)
-from desloppify.file_discovery import (
-    disable_file_cache,
-    enable_file_cache,
-    is_file_cache_enabled,
-    rel,
 )
 
 from .budget import _abstractions_context, _codebase_stats

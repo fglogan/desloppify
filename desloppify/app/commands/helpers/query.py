@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from desloppify.core.query import write_query as _core_write_query
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core.query import write_query as _core_write_query
 
 QUERY_FILE = PROJECT_ROOT / ".desloppify" / "query.json"
 

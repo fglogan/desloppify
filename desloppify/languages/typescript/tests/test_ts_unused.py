@@ -207,3 +207,28 @@ class TestDenoFallback:
         assert calls["count"] == 1
         assert total == 1
         assert entries and entries[0]["name"] == "x"
+
+    def test_detect_unused_root_deno_lock_does_not_force_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        """A repo-level deno.lock alone should not disable tsc-based unused detection."""
+        _write(tmp_path, "deno.lock", "{}\n")
+        _write(tmp_path, "src/app.ts", "const x = 1;\n")
+
+        class _Result:
+            stdout = (
+                "src/app.ts(1,7): error TS6133: 'x' is declared but its value is never read.\n"
+            )
+            stderr = ""
+
+        calls = {"count": 0}
+
+        def _fake_run(*args, **kwargs):
+            calls["count"] += 1
+            return _Result()
+
+        monkeypatch.setattr(ts_unused_mod.subprocess, "run", _fake_run)
+        entries, total = detect_unused(tmp_path / "src")
+        assert calls["count"] == 1
+        assert total == 1
+        assert entries and entries[0]["name"] == "x"

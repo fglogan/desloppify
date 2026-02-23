@@ -6,16 +6,16 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from desloppify.file_discovery import read_file_text, rel
 from desloppify.intelligence.review.context import (
     abs_path,
     dep_graph_lookup,
     importer_count,
 )
-from desloppify.file_discovery import read_file_text, rel
 from desloppify.languages import get_lang
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def select_files_for_review(
         files = lang.file_finder(path) if lang.file_finder else []
 
     cache = state.get("review_cache", {}).get("files", {})
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     candidates = []
 
     for filepath in files:
@@ -214,7 +214,7 @@ def get_file_findings(state: dict, filepath: str) -> list[dict]:
 def count_fresh(state: dict, max_age_days: int) -> int:
     """Count files in review cache that are still fresh."""
     cache = state.get("review_cache", {}).get("files", {})
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     for entry in cache.values():
         reviewed_at = entry.get("reviewed_at", "")

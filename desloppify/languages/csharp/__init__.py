@@ -9,6 +9,18 @@ from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
+from desloppify.languages._framework.base.phase_builders import (
+    detector_phase_security,
+    detector_phase_signature,
+    detector_phase_test_coverage,
+    shared_subjective_duplicates_tail,
+)
+from desloppify.languages._framework.base.types import (
+    DetectorPhase,
+    LangConfig,
+    LangValueSpec,
+)
+from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
 from desloppify.languages.csharp import move as csharp_move_helpers
 from desloppify.languages.csharp import test_coverage as csharp_test_coverage_hooks
 from desloppify.languages.csharp.commands import get_detect_commands
@@ -38,18 +50,6 @@ from desloppify.languages.csharp.review import REVIEW_GUIDANCE as CSHARP_REVIEW_
 from desloppify.languages.csharp.review import api_surface as csharp_review_api_surface
 from desloppify.languages.csharp.review import (
     module_patterns as csharp_review_module_patterns,
-)
-from desloppify.languages._framework.treesitter.phases import all_treesitter_phases
-from desloppify.languages._framework.base.phase_builders import (
-    detector_phase_security,
-    detector_phase_signature,
-    detector_phase_test_coverage,
-    shared_subjective_duplicates_tail,
-)
-from desloppify.languages._framework.base.types import (
-    DetectorPhase,
-    LangConfig,
-    LangValueSpec,
 )
 
 _CSHARP_MOVE_HELPERS = (

@@ -9,8 +9,8 @@ from desloppify.languages._framework.base.shared_phases import (
     run_coupling_phase,
     run_structural_phase,
 )
-from desloppify.languages.dart.detectors.deps import build_dep_graph
 from desloppify.languages._framework.runtime import LangRun
+from desloppify.languages.dart.detectors.deps import build_dep_graph
 from desloppify.utils import log
 
 DART_COMPLEXITY_SIGNALS = [

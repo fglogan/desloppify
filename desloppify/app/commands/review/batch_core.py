@@ -4,55 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-_CONFIDENCE_WEIGHTS = {
-    "high": 1.2,
-    "medium": 1.0,
-    "low": 0.75,
-}
-_IMPACT_SCOPE_WEIGHTS = {
-    "local": 1.0,
-    "module": 1.3,
-    "subsystem": 1.6,
-    "codebase": 2.0,
-}
-_FIX_SCOPE_WEIGHTS = {
-    "single_edit": 1.0,
-    "multi_file_refactor": 1.3,
-    "architectural_change": 1.7,
-}
+from desloppify.app.commands.review.batch_scoring import DimensionMergeScorer
+from desloppify.app.commands.review.batch_prompt_template import render_batch_prompt
 
-# ---------------------------------------------------------------------------
-# Penalty formula constants for _compute_merged_assessments.
-#
-# These values were calibrated so that a single high-severity codebase-wide
-# finding (pressure ~4.1) pulls a 92-point score into the mid-70s, while a
-# clean dimension (no findings) passes through unchanged.
-# ---------------------------------------------------------------------------
-
-# Blending ratio between the weighted mean and the per-batch floor score.
-# Higher FLOOR_BLEND_WEIGHT makes the merged score more sensitive to the
-# lowest individual batch score (guards against one batch inflating scores).
-_WEIGHTED_MEAN_BLEND = 0.7
-_FLOOR_BLEND_WEIGHT = 0.3
-
-# Maximum total penalty that findings can impose on a dimension score.
-# Prevents a pile-up of minor findings from zeroing out a dimension.
-_MAX_ISSUE_PENALTY = 24.0
-
-# Per-unit penalty from cumulative finding severity (confidence * impact * fix scope).
-_PRESSURE_PENALTY_MULTIPLIER = 2.2
-
-# Extra penalty per additional finding beyond the first in a dimension.
-# Encourages reviewers to consolidate related issues into fewer findings.
-_EXTRA_FINDING_PENALTY = 0.8
-
-# When findings exist, the score is capped to prevent high raw assessments
-# from surviving despite concrete issues. The cap starts at _CAP_CEILING and
-# is reduced by pressure * _CAP_PRESSURE_MULTIPLIER, but never below _CAP_FLOOR.
-_CAP_FLOOR = 60.0
-_CAP_CEILING = 90.0
-_CAP_PRESSURE_MULTIPLIER = 3.5
+_DIMENSION_SCORER = DimensionMergeScorer()
 
 
 def parse_batch_selection(raw: str | None, batch_count: int) -> list[int]:
@@ -77,7 +34,7 @@ def parse_batch_selection(raw: str | None, batch_count: int) -> list[int]:
     return selected
 
 
-def extract_json_payload(raw: str, *, log_fn) -> dict | None:
+def extract_json_payload(raw: str, *, log_fn) -> dict[str, object] | None:
     """Best-effort extraction of first JSON object from agent output text."""
     text = raw.strip()
     if not text:
@@ -144,7 +101,7 @@ def _validate_dimension_note(
 
 
 def _normalize_abstraction_sub_axes(
-    note_raw: dict,
+    note_raw: dict[str, object],
     abstraction_sub_axes: tuple[str, ...],
 ) -> dict[str, float]:
     """Extract and clamp abstraction_fitness sub-axis scores from a note."""
@@ -177,15 +134,15 @@ def _normalize_abstraction_sub_axes(
 
 def _normalize_findings(
     raw_findings: object,
-    dimension_notes: dict[str, dict],
+    dimension_notes: dict[str, dict[str, Any]],
     *,
     max_batch_findings: int,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Validate and normalize the findings array from a batch payload."""
     if not isinstance(raw_findings, list):
         raise ValueError("findings must be an array")
 
-    findings: list[dict] = []
+    findings: list[dict[str, Any]] = []
     for item in raw_findings:
         if not isinstance(item, dict):
             continue
@@ -205,11 +162,11 @@ def _normalize_findings(
 
 def _compute_batch_quality(
     assessments: dict[str, float],
-    findings: list[dict],
-    dimension_notes: dict[str, dict],
+    findings: list[dict[str, Any]],
+    dimension_notes: dict[str, dict[str, Any]],
     allowed_dims: set[str],
     high_score_without_risk: float,
-) -> dict:
+) -> dict[str, float]:
     """Compute quality metrics for a single batch result."""
     return {
         "dimension_coverage": round(
@@ -226,12 +183,17 @@ def _compute_batch_quality(
 
 
 def normalize_batch_result(
-    payload: dict,
+    payload: dict[str, object],
     allowed_dims: set[str],
     *,
     max_batch_findings: int,
     abstraction_sub_axes: tuple[str, ...],
-) -> tuple[dict[str, float], list[dict], dict[str, dict], dict[str, float]]:
+) -> tuple[
+    dict[str, float],
+    list[dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[str, float],
+]:
     """Validate and normalize one batch payload."""
     if "assessments" not in payload:
         raise ValueError("payload missing required key: assessments")
@@ -247,7 +209,7 @@ def normalize_batch_result(
         raise ValueError("dimension_notes must be an object")
 
     assessments: dict[str, float] = {}
-    dimension_notes: dict[str, dict] = {}
+    dimension_notes: dict[str, dict[str, Any]] = {}
     high_score_without_risk = 0.0
     for key, value in raw_assessments.items():
         if not isinstance(key, str) or not key:
@@ -269,7 +231,7 @@ def normalize_batch_result(
             high_score_without_risk += 1
 
         normalized_sub_axes: dict[str, float] = {}
-        if key == "abstraction_fitness":
+        if key == "abstraction_fitness" and isinstance(note_raw, dict):
             normalized_sub_axes = _normalize_abstraction_sub_axes(
                 note_raw, abstraction_sub_axes
             )
@@ -300,8 +262,8 @@ def normalize_batch_result(
 def assessment_weight(
     *,
     dimension: str,
-    findings: list[dict],
-    dimension_notes: dict[str, dict],
+    findings: list[dict[str, Any]],
+    dimension_notes: dict[str, dict[str, Any]],
 ) -> float:
     """Evidence-weighted assessment score weight with a neutral floor.
 
@@ -318,56 +280,24 @@ def assessment_weight(
     return float(1 + note_evidence + finding_count)
 
 
-def _finding_severity(
-    finding: dict,
-    *,
-    note: dict | None,
-) -> float:
-    """Compute per-finding severity used for score-pressure adjustments."""
-    note_ref = note if isinstance(note, dict) else {}
-    confidence = str(
-        finding.get("confidence", note_ref.get("confidence", "medium"))
-    ).strip().lower()
-    impact_scope = str(
-        finding.get("impact_scope", note_ref.get("impact_scope", "local"))
-    ).strip().lower()
-    fix_scope = str(
-        finding.get("fix_scope", note_ref.get("fix_scope", "single_edit"))
-    ).strip().lower()
-
-    confidence_weight = _CONFIDENCE_WEIGHTS.get(confidence, 1.0)
-    impact_weight = _IMPACT_SCOPE_WEIGHTS.get(impact_scope, 1.0)
-    fix_weight = _FIX_SCOPE_WEIGHTS.get(fix_scope, 1.0)
-    return confidence_weight * impact_weight * fix_weight
-
-
 def _finding_pressure_by_dimension(
-    findings: list[dict],
+    findings: list[dict[str, Any]],
     *,
-    dimension_notes: dict[str, dict],
+    dimension_notes: dict[str, dict[str, Any]],
 ) -> tuple[dict[str, float], dict[str, int]]:
     """Summarize how strongly findings should pull dimension scores down."""
-    pressure_by_dim: dict[str, float] = {}
-    count_by_dim: dict[str, int] = {}
-    for finding in findings:
-        dim = str(finding.get("dimension", "")).strip()
-        if not dim:
-            continue
-        note = dimension_notes.get(dim)
-        pressure_by_dim[dim] = pressure_by_dim.get(dim, 0.0) + _finding_severity(
-            finding,
-            note=note if isinstance(note, dict) else None,
-        )
-        count_by_dim[dim] = count_by_dim.get(dim, 0) + 1
-    return pressure_by_dim, count_by_dim
+    return _DIMENSION_SCORER.finding_pressure_by_dimension(
+        findings,
+        dimension_notes=dimension_notes,
+    )
 
 
 def _accumulate_batch_scores(
-    result: dict,
+    result: dict[str, Any],
     *,
     score_buckets: dict[str, list[tuple[float, float]]],
     score_raw_by_dim: dict[str, list[float]],
-    merged_dimension_notes: dict[str, dict],
+    merged_dimension_notes: dict[str, dict[str, Any]],
     abstraction_axis_scores: dict[str, list[tuple[float, float]]],
     abstraction_sub_axes: tuple[str, ...],
 ) -> None:
@@ -412,8 +342,8 @@ def _accumulate_batch_scores(
 
 
 def _accumulate_batch_findings(
-    result: dict,
-    finding_map: dict[str, dict],
+    result: dict[str, Any],
+    finding_map: dict[str, dict[str, Any]],
 ) -> None:
     """Deduplicate and accumulate findings from one batch into finding_map."""
     for finding in result.get("findings", []):
@@ -427,7 +357,7 @@ def _accumulate_batch_findings(
 
 
 def _accumulate_batch_quality(
-    result: dict,
+    result: dict[str, Any],
     *,
     coverage_values: list[float],
     evidence_density_values: list[float],
@@ -453,31 +383,12 @@ def _compute_merged_assessments(
     finding_count_by_dim: dict[str, int],
 ) -> dict[str, float]:
     """Compute pressure-adjusted weighted mean for each dimension."""
-    merged: dict[str, float] = {}
-    for key, weighted_scores in sorted(score_buckets.items()):
-        if not weighted_scores:
-            continue
-        numerator = sum(score * weight for score, weight in weighted_scores)
-        denominator = sum(weight for _, weight in weighted_scores)
-        weighted_mean = numerator / max(denominator, 1.0)
-        floor = min(score_raw_by_dim.get(key, [weighted_mean]))
-        floor_aware = (_WEIGHTED_MEAN_BLEND * weighted_mean) + (_FLOOR_BLEND_WEIGHT * floor)
-        finding_pressure = finding_pressure_by_dim.get(key, 0.0)
-        finding_count = finding_count_by_dim.get(key, 0)
-        issue_penalty = min(
-            _MAX_ISSUE_PENALTY,
-            (finding_pressure * _PRESSURE_PENALTY_MULTIPLIER)
-            + (max(finding_count - 1, 0) * _EXTRA_FINDING_PENALTY),
-        )
-        issue_adjusted = floor_aware - issue_penalty
-        if finding_count > 0:
-            issue_cap = max(
-                _CAP_FLOOR,
-                _CAP_CEILING - (finding_pressure * _CAP_PRESSURE_MULTIPLIER),
-            )
-            issue_adjusted = min(issue_adjusted, issue_cap)
-        merged[key] = round(max(0.0, min(100.0, issue_adjusted)), 1)
-    return merged
+    return _DIMENSION_SCORER.merge_scores(
+        score_buckets,
+        score_raw_by_dim,
+        finding_pressure_by_dim,
+        finding_count_by_dim,
+    )
 
 
 def _compute_abstraction_components(
@@ -512,7 +423,7 @@ def _compute_abstraction_components(
 
 
 def merge_batch_results(
-    batch_results: list[dict],
+    batch_results: list[dict[str, Any]],
     *,
     abstraction_sub_axes: tuple[str, ...],
     abstraction_component_names: dict[str, str],
@@ -520,8 +431,8 @@ def merge_batch_results(
     """Deterministically merge assessments/findings across batch outputs."""
     score_buckets: dict[str, list[tuple[float, float]]] = {}
     score_raw_by_dim: dict[str, list[float]] = {}
-    finding_map: dict[str, dict] = {}
-    merged_dimension_notes: dict[str, dict] = {}
+    finding_map: dict[str, dict[str, Any]] = {}
+    merged_dimension_notes: dict[str, dict[str, Any]] = {}
     coverage_values: list[float] = []
     evidence_density_values: list[float] = []
     high_score_without_risk_total = 0.0
@@ -597,69 +508,14 @@ def build_batch_prompt(
     repo_root: Path,
     packet_path: Path,
     batch_index: int,
-    batch: dict,
+    batch: dict[str, object],
 ) -> str:
     """Render one subagent prompt for a holistic investigation batch."""
-    name = str(batch.get("name", f"Batch {batch_index + 1}"))
-    dims = [str(d) for d in batch.get("dimensions", []) if isinstance(d, str) and d]
-    why = str(batch.get("why", "")).strip()
-    files = [str(f) for f in batch.get("files_to_read", []) if isinstance(f, str) and f]
-    file_lines = "\n".join(f"- {f}" for f in files) if files else "- (none)"
-    dim_text = ", ".join(dims) if dims else "(none)"
-    package_org_focus = ""
-    if "package_organization" in set(dims):
-        package_org_focus = (
-            "9a. For package_organization, ground scoring in objective structure signals from "
-            "`holistic_context.structure` (root_files fan_in/fan_out roles, directory_profiles, "
-            "coupling_matrix). Prefer thresholded evidence (for example: fan_in < 5 for root "
-            "stragglers, import-affinity > 60%, directories > 10 files with mixed concerns).\n"
-            "9b. Suggestions must include a staged reorg plan (target folders, move order, "
-            "and import-update/validation commands).\n"
-        )
-
-    return (
-        "You are a focused subagent reviewer for a single holistic investigation batch.\n\n"
-        f"Repository root: {repo_root}\n"
-        f"Immutable packet: {packet_path}\n"
-        f"Batch index: {batch_index + 1}\n"
-        f"Batch name: {name}\n"
-        f"Batch dimensions: {dim_text}\n"
-        f"Batch rationale: {why}\n\n"
-        "Files assigned:\n"
-        f"{file_lines}\n\n"
-        "Task requirements:\n"
-        "1. Read the immutable packet and follow `system_prompt` constraints exactly.\n"
-        "2. Evaluate ONLY listed files and ONLY listed dimensions for this batch.\n"
-        "3. Return 0-10 high-quality findings for this batch (empty array allowed).\n"
-        "4. Score/finding consistency is required: broader or more severe findings MUST lower dimension scores.\n"
-        "5. Every finding must include `related_files` with at least 2 files when possible.\n"
-        "6. Every finding must include `impact_scope` and `fix_scope`.\n"
-        "7. Every scored dimension MUST include dimension_notes with concrete evidence.\n"
-        "8. If a dimension score is >85, include `unreported_risk` in dimension_notes.\n"
-        "9. Use exactly one decimal place for every assessment and abstraction sub-axis score.\n"
-        f"{package_org_focus}"
-        "10. Do not edit repository files.\n"
-        "11. Return ONLY valid JSON, no markdown fences.\n\n"
-        "Scope enums:\n"
-        '- impact_scope: "local" | "module" | "subsystem" | "codebase"\n'
-        '- fix_scope: "single_edit" | "multi_file_refactor" | "architectural_change"\n\n'
-        "Output schema:\n"
-        "{\n"
-        f'  "batch": "{name}",\n'
-        f'  "batch_index": {batch_index + 1},\n'
-        '  "assessments": {"<dimension>": <0-100 with one decimal place>},\n'
-        '  "dimension_notes": {\n'
-        '    "<dimension>": {\n'
-        '      "evidence": ["specific code observations"],\n'
-        '      "impact_scope": "local|module|subsystem|codebase",\n'
-        '      "fix_scope": "single_edit|multi_file_refactor|architectural_change",\n'
-        '      "confidence": "high|medium|low",\n'
-        '      "unreported_risk": "required when score >85",\n'
-        '      "sub_axes": {"abstraction_leverage": 0-100 with one decimal place, "indirection_cost": 0-100 with one decimal place, "interface_honesty": 0-100 with one decimal place}  // required for abstraction_fitness when evidence supports it\n'
-        "    }\n"
-        "  },\n"
-        '  "findings": []\n'
-        "}\n"
+    return render_batch_prompt(
+        repo_root=repo_root,
+        packet_path=packet_path,
+        batch_index=batch_index,
+        batch=batch,
     )
 
 

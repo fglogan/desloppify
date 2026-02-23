@@ -5,15 +5,13 @@ from __future__ import annotations
 import argparse
 
 from desloppify.languages._framework.commands_base import (
+    build_standard_detect_registry,
+    make_cmd_complexity,
     make_cmd_cycles,
     make_cmd_deps,
     make_cmd_dupes,
-    make_cmd_orphaned,
-)
-from desloppify.languages._framework.commands_base import (
-    build_standard_detect_registry,
-    make_cmd_complexity,
     make_cmd_large,
+    make_cmd_orphaned,
 )
 from desloppify.languages.gdscript.detectors.deps import build_dep_graph
 from desloppify.languages.gdscript.extractors import (

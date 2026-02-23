@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT, get_project_root
+from desloppify.core._internal.text_utils import get_project_root
+from desloppify.core.file_paths import (
+    matches_exclusion,
+    rel,
+    resolve_path,
+    safe_write_text,
+)
+from desloppify.core.file_paths import (
+    normalize_path_separators as _normalize_path_separators,
+)
+from desloppify.core.file_paths import (
+    safe_relpath as _safe_relpath,
+)
 from desloppify.core.runtime_state import current_runtime_context
 
 __all__ = [
@@ -64,76 +75,6 @@ def set_exclusions(patterns: list[str]):
 def get_exclusions() -> tuple[str, ...]:
     """Return current extra exclusion patterns."""
     return current_runtime_context().exclusions
-
-
-def matches_exclusion(rel_path: str, exclusion: str) -> bool:
-    """Check if a relative path matches an exclusion pattern (path-component aware).
-
-    Matches if exclusion is a path component (e.g. "test" matches "test/foo.py"
-    or "src/test/bar.py") or a directory prefix (e.g. "src/test" matches
-    "src/test/bar.py"). Does NOT do substring matching — "test" will NOT match
-    "testimony.py".
-
-    Glob-style ``*`` in exclusion patterns is supported: ``*.egg-info`` matches
-    any path component ending with ``.egg-info``, and ``.venv*`` matches
-    ``.venv``, ``.venv-debug``, etc.
-    """
-    parts = Path(rel_path).parts
-    if exclusion in parts:
-        return True
-    if "*" in exclusion:
-        import fnmatch
-        if any(fnmatch.fnmatch(part, exclusion) for part in parts):
-            return True
-    if "/" in exclusion or os.sep in exclusion:
-        normalized = exclusion.rstrip("/").rstrip(os.sep)
-        return rel_path.startswith(normalized + "/") or rel_path.startswith(
-            normalized + os.sep
-        )
-    return False
-
-
-def _normalize_path_separators(path: str) -> str:
-    return path.replace("\\", "/")
-
-
-def _safe_relpath(path: str | Path, start: str | Path) -> str:
-    try:
-        return os.path.relpath(str(path), str(start))
-    except ValueError:
-        return str(Path(path).resolve())
-
-
-def rel(path: str) -> str:
-    root = get_project_root()
-    resolved = Path(path).resolve()
-    try:
-        return _normalize_path_separators(str(resolved.relative_to(root)))
-    except ValueError:
-        return _normalize_path_separators(_safe_relpath(resolved, root))
-
-
-def resolve_path(filepath: str) -> str:
-    """Resolve a filepath to absolute, handling both relative and absolute."""
-    p = Path(filepath)
-    if p.is_absolute():
-        return str(p.resolve())
-    return str((get_project_root() / filepath).resolve())
-
-
-def safe_write_text(filepath: str | Path, content: str) -> None:
-    """Atomically write text to a file using temp+rename."""
-    p = Path(filepath)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
-        os.replace(tmp, str(p))
-    except OSError:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
 
 
 # ── File content cache & reading ──────────────────────────────

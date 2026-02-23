@@ -6,9 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from desloppify.core.enums import Tier
-from desloppify.state import Finding
-from desloppify.state import make_finding
 from desloppify.file_discovery import rel
+from desloppify.state import Finding, make_finding
 
 
 def make_unused_findings(entries: list[dict], stderr_fn) -> list[Finding]:

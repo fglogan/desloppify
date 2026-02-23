@@ -7,6 +7,7 @@ import math
 import desloppify.languages.typescript.test_coverage as ts_cov
 from desloppify.engine.detectors.coverage.mapping import (
     _analyze_test_quality,
+    _get_test_files_for_prod,
     _import_based_mapping,
     _infer_lang_name,
     _map_test_to_source,
@@ -227,6 +228,25 @@ class TestImportBasedMapping:
         result = _import_based_mapping(graph, test_files, production_files)
         assert result == {"src/a.py", "src/b.py"}
 
+    def test_typescript_parses_dynamic_imports_even_when_graph_entry_exists(self, tmp_path):
+        prod_file = _write_file(tmp_path, "src/utils.ts", "export const x = 1;\n")
+        test_file = _write_file(
+            tmp_path,
+            "src/utils.test.ts",
+            (
+                'test("loads", async () => {\n'
+                "  await import('./utils');\n"
+                "  expect(true).toBe(true);\n"
+                "});\n"
+            ),
+        )
+        graph = {
+            test_file: {"imports": set()},
+            prod_file: {"imports": set(), "importer_count": 0},
+        }
+        result = _import_based_mapping(graph, {test_file}, {prod_file}, "typescript")
+        assert prod_file in result
+
 
 # ── _parse_test_imports ──────────────────────────────────
 
@@ -268,6 +288,24 @@ class TestParseTestImports:
         }
         result = _parse_test_imports(tf, prod, prod_by_module)
         assert prod_path in result
+
+
+class TestGetTestFilesForProd:
+    def test_typescript_dynamic_import_parsed_with_existing_graph_entry(self, tmp_path):
+        prod_file = _write_file(tmp_path, "src/a.ts", "export const a = 1;\n")
+        test_file = _write_file(
+            tmp_path,
+            "src/moduleCoverage.test.ts",
+            (
+                "it('imports module', async () => {\n"
+                "  await import('./a');\n"
+                "  await expect(import('./a')).resolves.toBeDefined();\n"
+                "});\n"
+            ),
+        )
+        graph = {test_file: {"imports": set()}}
+        related = _get_test_files_for_prod(prod_file, {test_file}, graph, "typescript")
+        assert test_file in related
 
 
 # ── _transitive_coverage ─────────────────────────────────
@@ -442,6 +480,24 @@ class TestAnalyzeTestQuality:
         assert result[tf]["quality"] == "placeholder_smoke"
         assert result[tf]["placeholder"] is True
 
+    def test_typescript_tobedefined_dynamic_import_smoke(self, tmp_path):
+        content = (
+            "const moduleLoaders = [\n"
+            "  () => import('./a'),\n"
+            "  () => import('./b'),\n"
+            "  () => import('./c'),\n"
+            "];\n"
+            "it('imports all modules', async () => {\n"
+            "  for (const loadModule of moduleLoaders) {\n"
+            "    await expect(loadModule()).resolves.toBeDefined();\n"
+            "  }\n"
+            "});\n"
+        )
+        tf = _write_file(tmp_path, "moduleCoverage.test.ts", content)
+        result = _analyze_test_quality({tf}, "typescript")
+        assert result[tf]["quality"] == "placeholder_smoke"
+        assert result[tf]["placeholder"] is True
+
     def test_no_test_functions(self, tmp_path):
         content = "# just a comment\nprint('hello')\n"
         tf = _write_file(tmp_path, "test_empty.py", content)
@@ -492,6 +548,49 @@ class TestDetectTestCoverage:
         assert len(entries) >= 1
         assert entries[0]["detail"]["kind"] == "untested_module"
         assert "loc_weight" in entries[0]["detail"]
+
+    def test_typescript_dynamic_import_smoke_produces_placeholder_findings(
+        self, tmp_path
+    ):
+        prod_a = _write_file(tmp_path, "src/a.ts", ("export function a(v: number) {\n  return v + 1;\n}\n" * 4))
+        prod_b = _write_file(tmp_path, "src/b.ts", ("export function b(v: number) {\n  return v + 2;\n}\n" * 4))
+        prod_c = _write_file(tmp_path, "src/c.ts", ("export function c(v: number) {\n  return v + 3;\n}\n" * 4))
+        test_f = _write_file(
+            tmp_path,
+            "src/moduleCoverage.test.ts",
+            (
+                "const moduleLoaders = [\n"
+                "  () => import('./a'),\n"
+                "  () => import('./b'),\n"
+                "  () => import('./c'),\n"
+                "];\n"
+                "it('imports all modules', async () => {\n"
+                "  for (const loadModule of moduleLoaders) {\n"
+                "    await expect(loadModule()).resolves.toBeDefined();\n"
+                "  }\n"
+                "});\n"
+            ),
+        )
+        all_files = [prod_a, prod_b, prod_c, test_f]
+        zone_map = _make_zone_map(all_files)
+        graph = {
+            prod_a: {"imports": set(), "importer_count": 0},
+            prod_b: {"imports": set(), "importer_count": 0},
+            prod_c: {"imports": set(), "importer_count": 0},
+            test_f: {"imports": set()},
+        }
+
+        entries, potential = detect_test_coverage(graph, zone_map, "typescript")
+        assert potential > 0
+        placeholders = [
+            entry
+            for entry in entries
+            if entry.get("detail", {}).get("kind") == "placeholder_test"
+        ]
+        assert placeholders
+        assert any(
+            entry.get("detail", {}).get("test_file") == test_f for entry in placeholders
+        )
 
     def test_production_with_direct_test(self, tmp_path):
         """Production file with a direct test → no untested finding."""
@@ -819,6 +918,23 @@ class TestResolveTsImport:
         prod = _write_file(tmp_path, "src/utils.ts", "export const x = 1;\n")
         result = _resolve_import("~/utils", "/any/test.ts", {prod}, "typescript")
         assert result == prod
+
+    def test_alias_resolves_relative_production_paths(self, tmp_path, monkeypatch):
+        """Alias resolution should also work when production paths are project-relative."""
+        monkeypatch.setattr(ts_cov, "SRC_PATH", tmp_path / "src")
+        monkeypatch.setattr(ts_cov, "PROJECT_ROOT", tmp_path)
+        _write_file(
+            tmp_path,
+            "src/components/Button.tsx",
+            "export default function Button() {}\n",
+        )
+        result = _resolve_import(
+            "@/components/Button",
+            "/any/test.ts",
+            {"src/components/Button.tsx"},
+            "typescript",
+        )
+        assert result == "src/components/Button.tsx"
 
     def test_index_ts_extension_probing(self, tmp_path):
         """Bare directory import resolves to index.ts."""

@@ -6,8 +6,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from desloppify.languages.typescript.detectors.knip_adapter import detect_with_knip
 from desloppify.file_discovery import rel
+from desloppify.languages.typescript.detectors.knip_adapter import detect_with_knip
 from desloppify.utils import colorize, print_table
 
 

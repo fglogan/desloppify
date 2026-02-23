@@ -11,8 +11,8 @@ from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.review import runtime as review_runtime_mod
 from desloppify.core.fallbacks import print_error
-from desloppify.intelligence import review as review_mod
 from desloppify.intelligence import integrity as subjective_integrity_mod
+from desloppify.intelligence import review as review_mod
 from desloppify.utils import colorize
 
 from .io import _load_state
@@ -73,12 +73,19 @@ def _cmd_fix_review(args):
                 )
             print(
                 colorize(
-                    "    Run: `desloppify review --prepare`", "dim"
+                    "    Preferred: `desloppify review --run-batches --runner codex --parallel --scan-after-import`",
+                    "dim",
                 )
             )
             print(
                 colorize(
-                    "    Then import and rescan: `desloppify review --import findings.json && desloppify scan`",
+                    "    Claude cloud durable path: `desloppify review --external-start --external-runner claude`, then run the printed `--external-submit ... --scan-after-import` command",
+                    "dim",
+                )
+            )
+            print(
+                colorize(
+                    "    Findings-only fallback: `desloppify review --prepare`, then `desloppify review --import findings.json && desloppify scan`",
                     "dim",
                 )
             )
@@ -128,16 +135,27 @@ def _cmd_fix_review(args):
     )
     print(colorize("  2. Evaluate each file against the dimensions above", "dim"))
     print(colorize("  3. Save findings as JSON (for example: findings.json)", "dim"))
-    print(colorize("  4. Import: desloppify review --import findings.json", "dim"))
     print(
         colorize(
-            "  5. Optional objective cross-check: desloppify review --prepare",
+            "  4. Preferred (Codex local): desloppify review --run-batches --runner codex --parallel --scan-after-import",
             "dim",
         )
     )
     print(
         colorize(
-            "  Next command to improve subjective scores: `desloppify review --import findings.json`",
+            "  5. Claude cloud durable path: desloppify review --external-start --external-runner claude (then run the printed --external-submit ... --scan-after-import command)",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  6. Findings-only fallback: desloppify review --import findings.json && desloppify scan",
+            "dim",
+        )
+    )
+    print(
+        colorize(
+            "  Next command to improve subjective scores: `desloppify review --run-batches --runner codex --parallel --scan-after-import`",
             "dim",
         )
     )

@@ -6,12 +6,12 @@ import math
 import os
 from unittest.mock import patch
 
+from desloppify.engine.detectors.test_coverage import discovery as discovery_mod
 from desloppify.engine.detectors.test_coverage.metrics import (
     _loc_weight,
     _quality_risk_level,
     _quality_threshold,
 )
-from desloppify.engine.detectors.test_coverage import discovery as discovery_mod
 
 # ── _loc_weight ───────────────────────────────────────────
 

@@ -264,7 +264,10 @@ class TestCmdNextOutput:
         out = capsys.readouterr().out
         assert "North star: strict 94.0/100 → target 95.0 (+1.0 needed)" in out
         assert "Subjective quality (<95%): Naming Quality 94.0%" in out
-        assert "review --prepare --dimensions naming_quality" in out
+        assert (
+            "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality"
+            in out
+        )
 
     def test_subjective_coverage_debt_hint(self, monkeypatch, capsys):
         _patch_common(
@@ -556,7 +559,10 @@ class TestCmdNextOutput:
         out = capsys.readouterr().out
         assert "were reset to 0.0 this scan" in out
         assert "Anti-gaming safeguard applied" in out
-        assert "review --prepare --dimensions" in out
+        assert (
+            "review --run-batches --runner codex --parallel --scan-after-import --dimensions"
+            in out
+        )
         assert "naming_quality" in out
         assert "logic_clarity" in out
 

@@ -155,8 +155,9 @@ def show_score_delta(
             if streak >= 2:
                 print(
                     colorize(
-                        "    This warning has repeated. Use `desloppify review --prepare` "
-                        "and run a blind reviewer pass before import.",
+                        "    This warning has repeated. Prefer "
+                        "`desloppify review --run-batches --runner codex --parallel --scan-after-import` "
+                        "or run a blind reviewer pass before import.",
                         "yellow",
                 )
             )
@@ -176,9 +177,8 @@ def show_concern_count(state: dict, lang_name: str | None = None) -> None:
                     "cyan",
                 )
             )
-    except Exception as exc:
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("Concern generation failed (best-effort): %s", exc)
-        pass  # Best-effort — don't block scan output.
 
 
 def show_strict_target_progress(strict_target: dict | None) -> tuple[float | None, float | None]:

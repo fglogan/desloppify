@@ -33,7 +33,6 @@ from desloppify.engine._state.resolution import (
     match_findings,
     resolve_findings,
 )
-
 from desloppify.engine._state.schema import (
     CURRENT_VERSION,
     STATE_DIR,

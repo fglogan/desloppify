@@ -7,6 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from desloppify.file_discovery import (
+    disable_file_cache,
+    enable_file_cache,
+    is_file_cache_enabled,
+    read_file_text,
+    rel,
+)
+from desloppify.intelligence.review._context.models import HolisticContext
+from desloppify.intelligence.review._prepare.helpers import (
+    HOLISTIC_WORKFLOW,
+    append_full_sweep_batch,
+)
 from desloppify.intelligence.review.context import (
     abs_path,
     build_review_context,
@@ -15,7 +27,6 @@ from desloppify.intelligence.review.context import (
     serialize_context,
 )
 from desloppify.intelligence.review.context_holistic import build_holistic_context
-from desloppify.intelligence.review._context.models import HolisticContext
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
 from desloppify.intelligence.review.dimensions.lang import get_lang_guidance
 from desloppify.intelligence.review.dimensions.selection import resolve_dimensions
@@ -28,23 +39,12 @@ from desloppify.intelligence.review.prepare_batches import (
 from desloppify.intelligence.review.prepare_batches import (
     filter_batches_to_dimensions as _filter_batches_to_dimensions,
 )
-from desloppify.intelligence.review._prepare.helpers import (
-    HOLISTIC_WORKFLOW,
-    append_full_sweep_batch,
-)
 from desloppify.intelligence.review.selection import (
     ReviewSelectionOptions,
     count_fresh,
     count_stale,
     get_file_findings,
     select_files_for_review,
-)
-from desloppify.file_discovery import (
-    disable_file_cache,
-    enable_file_cache,
-    is_file_cache_enabled,
-    read_file_text,
-    rel,
 )
 
 logger = logging.getLogger(__name__)
@@ -258,9 +258,8 @@ def prepare_holistic_review(
         concerns_batch = _batch_concerns(concerns)
         if concerns_batch:
             batches.append(concerns_batch)
-    except Exception as exc:
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("Concern generation failed (best-effort): %s", exc)
-        pass  # Concern generation is best-effort — don't block review.
 
     batches = _filter_batches_to_dimensions(batches, dims)
     include_full_sweep = bool(resolved_options.include_full_sweep)

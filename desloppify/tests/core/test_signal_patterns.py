@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from desloppify.core.signal_patterns import (
     DEPRECATION_MARKER_RE,
     MIGRATION_TODO_RE,
-    SERVICE_ROLE_TOKEN_RE,
     SERVER_ONLY_PATH_HINTS,
+    SERVICE_ROLE_TOKEN_RE,
     is_server_only_path,
 )
-
 
 # ── is_server_only_path ──────────────────────────────────────────────
 

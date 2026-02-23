@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _ensure_parser(
     cache: dict,
-    spec: "TreeSitterLangSpec",
+    spec: TreeSitterLangSpec,
     *,
     with_query: bool = False,
 ) -> bool:
@@ -306,8 +306,6 @@ _CLOSURE_NODE_TYPES = frozenset({
     "anonymous_function", "block_argument",
     # Go anonymous functions
     "func_literal",
-    # Rust closures
-    "closure_expression",
 })
 
 

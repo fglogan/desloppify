@@ -6,14 +6,14 @@ import re
 from pathlib import Path
 
 from desloppify.engine.detectors.base import ComplexitySignal, GodRule
+from desloppify.file_discovery import rel
 from desloppify.languages._framework.base.shared_phases import (
     run_coupling_phase,
     run_structural_phase,
 )
+from desloppify.languages._framework.runtime import LangRun
 from desloppify.languages.csharp.detectors.deps import build_dep_graph
 from desloppify.languages.csharp.extractors import extract_csharp_classes
-from desloppify.languages._framework.runtime import LangRun
-from desloppify.file_discovery import rel
 from desloppify.utils import log
 
 

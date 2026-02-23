@@ -1,5 +1,7 @@
 """Tests for desloppify.languages.python — PythonConfig and configuration data."""
 
+import shutil
+
 from desloppify.engine.policy.zones import Zone
 from desloppify.languages.python import (
     PY_COMPLEXITY_SIGNALS,
@@ -74,6 +76,19 @@ class TestPythonConfig:
         config = PythonConfig()
         assert config.zone_rules is not None
         assert len(config.zone_rules) > 0
+
+    def test_scan_coverage_prerequisites_when_bandit_missing(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+        config = PythonConfig()
+        checks = config.scan_coverage_prerequisites()
+        assert checks
+        assert checks[0].detector == "security"
+        assert checks[0].status == "reduced"
+
+    def test_scan_coverage_prerequisites_when_bandit_present(self, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda _cmd: "/usr/local/bin/bandit")
+        config = PythonConfig()
+        assert config.scan_coverage_prerequisites() == []
 
 
 class TestComplexitySignals:

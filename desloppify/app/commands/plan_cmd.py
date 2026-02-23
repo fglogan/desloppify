@@ -12,6 +12,7 @@ from desloppify.engine.planning import core as plan_mod
 from desloppify.file_discovery import safe_write_text
 from desloppify.utils import colorize
 
+
 def cmd_plan_output(args: argparse.Namespace) -> None:
     """Generate a prioritized markdown plan from state."""
     state = command_runtime(args).state

@@ -9,9 +9,10 @@ Review findings live in state["findings"]. This module provides:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from desloppify.core.issues_render import finding_weight
+from desloppify.engine._work_queue.helpers import detail_dict
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +59,18 @@ def update_investigation(state: dict, finding_id: str, text: str) -> bool:
     finding = state.get("findings", {}).get(finding_id)
     if not finding or finding.get("status") != "open":
         return False
-    detail = finding.setdefault("detail", {})
+    detail = detail_dict(finding)
+    if not detail:
+        detail = {}
+        finding["detail"] = detail
     detail["investigation"] = text
-    detail["investigated_at"] = datetime.now(timezone.utc).isoformat()
+    detail["investigated_at"] = datetime.now(UTC).isoformat()
     return True
 
 
 def expire_stale_holistic(state: dict, max_age_days: int = 30) -> list[str]:
     """Auto-resolve holistic review findings older than max_age_days."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expired: list[str] = []
 
     for finding_id, finding in state.get("findings", {}).items():
@@ -74,7 +78,7 @@ def expire_stale_holistic(state: dict, max_age_days: int = 30) -> list[str]:
             continue
         if finding.get("status") != "open":
             continue
-        if not finding.get("detail", {}).get("holistic"):
+        if not detail_dict(finding).get("holistic"):
             continue
 
         last_seen = finding.get("last_seen")

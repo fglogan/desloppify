@@ -7,6 +7,7 @@ SKIP_ALL_DETECTORS = frozenset(
         "exports",
         "deprecated",
         "structural",
+        "boilerplate_duplication",
         "props",
         "smells",
         "react",
@@ -26,6 +27,7 @@ SKIP_ALL_DETECTORS = frozenset(
 )
 
 TEST_SKIP_DETECTORS = {
+    "boilerplate_duplication",
     "dupes",
     "single_use",
     "orphaned",
@@ -38,6 +40,7 @@ TEST_SKIP_DETECTORS = {
 }
 
 CONFIG_SKIP_DETECTORS = {
+    "boilerplate_duplication",
     "smells",
     "structural",
     "dupes",
@@ -52,4 +55,3 @@ CONFIG_SKIP_DETECTORS = {
 }
 
 SCRIPT_SKIP_DETECTORS = {"coupling", "single_use", "orphaned", "facade"}
-

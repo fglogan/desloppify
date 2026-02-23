@@ -6,11 +6,10 @@ import copy
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from desloppify.core._internal.text_utils import is_numeric
 from desloppify.engine.detectors.base import FunctionInfo
-from desloppify.state import Finding
 
 if TYPE_CHECKING:
     from desloppify.engine.policy.zones import FileZoneMap, ZoneRule
@@ -34,7 +33,7 @@ class DetectorPhase:
     """
 
     label: str
-    run: Callable[[Path, LangRun], tuple[list[Finding], dict[str, int]]]
+    run: Callable[[Path, LangRun], tuple[list[dict[str, Any]], dict[str, int]]]
     slow: bool = False
 
 
@@ -44,6 +43,55 @@ class FixResult:
 
     entries: list[dict]
     skip_reasons: dict[str, int] = field(default_factory=dict)
+
+
+CoverageStatus = Literal["full", "reduced"]
+
+
+class DetectorCoverageRecord(TypedDict, total=False):
+    """Persisted detector-level coverage confidence metadata."""
+
+    detector: str
+    status: CoverageStatus
+    confidence: float
+    summary: str
+    impact: str
+    remediation: str
+    tool: str
+    reason: str
+
+
+class ScanCoverageRecord(TypedDict, total=False):
+    """Persisted scan-level coverage snapshot for one language run."""
+
+    status: CoverageStatus
+    confidence: float
+    detectors: dict[str, DetectorCoverageRecord]
+    warnings: list[DetectorCoverageRecord]
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class DetectorCoverageStatus:
+    """Coverage-confidence metadata for a detector in the current scan."""
+
+    detector: str
+    status: CoverageStatus
+    confidence: float = 1.0
+    summary: str = ""
+    impact: str = ""
+    remediation: str = ""
+    tool: str = ""
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class LangSecurityResult:
+    """Normalized return shape for language-specific security hooks."""
+
+    entries: list[dict]
+    files_scanned: int
+    coverage: DetectorCoverageStatus | None = None
 
 
 @dataclass
@@ -279,15 +327,31 @@ class LangConfig:
         """Language-specific security checks. Override in subclasses."""
         return [], 0
 
+    def detect_lang_security_detailed(
+        self,
+        files: list[str],
+        zone_map: FileZoneMap | None,
+    ) -> LangSecurityResult:
+        """Language-specific security checks with optional coverage metadata."""
+        entries, files_scanned = self.detect_lang_security(files, zone_map)
+        return LangSecurityResult(entries=entries, files_scanned=files_scanned)
+
     def detect_private_imports(
         self, graph: dict, zone_map: FileZoneMap | None
     ) -> tuple[list[dict], int]:
         """Language-specific private-import detection. Override in subclasses."""
         return [], 0
 
+    def scan_coverage_prerequisites(self) -> list[DetectorCoverageStatus]:
+        """Optional preflight checks that can reduce scan confidence."""
+        return []
+
 
 __all__ = [
     "BoundaryRule",
+    "DetectorCoverageRecord",
+    "CoverageStatus",
+    "DetectorCoverageStatus",
     "DepGraphBuilder",
     "DetectorPhase",
     "FileFinder",
@@ -295,5 +359,7 @@ __all__ = [
     "FixResult",
     "FunctionExtractor",
     "LangConfig",
+    "ScanCoverageRecord",
+    "LangSecurityResult",
     "LangValueSpec",
 ]

@@ -9,7 +9,6 @@ from desloppify import state as state_mod
 from desloppify.app.commands.helpers.score import coerce_target_score
 from desloppify.intelligence import integrity as subjective_integrity_mod
 
-
 # ---------------------------------------------------------------------------
 # Common helpers (formerly scan_reporting_subjective_common)
 # ---------------------------------------------------------------------------
@@ -83,13 +82,20 @@ def subjective_rerun_command(
     max_items: int = 5,
     refresh: bool = True,
 ) -> str:
+    _ = refresh
     dim_keys = flatten_cli_keys(items, max_items=max_items)
-    if not dim_keys:
-        return "`desloppify review --prepare && desloppify scan`"
-
-    prepare_parts = ["desloppify", "review", "--prepare"]
-    prepare_parts.extend(["--dimensions", dim_keys])
-    return f"`{' '.join(prepare_parts)} && desloppify scan`"
+    command_parts = [
+        "desloppify",
+        "review",
+        "--run-batches",
+        "--runner",
+        "codex",
+        "--parallel",
+        "--scan-after-import",
+    ]
+    if dim_keys:
+        command_parts.extend(["--dimensions", dim_keys])
+    return f"`{' '.join(command_parts)}`"
 
 
 # ---------------------------------------------------------------------------
@@ -287,11 +293,9 @@ def build_subjective_followup(
         key=lambda entry: float(entry.get("strict", entry.get("score", 100.0))),
     )
     rendered = render_subjective_scores(low_assessed, max_items=max_quality_items)
-    dim_keys = flatten_cli_keys(low_assessed, max_items=max_quality_items)
-    command = (
-        f"`desloppify review --prepare --dimensions {dim_keys}`"
-        if dim_keys
-        else "`desloppify review --prepare`"
+    command = subjective_rerun_command(
+        low_assessed,
+        max_items=max_quality_items,
     )
     integrity_notice = subjective_integrity_followup(
         state,
@@ -392,13 +396,19 @@ def show_subjective_paths(
         print(colorize_fn(f"    High-priority integrity gap: {integrity_label}", "yellow"))
         print(
             colorize_fn(
-                "    Refresh baseline: `desloppify review --prepare`",
+                "    Refresh baseline (Codex local): `desloppify review --run-batches --runner codex --parallel --scan-after-import`",
                 "dim",
             )
         )
         print(
             colorize_fn(
-                "    Then import and rescan: `desloppify review --import findings.json && desloppify scan`",
+                "    Claude cloud durable path: `desloppify review --external-start --external-runner claude`, then run the printed `--external-submit ... --scan-after-import` command",
+                "dim",
+            )
+        )
+        print(
+            colorize_fn(
+                "    Findings-only fallback: `desloppify review --prepare`, then `desloppify review --import findings.json && desloppify scan`",
                 "dim",
             )
         )

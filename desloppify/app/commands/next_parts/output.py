@@ -1,0 +1,116 @@
+"""Output helpers for the `next` command."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+
+def serialize_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a serializable output dict from a queue item."""
+    serialized: dict[str, Any] = {
+        "id": item.get("id"),
+        "kind": item.get("kind", "finding"),
+        "tier": item.get("tier"),
+        "effective_tier": item.get("effective_tier", item.get("tier")),
+        "confidence": item.get("confidence"),
+        "detector": item.get("detector"),
+        "file": item.get("file"),
+        "summary": item.get("summary"),
+        "detail": item.get("detail", {}),
+        "status": item.get("status"),
+        "primary_command": item.get("primary_command"),
+    }
+    explain = item.get("explain")
+    if explain is not None:
+        serialized["explain"] = explain
+    return serialized
+
+
+def build_query_payload(
+    queue: Mapping[str, Any],
+    items: Sequence[Mapping[str, Any]],
+    *,
+    command: str,
+    narrative: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build JSON payload for query.json and non-terminal output modes."""
+    serialized = [serialize_item(item) for item in items]
+    return {
+        "command": command,
+        "items": serialized,
+        "queue": {
+            "tier_counts": queue.get("tier_counts", {}),
+            "requested_tier": queue.get("requested_tier"),
+            "selected_tier": queue.get("selected_tier"),
+            "fallback_reason": queue.get("fallback_reason"),
+            "available_tiers": queue.get("available_tiers", []),
+            "total": queue.get("total", len(items)),
+        },
+        "narrative": narrative,
+    }
+
+
+def render_markdown(items: Sequence[Mapping[str, Any]]) -> str:
+    """Render queue items as markdown."""
+    lines = [
+        "# Desloppify Next Queue",
+        "",
+        "| Kind | Tier | Confidence | Summary | Command |",
+        "|------|------|------------|---------|---------|",
+    ]
+    for item in items:
+        kind = item.get("kind", "finding")
+        tier = int(item.get("effective_tier", item.get("tier", 3)))
+        conf = item.get("confidence", "medium")
+        summary = item.get("summary", "").replace("|", "\\|")
+        command = (item.get("primary_command", "") or "").replace("|", "\\|")
+        lines.append(f"| {kind} | T{tier} | {conf} | {summary} | {command} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_output_file(
+    output_file: str,
+    payload: dict[str, Any],
+    item_count: int,
+    *,
+    safe_write_text_fn,
+    colorize_fn,
+) -> bool:
+    """Persist payload to file and print success/failure hints."""
+    try:
+        safe_write_text_fn(output_file, json.dumps(payload, indent=2) + "\n")
+        print(colorize_fn(f"Wrote {item_count} items to {output_file}", "green"))
+    except OSError as exc:
+        payload["output_error"] = str(exc)
+        print(colorize_fn(f"Could not write to {output_file}: {exc}", "red"))
+        return False
+    return True
+
+
+def emit_non_terminal_output(
+    output_format: str,
+    payload: dict[str, Any],
+    items: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Render JSON/markdown output variants."""
+    renderers = {
+        "json": lambda: print(json.dumps(payload, indent=2)),
+        "md": lambda: print(render_markdown(items)),
+    }
+    renderer = renderers.get(output_format)
+    if renderer is None:
+        return False
+    renderer()
+    return True
+
+
+__all__ = [
+    "build_query_payload",
+    "emit_non_terminal_output",
+    "render_markdown",
+    "serialize_item",
+    "write_output_file",
+]

@@ -25,7 +25,7 @@ def _build_handlers() -> dict[str, CommandHandler]:
     from desloppify.app.commands.review.entrypoint import cmd_review
     from desloppify.app.commands.scan.scan import cmd_scan
     from desloppify.app.commands.show.cmd import cmd_show
-    from desloppify.app.commands.status import cmd_status
+    from desloppify.app.commands.status_cmd import cmd_status
     from desloppify.app.commands.update_skill import cmd_update_skill
     from desloppify.app.commands.viz_cmd import cmd_tree, cmd_viz
     from desloppify.app.commands.zone_cmd import cmd_zone

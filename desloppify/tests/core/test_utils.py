@@ -8,11 +8,12 @@ import pytest
 import desloppify.core._internal.text_utils as utils_text_mod
 import desloppify.file_discovery as file_discovery_mod
 import desloppify.utils as utils_mod
-from desloppify.file_discovery import rel, resolve_path
 from desloppify.file_discovery import (
     find_source_files,
     get_exclusions,
     matches_exclusion,
+    rel,
+    resolve_path,
     set_exclusions,
 )
 from desloppify.utils import (

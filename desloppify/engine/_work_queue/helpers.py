@@ -19,6 +19,12 @@ ATTEST_EXAMPLE = (
 )
 
 
+def detail_dict(item: dict) -> dict:
+    """Return finding detail as a dict; tolerate legacy/non-dict payloads."""
+    detail = item.get("detail")
+    return detail if isinstance(detail, dict) else {}
+
+
 def status_matches(item_status: str, status_filter: str) -> bool:
     return status_filter == "all" or item_status == status_filter
 
@@ -45,7 +51,7 @@ def review_finding_weight(item: dict) -> float:
         "low": 0.3,
     }
     weight = weight_by_confidence.get(confidence, 0.3)
-    if item.get("detail", {}).get("holistic"):
+    if detail_dict(item).get("holistic"):
         weight *= 10.0
     return float(weight)
 
@@ -59,7 +65,7 @@ def scope_matches(item: dict, scope: str | None) -> bool:
     detector = item.get("detector", "")
     filepath = item.get("file", "")
     summary = item.get("summary", "")
-    dimension = item.get("detail", {}).get("dimension_name", "")
+    dimension = detail_dict(item).get("dimension_name", "")
     kind = item.get("kind", "")
 
     if "*" in scope:
@@ -216,7 +222,7 @@ def build_subjective_items(
     for finding in findings.values():
         if finding.get("status") != "open" or finding.get("detector") != "review":
             continue
-        dim_key = str(finding.get("detail", {}).get("dimension", "")).strip().lower()
+        dim_key = str(detail_dict(finding).get("dimension", "")).strip().lower()
         if not dim_key:
             continue
         review_open_by_dim[dim_key] = review_open_by_dim.get(dim_key, 0) + 1
@@ -285,6 +291,7 @@ __all__ = [
     "ALL_STATUSES",
     "ATTEST_EXAMPLE",
     "build_subjective_items",
+    "detail_dict",
     "is_review_finding",
     "is_subjective_finding",
     "primary_command_for_finding",

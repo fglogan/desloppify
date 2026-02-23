@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.detectors.base import ComplexitySignal
 from desloppify.engine.detectors.complexity import detect_complexity
 from desloppify.engine.detectors.dupes import detect_duplicates
@@ -23,10 +24,20 @@ from desloppify.engine.detectors.review_coverage import (
 from desloppify.engine.detectors.security.detector import detect_security_issues
 from desloppify.engine.detectors.single_use import detect_single_use_abstractions
 from desloppify.engine.detectors.test_coverage.detector import detect_test_coverage
-from desloppify.engine.policy.zones import EXCLUDED_ZONES, adjust_potential, filter_entries
+from desloppify.engine.policy.zones import (
+    EXCLUDED_ZONES,
+    adjust_potential,
+    filter_entries,
+    should_skip_finding,
+)
+from desloppify.file_discovery import rel
 from desloppify.languages._framework.base.structural import (
     add_structural_signal,
     merge_structural_signals,
+)
+from desloppify.languages._framework.base.types import (
+    DetectorCoverageStatus,
+    LangSecurityResult,
 )
 from desloppify.languages._framework.finding_factories import (
     make_cycle_findings,
@@ -35,10 +46,7 @@ from desloppify.languages._framework.finding_factories import (
     make_single_use_findings,
 )
 from desloppify.languages._framework.runtime import LangRun
-from desloppify.state import Finding
-from desloppify.state import make_finding
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import rel
+from desloppify.state import Finding, make_finding
 from desloppify.utils import log
 
 
@@ -75,6 +83,7 @@ def phase_boilerplate_duplication(
     entries = detect_with_jscpd(path)
     if entries is None:
         return [], {}
+    entries = _filter_boilerplate_entries_by_zone(entries, lang.zone_map)
 
     findings: list[Finding] = []
     for entry in entries:
@@ -109,6 +118,49 @@ def phase_boilerplate_duplication(
         log(f"         boilerplate duplication: {len(findings)} clusters")
     distinct_files = len({loc["file"] for e in entries for loc in e["locations"]})
     return findings, {"boilerplate_duplication": distinct_files}
+
+
+def _filter_boilerplate_entries_by_zone(entries: list[dict], zone_map) -> list[dict]:
+    """Keep only in-scope, zone-allowed boilerplate clusters.
+
+    jscpd can return files that are outside language discovery (artifacts/docs).
+    Restricting to known zone-map files prevents unknown paths from being treated
+    as production findings.
+    """
+    if zone_map is None:
+        return entries
+
+    known_files = set(zone_map.all_files())
+    filtered: list[dict] = []
+    skipped = 0
+    for entry in entries:
+        locations = entry.get("locations", [])
+        kept_locations = [
+            loc
+            for loc in locations
+            if loc.get("file") in known_files
+            and not should_skip_finding(
+                zone_map,
+                loc.get("file", ""),
+                "boilerplate_duplication",
+            )
+        ]
+        distinct_files = {loc["file"] for loc in kept_locations}
+        if len(distinct_files) < 2:
+            skipped += 1
+            continue
+
+        normalized = dict(entry)
+        normalized["locations"] = sorted(
+            kept_locations,
+            key=lambda item: (item.get("file", ""), item.get("line", 0)),
+        )
+        normalized["distinct_files"] = len(distinct_files)
+        filtered.append(normalized)
+
+    if skipped:
+        log(f"         zones: {skipped} boilerplate clusters excluded")
+    return filtered
 
 
 def find_external_test_files(path: Path, lang: LangRun) -> set[str]:
@@ -166,6 +218,70 @@ def _log_phase_summary(label: str, results: list[Finding], potential: int, unit:
         log(f"         {label}: clean ({potential} {unit})")
 
 
+def _coerce_coverage_confidence(value: object, *, default: float = 1.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, parsed))
+
+
+def _coverage_to_dict(coverage: DetectorCoverageStatus) -> dict[str, object]:
+    return {
+        "detector": coverage.detector,
+        "status": coverage.status,
+        "confidence": round(_coerce_coverage_confidence(coverage.confidence), 2),
+        "summary": coverage.summary,
+        "impact": coverage.impact,
+        "remediation": coverage.remediation,
+        "tool": coverage.tool,
+        "reason": coverage.reason,
+    }
+
+
+def _merge_detector_coverage(
+    existing: dict[str, object],
+    incoming: dict[str, object],
+) -> dict[str, object]:
+    merged = dict(existing)
+    merged["status"] = (
+        "reduced"
+        if str(existing.get("status", "full")) == "reduced"
+        or str(incoming.get("status", "full")) == "reduced"
+        else "full"
+    )
+    merged["confidence"] = round(
+        min(
+            _coerce_coverage_confidence(existing.get("confidence")),
+            _coerce_coverage_confidence(incoming.get("confidence")),
+        ),
+        2,
+    )
+
+    for key in ("summary", "impact", "remediation", "tool", "reason"):
+        current = str(merged.get(key, "") or "").strip()
+        update = str(incoming.get(key, "") or "").strip()
+        if update and not current:
+            merged[key] = update
+        elif update and current and update not in current:
+            merged[key] = f"{current} | {update}"
+    return merged
+
+
+def _record_detector_coverage(lang: LangRun, coverage: DetectorCoverageStatus | None) -> None:
+    if coverage is None:
+        return
+    normalized = _coverage_to_dict(coverage)
+    detector = str(normalized.get("detector", "")).strip()
+    if not detector:
+        return
+    existing = lang.detector_coverage.get(detector)
+    if isinstance(existing, dict):
+        lang.detector_coverage[detector] = _merge_detector_coverage(existing, normalized)
+    else:
+        lang.detector_coverage[detector] = normalized
+
+
 def phase_security(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect security issues (cross-language + lang-specific)."""
     zone_map = lang.zone_map
@@ -173,7 +289,13 @@ def phase_security(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
     entries, potential = detect_security_issues(files, zone_map, lang.name)
 
     # Also call lang-specific security detectors.
-    lang_entries, _ = lang.detect_lang_security(files, zone_map)
+    lang_result = lang.detect_lang_security_detailed(files, zone_map)
+    if isinstance(lang_result, LangSecurityResult):
+        lang_entries = lang_result.entries
+        _record_detector_coverage(lang, lang_result.coverage)
+    else:
+        # Backwards compatibility for legacy plugins returning tuple[list[dict], int].
+        lang_entries, _ = lang_result
     entries.extend(lang_entries)
 
     entries = filter_entries(zone_map, entries, "security")
@@ -185,6 +307,18 @@ def phase_security(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
         zone_map=zone_map,
     )
     _log_phase_summary("security", results, potential, "files scanned")
+
+    if "security" not in lang.detector_coverage:
+        lang.detector_coverage["security"] = {
+            "detector": "security",
+            "status": "full",
+            "confidence": 1.0,
+            "summary": "Security coverage complete for enabled detectors.",
+            "impact": "",
+            "remediation": "",
+            "tool": "",
+            "reason": "",
+        }
 
     return results, {"security": potential}
 

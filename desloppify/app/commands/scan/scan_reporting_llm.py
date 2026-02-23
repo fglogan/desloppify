@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-from textwrap import dedent
 
 from desloppify import scoring as scoring_mod
 from desloppify import state as state_mod
 from desloppify import utils as utils_mod
+from desloppify.app.commands.scan.scan_reporting_text import build_workflow_guide
 from desloppify.app.output.scorecard_parts import projection as scorecard_projection_mod
 from desloppify.core import registry as registry_mod
-from desloppify.engine.work_queue import ATTEST_EXAMPLE
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.engine.work_queue import ATTEST_EXAMPLE
+
+logger = logging.getLogger(__name__)
 
 
 def _is_agent_environment() -> bool:
@@ -144,34 +147,7 @@ def _print_stats_summary(
     print()
 
 
-_WORKFLOW_GUIDE = dedent(
-    f"""
-    ## Workflow Guide
-
-    1. **Review findings first** (if any): `desloppify issues` — high-value subjective findings
-    2. **Run auto-fixers** (if available): `desloppify fix <fixer> --dry-run` to preview, then apply
-    3. **Manual fixes**: `desloppify next` — highest-priority item. Fix it, then:
-       `desloppify resolve fixed "<id>" --note "<what you did>" --attest "{ATTEST_EXAMPLE}"`
-       Required attestation keywords: 'I have actually' and 'not gaming'.
-    4. **Rescan**: `desloppify scan --path <path>` — verify improvements, catch cascading effects
-    5. **Reset subjective baseline when needed**:
-       `desloppify scan --path <path> --reset-subjective` (then run a fresh review/import cycle)
-    6. **Check progress**: `desloppify status` — dimension scores dashboard
-
-    ### Decision Guide
-    - **Tackle**: T1/T2 (high impact), auto-fixable, security findings
-    - **Consider skipping**: T4 low-confidence, test/config zone findings (lower impact)
-    - **Wontfix**: Intentional patterns, false positives →
-      `desloppify resolve wontfix "<id>" --note "<why>" --attest "{ATTEST_EXAMPLE}"`
-    - **Batch wontfix**: Multiple intentional patterns →
-      `desloppify resolve wontfix "<detector>::*::<category>" --note "<why>" --attest "{ATTEST_EXAMPLE}"`
-
-    ### Understanding Dimensions
-    - **Mechanical** (File health, Code quality, etc.): Fix code → rescan
-    - **Subjective** (Naming Quality, Logic Clarity, etc.): Address review findings → re-review
-    - **Health vs Strict**: Health ignores wontfix; Strict penalizes it. Focus on Strict.
-    """
-).strip()
+_WORKFLOW_GUIDE = build_workflow_guide(ATTEST_EXAMPLE)
 
 
 def _print_workflow_guide() -> None:
@@ -235,8 +211,8 @@ def _try_auto_update_skill() -> None:
 
         if interface:
             update_installed_skill(interface)
-    except Exception:  # noqa: BLE001
-        pass
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.debug("Skill auto-update skipped: %s", exc, exc_info=True)
 
 
 def _print_badge_hint(badge_path: Path | None) -> None:

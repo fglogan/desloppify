@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from desloppify.core.registry import _DISPLAY_ORDER, DETECTORS
@@ -13,11 +13,12 @@ from desloppify.engine.detectors.review_coverage import (
     detect_holistic_review_staleness,
     detect_review_coverage,
 )
-from desloppify.state import find_suspect_detectors
-from desloppify.state import empty_state
+from desloppify.file_discovery import rel
+from desloppify.intelligence.review import (
+    DIMENSION_PROMPTS,
+)
 from desloppify.intelligence.review import (
     DIMENSIONS as REVIEW_DIMENSIONS,
-    DIMENSION_PROMPTS,
 )
 from desloppify.intelligence.review import (
     import_review_findings as _import_review_findings_impl,
@@ -26,7 +27,7 @@ from desloppify.languages._framework.runtime import make_lang_run
 from desloppify.languages.python import PythonConfig
 from desloppify.languages.typescript import TypeScriptConfig
 from desloppify.scoring import DIMENSIONS, FILE_BASED_DETECTORS
-from desloppify.file_discovery import rel
+from desloppify.state import empty_state, find_suspect_detectors
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -162,7 +163,7 @@ class TestReviewCoverageFreshCache:
         f = _make_file(str(tmp_path), "module.py")
         rpath = os.path.basename(f)  # relative path key
         content_hash = _hash_content(f)
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             rpath: {
                 "content_hash": content_hash,
@@ -184,7 +185,7 @@ class TestReviewCoverageStaleCache:
     def test_changed_file(self, tmp_path):
         f = _make_file(str(tmp_path), "module.py")
         rpath = os.path.basename(f)
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             rpath: {
                 "content_hash": "old_hash_doesnt_match",
@@ -205,7 +206,7 @@ class TestReviewCoverageStaleCache:
         f = _make_file(str(tmp_path), "module.py")
         rpath = os.path.basename(f)
         content_hash = _hash_content(f)
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat(
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat(
             timespec="seconds"
         )
         cache = {
@@ -484,7 +485,7 @@ class TestHolisticStalenessInCoverage:
         assert entries[0]["tier"] == 4
 
     def test_fresh_holistic_emits_nothing(self):
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             "holistic": {
                 "reviewed_at": now,
@@ -496,7 +497,7 @@ class TestHolisticStalenessInCoverage:
         assert len(entries) == 0
 
     def test_stale_holistic_emits_stale(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat(
+        old = (datetime.now(UTC) - timedelta(days=60)).isoformat(
             timespec="seconds"
         )
         cache = {
@@ -511,7 +512,7 @@ class TestHolisticStalenessInCoverage:
         assert entries[0]["name"] == "holistic_stale"
 
     def test_drifted_file_count_emits_stale(self):
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         cache = {
             "holistic": {
                 "reviewed_at": now,
@@ -542,7 +543,7 @@ class TestReviewNeverExpires:
 
             # rel_path key must match what rel() returns for this filepath
             rpath = rel(fp)
-            old_date = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat(
+            old_date = (datetime.now(UTC) - timedelta(days=90)).isoformat(
                 timespec="seconds"
             )
             cache = {rpath: {"content_hash": content_hash, "reviewed_at": old_date}}
@@ -556,7 +557,7 @@ class TestReviewNeverExpires:
             assert len(stale) == 0
 
     def test_holistic_never_expires_with_zero(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat(
+        old = (datetime.now(UTC) - timedelta(days=365)).isoformat(
             timespec="seconds"
         )
         cache = {

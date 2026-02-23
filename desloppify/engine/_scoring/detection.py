@@ -14,7 +14,6 @@ from desloppify.engine._scoring.policy.core import (
 )
 from desloppify.engine._state.schema import Finding
 
-
 # Tiered file-count cap thresholds for non-LOC file-based detectors.
 # Controls how many findings per file contribute to the weighted failure sum.
 _FILE_CAP_HIGH_THRESHOLD = 6     # findings in file for high cap

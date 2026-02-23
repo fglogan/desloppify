@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from desloppify.app.commands.review.batch_scoring import (
+    DimensionMergeScorer,
+    ScoreInputs,
+)
 from desloppify.app.commands.review import batch_core as batch_core_mod
 
 _ABSTRACTION_SUB_AXES = (
@@ -95,3 +99,45 @@ def test_batch_prompt_requires_score_and_finding_consistency():
         },
     )
     assert "Score/finding consistency is required" in prompt
+
+
+def test_dimension_merge_scorer_penalizes_higher_pressure():
+    scorer = DimensionMergeScorer()
+    low = scorer.score_dimension(
+        ScoreInputs(
+            weighted_mean=92.0,
+            floor=90.0,
+            finding_pressure=1.0,
+            finding_count=1,
+        )
+    )
+    high = scorer.score_dimension(
+        ScoreInputs(
+            weighted_mean=92.0,
+            floor=90.0,
+            finding_pressure=4.08,
+            finding_count=1,
+        )
+    )
+    assert low.final_score > high.final_score
+
+
+def test_dimension_merge_scorer_penalizes_additional_findings():
+    scorer = DimensionMergeScorer()
+    one_finding = scorer.score_dimension(
+        ScoreInputs(
+            weighted_mean=92.0,
+            floor=90.0,
+            finding_pressure=2.0,
+            finding_count=1,
+        )
+    )
+    three_findings = scorer.score_dimension(
+        ScoreInputs(
+            weighted_mean=92.0,
+            floor=90.0,
+            finding_pressure=2.0,
+            finding_count=3,
+        )
+    )
+    assert one_finding.final_score > three_findings.final_score

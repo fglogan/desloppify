@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
-
-import pytest
 
 from desloppify.app.commands.helpers.rendering import (
     print_agent_plan,
@@ -14,7 +11,6 @@ from desloppify.app.commands.helpers.rendering import (
 )
 from desloppify.app.commands.helpers.state import require_completed_scan, state_path
 from desloppify.app.commands.helpers.subjective import print_subjective_followup
-
 
 # ── rendering.py: print_agent_plan ────────────────────────────────────
 

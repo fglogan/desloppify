@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
 from functools import partial
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import get_area
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
+from desloppify.file_discovery import find_py_files
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
 from desloppify.languages._framework.base.phase_builders import (
@@ -16,29 +18,34 @@ from desloppify.languages._framework.base.phase_builders import (
     shared_subjective_duplicates_tail,
 )
 from desloppify.languages._framework.base.shared_phases import phase_private_imports
-from desloppify.languages._framework.base.types import DetectorPhase, LangConfig
+from desloppify.languages._framework.base.types import (
+    DetectorCoverageStatus,
+    DetectorPhase,
+    LangConfig,
+    LangSecurityResult,
+)
 from desloppify.languages.python import test_coverage as py_test_coverage_hooks
 from desloppify.languages.python.commands import get_detect_commands
+from desloppify.languages.python.detectors.bandit_adapter import detect_with_bandit
 from desloppify.languages.python.detectors.deps import build_dep_graph
 from desloppify.languages.python.detectors.private_imports import (
     detect_private_imports as detect_python_private_imports,
 )
-from desloppify.languages.python.detectors.bandit_adapter import detect_with_bandit
 from desloppify.languages.python.extractors import extract_py_functions
 from desloppify.languages.python.phases import (
     PY_COMPLEXITY_SIGNALS as PY_COMPLEXITY_SIGNALS,
 )
 from desloppify.languages.python.phases import (
     PY_ENTRY_PATTERNS,
-    _phase_coupling,
-    _phase_dict_keys,
-    _phase_layer_violation,
-    _phase_mutable_state,
-    _phase_responsibility_cohesion,
-    _phase_smells,
-    _phase_structural,
-    _phase_uncalled_functions,
-    _phase_unused,
+    phase_coupling,
+    phase_dict_keys,
+    phase_layer_violation,
+    phase_mutable_state,
+    phase_responsibility_cohesion,
+    phase_smells,
+    phase_structural,
+    phase_uncalled_functions,
+    phase_unused,
 )
 from desloppify.languages.python.phases import (
     PY_GOD_RULES as PY_GOD_RULES,
@@ -61,7 +68,6 @@ from desloppify.languages.python.review import api_surface as py_review_api_surf
 from desloppify.languages.python.review import (
     module_patterns as py_review_module_patterns,
 )
-from desloppify.file_discovery import find_py_files
 
 # ── Zone classification rules (order matters — first match wins) ──
 
@@ -115,11 +121,42 @@ def _scan_root_from_files(files: list[str]) -> Path | None:
 
 @register_lang("python")
 class PythonConfig(LangConfig):
-    def detect_lang_security(self, files, zone_map):
+    def _missing_bandit_coverage(self) -> DetectorCoverageStatus:
+        return DetectorCoverageStatus(
+            detector="security",
+            status="reduced",
+            confidence=0.6,
+            summary="bandit is not installed — Python-specific security checks will be skipped.",
+            impact=(
+                "Python-specific security coverage is reduced; clean security output may "
+                "miss shell injection, unsafe deserialization, and risky SQL/subprocess patterns."
+            ),
+            remediation="Install Bandit: pip install bandit",
+            tool="bandit",
+            reason="missing_dependency",
+        )
+
+    def scan_coverage_prerequisites(self) -> list[DetectorCoverageStatus]:
+        if shutil.which("bandit") is not None:
+            return []
+        return [self._missing_bandit_coverage()]
+
+    def detect_lang_security_detailed(self, files, zone_map) -> LangSecurityResult:
         scan_root = _scan_root_from_files(files)
         if scan_root is None:
-            return [], 0
-        return detect_with_bandit(scan_root, zone_map) or ([], 0)
+            return LangSecurityResult(entries=[], files_scanned=0)
+
+        result = detect_with_bandit(scan_root, zone_map)
+        coverage = result.status.coverage()
+        return LangSecurityResult(
+            entries=result.entries,
+            files_scanned=result.files_scanned,
+            coverage=coverage,
+        )
+
+    def detect_lang_security(self, files, zone_map):
+        detailed = self.detect_lang_security_detailed(files, zone_map)
+        return detailed.entries, detailed.files_scanned
 
     def detect_private_imports(self, graph, zone_map):
         return detect_python_private_imports(graph, zone_map)
@@ -134,18 +171,18 @@ class PythonConfig(LangConfig):
             entry_patterns=PY_ENTRY_PATTERNS,
             barrel_names={"__init__.py"},
             phases=[
-                DetectorPhase("Unused (ruff)", _phase_unused),
-                DetectorPhase("Structural analysis", _phase_structural),
-                DetectorPhase("Responsibility cohesion", _phase_responsibility_cohesion),
-                DetectorPhase("Coupling + cycles + orphaned", _phase_coupling),
-                DetectorPhase("Uncalled functions", _phase_uncalled_functions),
+                DetectorPhase("Unused (ruff)", phase_unused),
+                DetectorPhase("Structural analysis", phase_structural),
+                DetectorPhase("Responsibility cohesion", phase_responsibility_cohesion),
+                DetectorPhase("Coupling + cycles + orphaned", phase_coupling),
+                DetectorPhase("Uncalled functions", phase_uncalled_functions),
                 detector_phase_test_coverage(),
-                DetectorPhase("Code smells", _phase_smells),
-                DetectorPhase("Mutable state", _phase_mutable_state),
+                DetectorPhase("Code smells", phase_smells),
+                DetectorPhase("Mutable state", phase_mutable_state),
                 detector_phase_security(),
                 DetectorPhase("Private imports", phase_private_imports),
-                DetectorPhase("Layer violations", _phase_layer_violation),
-                DetectorPhase("Dict key flow", _phase_dict_keys),
+                DetectorPhase("Layer violations", phase_layer_violation),
+                DetectorPhase("Dict key flow", phase_dict_keys),
                 *shared_subjective_duplicates_tail(),
             ],
             fixers={},

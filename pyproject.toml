@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
-dependencies = ["Pillow>=9.0.0"]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/peteromallet/desloppify"
@@ -36,9 +36,11 @@ Issues = "https://github.com/peteromallet/desloppify/issues"
 [project.optional-dependencies]
 treesitter = ["tree-sitter-language-pack>=0.3"]
 python-security = ["bandit>=1.7.8"]
+scorecard = ["Pillow>=9.0.0"]
 full = [
   "tree-sitter-language-pack>=0.3",
   "bandit>=1.7.8",
+  "Pillow>=9.0.0",
 ]
 
 [project.scripts]

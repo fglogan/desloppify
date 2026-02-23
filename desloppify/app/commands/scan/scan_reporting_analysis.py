@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from desloppify import state as state_mod
 from desloppify.app.commands.helpers.rendering import print_ranked_actions
-from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import integrity as subjective_integrity_mod
+from desloppify.intelligence import narrative as narrative_mod
 from desloppify.utils import colorize
 
 
@@ -128,7 +128,8 @@ def _show_subjective_score_nudge(state: dict) -> None:
     print(colorize(f"  Subjective scores below 90: {dim_preview}", "yellow"))
     print(
         colorize(
-            f"  You can {verb} the subjective scoring with `desloppify review --prepare`.",
+            f"  You can {verb} the subjective scoring with "
+            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`.",
             "cyan",
         )
     )
@@ -139,6 +140,54 @@ def _show_subjective_score_nudge(state: dict) -> None:
         )
     )
     print()
+
+
+def _coerce_coverage_confidence(value: object, *, default: float = 1.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, parsed))
+
+
+def _current_scan_coverage(state: dict, lang) -> dict:
+    scan_coverage = state.get("scan_coverage", {})
+    if not isinstance(scan_coverage, dict):
+        return {}
+    lang_name = getattr(lang, "name", None) if lang is not None else None
+    if isinstance(lang_name, str) and lang_name:
+        entry = scan_coverage.get(lang_name, {})
+        return entry if isinstance(entry, dict) else {}
+    return {}
+
+
+def _coverage_reduction_warnings(state: dict, lang) -> list[str]:
+    coverage = _current_scan_coverage(state, lang)
+    detectors = coverage.get("detectors", {})
+    if not isinstance(detectors, dict):
+        return []
+
+    warnings: list[str] = []
+    for detector, payload in detectors.items():
+        if not isinstance(payload, dict):
+            continue
+        status = str(payload.get("status", "full")).strip().lower()
+        confidence = _coerce_coverage_confidence(payload.get("confidence"), default=1.0)
+        if status != "reduced" and confidence >= 1.0:
+            continue
+
+        summary = str(payload.get("summary", "")).strip()
+        impact = str(payload.get("impact", "")).strip()
+        remediation = str(payload.get("remediation", "")).strip()
+        detector_label = str(detector).strip() or "detector"
+
+        line = f"Coverage reduced ({detector_label}): {summary or 'reduced detector confidence.'}"
+        if impact:
+            line += f" Repercussion: {impact}"
+        if remediation:
+            line += f" Fix: {remediation}"
+        warnings.append(line)
+    return warnings
 
 
 def show_post_scan_analysis(
@@ -166,6 +215,7 @@ def show_post_scan_analysis(
             "(reopened 2+ times). These keep bouncing — fix properly or wontfix. "
             "Run: `desloppify show --chronic` to see them."
         )
+    warnings.extend(_coverage_reduction_warnings(state, lang))
 
     if warnings:
         for warning in warnings:
@@ -246,7 +296,7 @@ def show_post_scan_analysis(
             print(
                 colorize(
                     f"  Subjective integrity: {holistic_open} holistic stale/missing signal(s) — "
-                    "`desloppify review --prepare`",
+                    "`desloppify review --run-batches --runner codex --parallel --scan-after-import`",
                     "yellow",
                 )
             )
@@ -275,7 +325,8 @@ def show_post_scan_analysis(
         print(
             colorize(
                 f"  {len(complex_unreviewed)} complex files have never been reviewed — "
-                "`desloppify review --prepare` would provide actionable refactoring guidance",
+                "`desloppify review --run-batches --runner codex --parallel --scan-after-import` "
+                "would provide actionable refactoring guidance",
                 "dim",
             )
         )
@@ -290,8 +341,13 @@ def show_score_integrity(state: dict, diff: dict):
     wontfix = stats.get("wontfix", 0)
     ignored = diff.get("ignored", 0)
     ignore_patterns = diff.get("ignore_patterns", 0)
+    score_confidence = state.get("score_confidence", {})
+    confidence_reduced = (
+        isinstance(score_confidence, dict)
+        and str(score_confidence.get("status", "full")).lower() == "reduced"
+    )
 
-    if wontfix <= 5 and ignored <= 0 and ignore_patterns <= 0:
+    if wontfix <= 5 and ignored <= 0 and ignore_patterns <= 0 and not confidence_reduced:
         return
 
     overall = state_mod.get_overall_score(state)
@@ -375,6 +431,36 @@ def show_score_integrity(state: dict, diff: dict):
                 "dim",
             )
         )
+
+    if confidence_reduced:
+        impacted_dimensions = score_confidence.get("dimensions", [])
+        detectors = score_confidence.get("detectors", [])
+        confidence = _coerce_coverage_confidence(
+            score_confidence.get("confidence"),
+            default=1.0,
+        )
+        dim_text = ""
+        if isinstance(impacted_dimensions, list) and impacted_dimensions:
+            preview = ", ".join(str(item) for item in impacted_dimensions[:3])
+            if len(impacted_dimensions) > 3:
+                preview += f", +{len(impacted_dimensions) - 3} more"
+            dim_text = f" (dimensions: {preview})"
+        print(
+            colorize(
+                f"  ⚠ Score confidence reduced to {confidence * 100:.0f}%{dim_text}",
+                "yellow",
+            )
+        )
+        if isinstance(detectors, list):
+            for detector in detectors[:3]:
+                if not isinstance(detector, dict):
+                    continue
+                summary = str(detector.get("summary", "")).strip()
+                remediation = str(detector.get("remediation", "")).strip()
+                if summary:
+                    print(colorize(f"    - {summary}", "dim"))
+                if remediation:
+                    print(colorize(f"      Fix: {remediation}", "dim"))
 
     print(colorize("  " + "┄" * 55, "dim"))
     print()

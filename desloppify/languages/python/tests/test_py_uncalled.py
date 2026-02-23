@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from desloppify.languages.python.detectors.uncalled import detect_uncalled_functions
 from desloppify.languages.python.detectors.deps import build_dep_graph
+from desloppify.languages.python.detectors.uncalled import detect_uncalled_functions
 
 
 def _graph_entry(*, imports: set[str] | None = None) -> dict:

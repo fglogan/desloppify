@@ -8,13 +8,9 @@ import pytest
 from desloppify.engine._state import filtering as state_query_mod
 from desloppify.state import (
     MergeScanOptions,
+    apply_finding_noise_budget,
     empty_state,
     ensure_state_defaults,
-    upsert_findings,
-    validate_state_invariants,
-)
-from desloppify.state import (
-    apply_finding_noise_budget,
     load_state,
     make_finding,
     resolve_finding_noise_budget,
@@ -22,6 +18,8 @@ from desloppify.state import (
     resolve_finding_noise_settings,
     save_state,
     suppression_metrics,
+    upsert_findings,
+    validate_state_invariants,
 )
 from desloppify.state import (
     merge_scan as _merge_scan,

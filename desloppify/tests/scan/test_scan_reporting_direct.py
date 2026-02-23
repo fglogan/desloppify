@@ -216,7 +216,51 @@ def test_show_post_scan_analysis_flags_holistic_subjective_integrity(
     )
     out = capsys.readouterr().out
     assert "Subjective integrity:" in out
-    assert "review --prepare" in out
+    assert "review --run-batches --runner codex --parallel --scan-after-import" in out
+
+
+def test_show_post_scan_analysis_warns_when_scan_coverage_reduced(monkeypatch, capsys):
+    import desloppify.intelligence.narrative as narrative_mod
+    import desloppify.state as state_mod
+
+    monkeypatch.setattr(
+        narrative_mod,
+        "compute_narrative",
+        lambda *_args, **_kwargs: {"headline": None, "strategy": {}, "actions": []},
+    )
+    monkeypatch.setattr(
+        state_mod,
+        "path_scoped_findings",
+        lambda *_args, **_kwargs: {},
+    )
+
+    warnings, _ = scan_reporting_analysis_mod.show_post_scan_analysis(
+        diff={"new": 0, "auto_resolved": 0, "reopened": 0, "chronic_reopeners": []},
+        state={
+            "findings": {},
+            "scan_path": ".",
+            "scan_coverage": {
+                "python": {
+                    "detectors": {
+                        "security": {
+                            "status": "reduced",
+                            "confidence": 0.6,
+                            "summary": "bandit missing",
+                            "impact": "Python-specific security checks were skipped.",
+                            "remediation": "Install Bandit: pip install bandit",
+                        }
+                    }
+                }
+            },
+        },
+        lang=SimpleNamespace(name="python"),
+    )
+
+    out = capsys.readouterr().out
+    assert any("Coverage reduced (security)" in warning for warning in warnings)
+    assert "Coverage reduced (security)" in out
+    assert "Repercussion:" in out
+    assert "Install Bandit" in out
 
 
 def test_show_score_integrity_surfaces_wontfix_and_ignored(monkeypatch, capsys):
@@ -247,6 +291,36 @@ def test_show_score_integrity_surfaces_wontfix_and_ignored(monkeypatch, capsys):
     assert "Biggest gaps:" in out
     assert "suppressed 120 findings" in out
     assert "still count against strict and verified scores" in out
+
+
+def test_show_score_integrity_surfaces_reduced_score_confidence(capsys):
+    scan_reporting_analysis_mod.show_score_integrity(
+        state={
+            "stats": {
+                "open": 0,
+                "wontfix": 0,
+                "fixed": 0,
+                "auto_resolved": 0,
+                "false_positive": 0,
+            },
+            "score_confidence": {
+                "status": "reduced",
+                "confidence": 0.6,
+                "dimensions": ["Security"],
+                "detectors": [
+                    {
+                        "summary": "bandit is not installed",
+                        "remediation": "Install Bandit: pip install bandit",
+                    }
+                ],
+            },
+        },
+        diff={"ignored": 0, "ignore_patterns": 0},
+    )
+    out = capsys.readouterr().out
+    assert "Score Integrity" in out
+    assert "Score confidence reduced to 60%" in out
+    assert "bandit is not installed" in out
 
 
 def test_print_llm_summary_respects_env_and_includes_dimension_table(
@@ -387,7 +461,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
     hint_out = capsys.readouterr().out
     assert "Needs attention:" in hint_out
     assert "run `desloppify show structural`" in hint_out
-    assert "run `desloppify review --prepare`" in hint_out
+    assert "run `desloppify review --run-batches --runner codex --parallel --scan-after-import`" in hint_out
 
     monkeypatch.setattr(
         state_mod,
@@ -455,7 +529,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
     assert "North star: strict 90.0/100 → target 95.0 (+5.0 needed)" in subjective_out
     assert "Quality below target (<95%)" in subjective_out
     assert (
-        "review --prepare --dimensions mid_level_elegance,high_level_elegance"
+        "review --run-batches --runner codex --parallel --scan-after-import --dimensions mid_level_elegance,high_level_elegance"
         in subjective_out
     )
     assert "Coverage debt: 2 files need review" in subjective_out
@@ -553,10 +627,10 @@ def test_subjective_rerun_command_builds_dimension_and_holistic_variants():
         max_items=5,
     )
     assert (
-        "review --prepare --dimensions naming_quality,logic_clarity"
+        "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality,logic_clarity"
         in command_dims
     )
-    assert command_dims.endswith("&& desloppify scan`")
+    assert command_dims.endswith("naming_quality,logic_clarity`")
 
     command_holistic = scan_reporting_dimensions_mod.subjective_rerun_command(
         [],
@@ -564,7 +638,7 @@ def test_subjective_rerun_command_builds_dimension_and_holistic_variants():
     )
     assert (
         command_holistic
-        == "`desloppify review --prepare && desloppify scan`"
+        == "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
     )
 
 
@@ -624,7 +698,7 @@ def test_show_subjective_paths_prioritizes_integrity_gap(monkeypatch, capsys):
     )
     out = capsys.readouterr().out
     assert "High-priority integrity gap:" in out
-    assert "review --prepare" in out
+    assert "review --run-batches --runner codex --parallel --scan-after-import" in out
     assert "Unassessed (0% placeholder): High Elegance" in out
 
 
@@ -664,4 +738,7 @@ def test_show_subjective_paths_shows_target_match_reset_warning(monkeypatch, cap
     out = capsys.readouterr().out
     assert "were reset to 0.0 this scan" in out
     assert "Anti-gaming safeguard applied" in out
-    assert "review --prepare --dimensions naming_quality,logic_clarity" in out
+    assert (
+        "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality,logic_clarity"
+        in out
+    )

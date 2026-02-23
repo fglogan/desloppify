@@ -10,7 +10,6 @@ from desloppify.intelligence.review.dimensions import (
     normalize_dimension_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # normalize_dimension_name
 # ---------------------------------------------------------------------------

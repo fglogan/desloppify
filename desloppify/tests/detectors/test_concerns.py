@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from desloppify.core.registry import JUDGMENT_DETECTORS
 from desloppify.engine.concerns import (
-    Concern,
-    cleanup_stale_dismissals,
-    generate_concerns,
     _build_evidence,
     _build_question,
     _build_summary,
@@ -19,8 +16,9 @@ from desloppify.engine.concerns import (
     _has_elevated_signals,
     _is_dismissed,
     _open_findings,
+    cleanup_stale_dismissals,
+    generate_concerns,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -495,7 +493,7 @@ class TestEdgeCases:
         ]
         concerns = generate_concerns(_state_with_findings(*findings))
         assert len(concerns) == 2
-        for a, b in zip(concerns, concerns[1:]):
+        for a, b in zip(concerns, concerns[1:], strict=False):
             assert (a.type, a.file) <= (b.type, b.file)
 
     def test_no_duplicate_fingerprints(self):

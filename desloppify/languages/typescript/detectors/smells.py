@@ -4,10 +4,13 @@ Defines TS-specific smell rules and multi-line smell helpers (brace-tracked).
 """
 
 import logging
+import json
 import re
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.fallbacks import log_best_effort_failure
+from desloppify.file_discovery import find_source_files, find_ts_files
 from desloppify.languages.typescript.detectors._smell_detectors import (
     _detect_catch_return_default,
     _detect_dead_functions,
@@ -23,8 +26,6 @@ from desloppify.languages.typescript.detectors._smell_helpers import (
     _ts_match_is_in_string,
     scan_code,
 )
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import find_ts_files
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ TS_SMELL_CHECKS = [
     {
         "id": "any_type",
         "label": "Explicit `any` types",
-        "pattern": r":\s*any\b",
+        "pattern": r":\s*any\b|<\s*any\b|,\s*any\b(?=\s*(?:,|>))",
         "severity": "medium",
     },
     {
@@ -180,6 +181,24 @@ TS_SMELL_CHECKS = [
         "id": "switch_no_default",
         "label": "Switch without default case",
         "pattern": None,  # multi-line brace-tracked
+        "severity": "low",
+    },
+    {
+        "id": "css_monolith",
+        "label": "Large stylesheet file (300+ LOC)",
+        "pattern": None,  # non-TS asset scan
+        "severity": "medium",
+    },
+    {
+        "id": "css_important_overuse",
+        "label": "Heavy !important usage in stylesheet",
+        "pattern": None,  # non-TS asset scan
+        "severity": "low",
+    },
+    {
+        "id": "docs_scripts_drift",
+        "label": "README missing key package scripts",
+        "pattern": None,  # non-TS asset scan
         "severity": "low",
     },
 ]
@@ -431,6 +450,92 @@ def _detect_dead_useeffects(filepath: str, lines: list[str], smell_counts: dict[
             )
 
 
+def _script_is_documented(readme_text: str, script_name: str) -> bool:
+    escaped = re.escape(script_name)
+    command_patterns = [
+        rf"\bnpm\s+(?:run\s+)?{escaped}\b",
+        rf"\bpnpm\s+{escaped}\b",
+        rf"\byarn\s+{escaped}\b",
+        rf"\bbun\s+run\s+{escaped}\b",
+    ]
+    if any(re.search(pattern, readme_text, flags=re.IGNORECASE) for pattern in command_patterns):
+        return True
+    return bool(re.search(rf"`{escaped}`", readme_text))
+
+
+def _detect_non_ts_asset_smells(path: Path, smell_counts: dict[str, list[dict]]) -> int:
+    """Scan adjacent non-TS assets (CSS/docs) for common repo-health smells."""
+    scanned_files = 0
+    css_files = find_source_files(path, [".css", ".scss", ".sass", ".less"])
+    scanned_files += len(css_files)
+
+    for filepath in css_files:
+        try:
+            full = Path(filepath) if Path(filepath).is_absolute() else PROJECT_ROOT / filepath
+            content = full.read_text()
+            lines = content.splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            log_best_effort_failure(logger, f"read stylesheet smell candidate {filepath}", exc)
+            continue
+
+        if len(lines) >= 300:
+            smell_counts["css_monolith"].append(
+                {
+                    "file": filepath,
+                    "line": 1,
+                    "content": f"{len(lines)} LOC stylesheet",
+                }
+            )
+
+        important_count = content.count("!important")
+        if important_count >= 8:
+            first_line = next(
+                (idx + 1 for idx, line in enumerate(lines) if "!important" in line),
+                1,
+            )
+            smell_counts["css_important_overuse"].append(
+                {
+                    "file": filepath,
+                    "line": first_line,
+                    "content": f"{important_count} !important declarations",
+                }
+            )
+
+    readme_path = PROJECT_ROOT / "README.md"
+    package_path = PROJECT_ROOT / "package.json"
+    if not readme_path.is_file() or not package_path.is_file():
+        return scanned_files
+
+    scanned_files += 1
+    try:
+        readme_text = readme_path.read_text()
+        package_payload = json.loads(package_path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        log_best_effort_failure(logger, "read package/readme for docs drift smell", exc)
+        return scanned_files
+
+    scripts = package_payload.get("scripts")
+    if not isinstance(scripts, dict):
+        return scanned_files
+
+    key_scripts = [
+        script for script in ("dev", "build", "test", "lint", "typecheck") if script in scripts
+    ]
+    if len(key_scripts) < 2:
+        return scanned_files
+
+    missing = [script for script in key_scripts if not _script_is_documented(readme_text, script)]
+    if len(missing) >= 2:
+        smell_counts["docs_scripts_drift"].append(
+            {
+                "file": "README.md",
+                "line": 1,
+                "content": f"Missing script docs: {', '.join(missing[:5])}",
+            }
+        )
+    return scanned_files
+
+
 def detect_smells(path: Path) -> tuple[list[dict], int]:
     """Detect TypeScript/React code smell patterns across the codebase.
 
@@ -500,6 +605,8 @@ def detect_smells(path: Path) -> tuple[list[dict], int]:
         _detect_catch_return_default(filepath, content, smell_counts)
         _detect_switch_no_default(filepath, content, smell_counts)
 
+    non_ts_files = _detect_non_ts_asset_smells(path, smell_counts)
+
     # Build summary entries sorted by severity then count
     severity_order = {"high": 0, "medium": 1, "low": 2}
     entries = []
@@ -517,4 +624,4 @@ def detect_smells(path: Path) -> tuple[list[dict], int]:
                 }
             )
     entries.sort(key=lambda e: (severity_order.get(e["severity"], 9), -e["count"]))
-    return entries, len(files)
+    return entries, len(files) + non_ts_files

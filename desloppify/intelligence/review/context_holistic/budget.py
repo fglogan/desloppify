@@ -6,8 +6,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from desloppify.intelligence.review.context import file_excerpt
 from desloppify.file_discovery import rel
+from desloppify.intelligence.review.context import file_excerpt
 
 _DEF_SIGNATURE_RE = re.compile(
     r"(?:^|\n)\s*(?:async\s+def|def|async\s+function|function)\s+\w+\s*\(([^)]*)\)",

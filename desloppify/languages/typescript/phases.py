@@ -8,7 +8,6 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from desloppify.state import Finding
 from desloppify.engine.detectors import complexity as complexity_detector_mod
 from desloppify.engine.detectors import coupling as coupling_detector_mod
 from desloppify.engine.detectors import flat_dirs as flat_dirs_detector_mod
@@ -21,11 +20,11 @@ from desloppify.engine.detectors import signature as signature_detector_mod
 from desloppify.engine.detectors import single_use as single_use_detector_mod
 from desloppify.engine.detectors.base import ComplexitySignal, GodRule
 from desloppify.engine.policy.zones import adjust_potential, filter_entries
+from desloppify.file_discovery import rel
 from desloppify.languages._framework.base.structural import (
     add_structural_signal,
     merge_structural_signals,
 )
-from desloppify.languages._framework.runtime import LangRun
 from desloppify.languages._framework.finding_factories import (
     make_cycle_findings,
     make_facade_findings,
@@ -34,6 +33,7 @@ from desloppify.languages._framework.finding_factories import (
     make_smell_findings,
     make_unused_findings,
 )
+from desloppify.languages._framework.runtime import LangRun
 from desloppify.languages.typescript.detectors import concerns as concerns_detector_mod
 from desloppify.languages.typescript.detectors import (
     deprecated as deprecated_detector_mod,
@@ -51,8 +51,7 @@ from desloppify.languages.typescript.extractors_components import (
     detect_passthrough_components,
     extract_ts_components,
 )
-from desloppify.state import make_finding
-from desloppify.file_discovery import rel
+from desloppify.state import Finding, make_finding
 from desloppify.utils import SRC_PATH, log
 
 # ── Helper computations for complexity signals ─────────────
@@ -135,7 +134,7 @@ TS_SKIP_DIRS = {"src/shared/components/ui"}
 # ── Phase runners ──────────────────────────────────────────
 
 
-def _phase_logs(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_logs(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     log_result = logs_detector_mod.detect_logs_result(path)
     log_entries = log_result.entries
     total_files = log_result.population_size
@@ -162,14 +161,14 @@ def _phase_logs(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int
     return results, {"logs": adjust_potential(lang.zone_map, total_files)}
 
 
-def _phase_unused(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_unused(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     entries, total_files = unused_detector_mod.detect_unused(path)
     return make_unused_findings(entries, log), {
         "unused": adjust_potential(lang.zone_map, total_files),
     }
 
 
-def _phase_exports(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_exports(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     export_entries, total_exports = exports_detector_mod.detect_dead_exports(path)
     results = []
     for e in export_entries:
@@ -188,7 +187,7 @@ def _phase_exports(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
     return results, {"exports": total_exports}
 
 
-def _phase_deprecated(
+def phase_deprecated(
     path: Path, lang: LangRun
 ) -> tuple[list[Finding], dict[str, int]]:
     dep_result = deprecated_detector_mod.detect_deprecated_result(path)
@@ -217,7 +216,7 @@ def _phase_deprecated(
     return results, {"deprecated": total_deprecated}
 
 
-def _phase_structural(
+def phase_structural(
     path: Path, lang: LangRun
 ) -> tuple[list[Finding], dict[str, int]]:
     structural: dict[str, dict] = {}
@@ -403,7 +402,7 @@ def _make_boundary_findings(
     return results, total_shared
 
 
-def _phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     results = []
     graph = deps_detector_mod.build_dep_graph(path)
     lang.dep_graph = graph
@@ -559,7 +558,7 @@ def _phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str,
     return results, potentials
 
 
-def _phase_smells(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_smells(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
     smell_entries, total_smell_files = smells_detector_mod.detect_smells(path)
     results = make_smell_findings(smell_entries, log)
 
@@ -673,3 +672,13 @@ def _phase_smells(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, i
         "smells": adjust_potential(lang.zone_map, total_smell_files),
         "react": total_effects,
     }
+
+
+# Backward-compatible aliases for internal callers/tests.
+_phase_logs = phase_logs
+_phase_unused = phase_unused
+_phase_exports = phase_exports
+_phase_deprecated = phase_deprecated
+_phase_structural = phase_structural
+_phase_coupling = phase_coupling
+_phase_smells = phase_smells

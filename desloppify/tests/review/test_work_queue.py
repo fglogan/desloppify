@@ -304,6 +304,28 @@ def test_invalid_status_raises_value_error():
         build_work_queue(state, status="bogus")
 
 
+def test_legacy_string_detail_does_not_crash_queue_build():
+    """Queue building should tolerate findings whose detail is a plain string."""
+    review = _finding(
+        "review::src/a.py::legacy",
+        detector="review",
+        detail={"dimension": "naming_quality"},
+    )
+    weird = _finding("responsibility_cohesion::src/a.py::legacy", detector="smells")
+    weird["detail"] = "Clusters: alpha, beta"
+
+    state = _state(
+        [review, weird],
+        dimension_scores={
+            "Naming Quality": {"score": 92.0, "strict": 92.0, "issues": 1}
+        },
+    )
+    queue = build_work_queue(state, count=None, include_subjective=False)
+    ids = [item["id"] for item in queue["items"]]
+    assert "review::src/a.py::legacy" in ids
+    assert "responsibility_cohesion::src/a.py::legacy" in ids
+
+
 # ── Subjective threshold clamping ─────────────────────────
 
 

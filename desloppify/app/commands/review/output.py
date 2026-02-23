@@ -32,6 +32,11 @@ def _subjective_at_target_dimensions(
 def _load_import_findings_data(
     import_file: str,
     *,
+    trusted_assessment_source: bool = False,
+    trusted_assessment_label: str | None = None,
+    attested_external: bool = False,
+    manual_override: bool = False,
+    manual_attest: str | None = None,
     assessment_override: bool = False,
     assessment_note: str | None = None,
 ) -> dict:
@@ -39,6 +44,11 @@ def _load_import_findings_data(
     return import_helpers_mod.load_import_findings_data(
         import_file,
         colorize_fn=colorize,
+        trusted_assessment_source=trusted_assessment_source,
+        trusted_assessment_label=trusted_assessment_label,
+        attested_external=attested_external,
+        manual_override=manual_override,
+        manual_attest=manual_attest,
         assessment_override=assessment_override,
         assessment_note=assessment_note,
     )

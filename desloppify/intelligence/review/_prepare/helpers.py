@@ -13,7 +13,9 @@ HOLISTIC_WORKFLOW = [
     "IMPORTANT: findings must be defects only — never positive observations. High scores capture quality; findings capture problems.",
     "For simple issues (missing import, wrong name): fix directly in code, then note as resolved",
     "For cross-cutting issues: write to findings.json (format described in system_prompt)",
-    "Import: desloppify review --import findings.json",
+    "Preferred local Codex path: desloppify review --run-batches --runner codex --parallel --scan-after-import",
+    "Claude cloud durable path: run `desloppify review --external-start --external-runner claude`, follow the session template/instructions, then run the printed `--external-submit` command",
+    "Fallback path: `desloppify review --import findings.json` (findings only). Use manual override only for emergency/provisional imports.",
     "Run `desloppify issues` to see the work queue, then fix each finding and resolve",
 ]
 

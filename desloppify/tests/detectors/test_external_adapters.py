@@ -13,10 +13,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 # ── Knip adapter ────────────────────────────────────────────────────────────
-
-
 from desloppify.languages.typescript.detectors.knip_adapter import detect_with_knip
 
 
@@ -112,7 +109,7 @@ class TestKnipAdapter:
 # ── Ruff smells adapter ──────────────────────────────────────────────────────
 
 
-from desloppify.languages.python.detectors.ruff_smells import detect_with_ruff_smells
+from desloppify.languages.python.detectors.ruff_smells import detect_with_ruff_smells  # noqa: E402,I001
 
 
 class TestRuffSmellsAdapter:
@@ -248,7 +245,7 @@ class TestRuffSmellsAdapter:
 # ── Bandit adapter ───────────────────────────────────────────────────────────
 
 
-from desloppify.languages.python.detectors.bandit_adapter import (
+from desloppify.languages.python.detectors.bandit_adapter import (  # noqa: E402
     _to_security_entry,
     detect_with_bandit,
 )
@@ -266,32 +263,40 @@ class TestBanditAdapter:
         with patch("subprocess.run", return_value=mock_result):
             return detect_with_bandit(path, zone_map=None)
 
-    def test_returns_none_when_bandit_not_installed(self, tmp_path):
+    def test_returns_missing_tool_status_when_bandit_not_installed(self, tmp_path):
         with patch("subprocess.run", side_effect=FileNotFoundError("bandit not found")):
-            assert detect_with_bandit(tmp_path, zone_map=None) is None
+            result = detect_with_bandit(tmp_path, zone_map=None)
+        assert result.status.state == "missing_tool"
+        coverage = result.status.coverage()
+        assert coverage is not None
+        assert coverage.detector == "security"
+        assert coverage.status == "reduced"
 
-    def test_returns_none_on_timeout(self, tmp_path):
+    def test_returns_timeout_status_on_timeout(self, tmp_path):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("bandit", 120)):
-            assert detect_with_bandit(tmp_path, zone_map=None) is None
+            result = detect_with_bandit(tmp_path, zone_map=None)
+        assert result.status.state == "timeout"
+        assert result.status.coverage() is not None
 
     def test_returns_empty_on_no_findings(self):
         result = self._run_detect(stdout=self._bandit_result([]))
-        assert result is not None
-        entries, files_scanned = result
-        assert entries == []
+        assert result.status.state == "ok"
+        assert result.entries == []
+        assert result.files_scanned == 0
 
     def test_returns_empty_on_empty_stdout(self):
         result = self._run_detect(stdout="")
-        assert result is not None
-        entries, _ = result
-        assert entries == []
+        assert result.status.state == "ok"
+        assert result.entries == []
 
-    def test_returns_none_on_invalid_json(self):
+    def test_returns_parse_error_on_invalid_json(self):
         mock_result = MagicMock()
         mock_result.stdout = "not-json"
         with patch("subprocess.run", return_value=mock_result):
             result = detect_with_bandit(Path("/fake"), zone_map=None)
-        assert result is None
+        assert result.status.state == "parse_error"
+        assert result.entries == []
+        assert result.status.coverage() is not None
 
     def test_parses_high_severity_finding(self):
         raw = [
@@ -308,8 +313,7 @@ class TestBanditAdapter:
             }
         ]
         result = self._run_detect(stdout=self._bandit_result(raw))
-        assert result is not None
-        entries, _ = result
+        entries = result.entries
         assert len(entries) == 1
         e = entries[0]
         assert e["confidence"] == "high"
@@ -333,8 +337,7 @@ class TestBanditAdapter:
             }
         ]
         result = self._run_detect(stdout=self._bandit_result(raw))
-        assert result is not None
-        entries, _ = result
+        entries = result.entries
         assert len(entries) == 1
         assert entries[0]["confidence"] == "medium"
         assert entries[0]["tier"] == 3
@@ -354,9 +357,7 @@ class TestBanditAdapter:
             }
         ]
         result = self._run_detect(stdout=self._bandit_result(raw))
-        assert result is not None
-        entries, _ = result
-        assert entries == []
+        assert result.entries == []
 
     def test_skips_cross_lang_overlap_ids(self):
         """B105 (hardcoded_password_string) overlaps with cross-lang detector — skip it."""
@@ -374,9 +375,7 @@ class TestBanditAdapter:
             }
         ]
         result = self._run_detect(stdout=self._bandit_result(raw))
-        assert result is not None
-        entries, _ = result
-        assert entries == []
+        assert result.entries == []
 
     def test_finding_name_is_stable_and_unique(self):
         raw = [
@@ -393,7 +392,7 @@ class TestBanditAdapter:
             }
         ]
         result = self._run_detect(stdout=self._bandit_result(raw))
-        entries, _ = result
+        entries = result.entries
         assert "B102" in entries[0]["name"]
         assert "10" in entries[0]["name"]
 
@@ -409,8 +408,7 @@ class TestBanditAdapter:
         }
         stdout = self._bandit_result([], metrics=metrics)
         result = self._run_detect(stdout=stdout)
-        assert result is not None
-        _, files_scanned = result
+        files_scanned = result.files_scanned
         # _totals should be excluded; 2 actual files
         assert files_scanned == 2
 
@@ -418,7 +416,10 @@ class TestBanditAdapter:
 # ── jscpd adapter ────────────────────────────────────────────────────────────
 
 
-from desloppify.engine.detectors.jscpd_adapter import _parse_jscpd_report, detect_with_jscpd
+from desloppify.engine.detectors.jscpd_adapter import (  # noqa: E402
+    _parse_jscpd_report,
+    detect_with_jscpd,
+)
 
 
 class TestJscpdAdapter:
@@ -520,6 +521,76 @@ class TestJscpdAdapter:
         result = _parse_jscpd_report(report, tmp_path)
         assert result[0]["sample"] == ["line1", "line2", "line3", "line4"]
 
+    def test_skips_same_file_pairs(self, tmp_path):
+        f1 = str(tmp_path / "a.py")
+        fragment = "x = 1\ny = 2\nz = 3\nw = 4"
+        report = {
+            "duplicates": [
+                {
+                    "fragment": fragment,
+                    "lines": 4,
+                    "firstFile": {"name": f1, "start": 3},
+                    "secondFile": {"name": f1, "start": 30},
+                }
+            ]
+        }
+        result = _parse_jscpd_report(report, tmp_path)
+        assert result == []
+
+    def test_skips_build_lib_source_mirror_pairs(self, tmp_path):
+        f_build = str(tmp_path / "build" / "lib" / "pkg" / "module.py")
+        f_src = str(tmp_path / "pkg" / "module.py")
+        fragment = "x = 1\ny = 2\nz = 3\nw = 4"
+        report = {
+            "duplicates": [
+                {
+                    "fragment": fragment,
+                    "lines": 4,
+                    "firstFile": {"name": f_build, "start": 8},
+                    "secondFile": {"name": f_src, "start": 9},
+                }
+            ]
+        }
+        result = _parse_jscpd_report(report, tmp_path)
+        assert result == []
+
+    def test_skips_artifact_paths(self, tmp_path):
+        f_artifact = str(tmp_path / ".desloppify" / "cache.py")
+        f_src = str(tmp_path / "pkg" / "module.py")
+        fragment = "x = 1\ny = 2\nz = 3\nw = 4"
+        report = {
+            "duplicates": [
+                {
+                    "fragment": fragment,
+                    "lines": 4,
+                    "firstFile": {"name": f_artifact, "start": 2},
+                    "secondFile": {"name": f_src, "start": 11},
+                }
+            ]
+        }
+        result = _parse_jscpd_report(report, tmp_path)
+        assert result == []
+
+    def test_detect_command_includes_artifact_ignores(self, tmp_path):
+        report_file = tmp_path / "jscpd-report.json"
+        report_file.write_text(json.dumps({"duplicates": []}))
+
+        def _fake_run(cmd, **kwargs):
+            assert "--ignore" in cmd
+            ignore_value = cmd[cmd.index("--ignore") + 1]
+            assert "**/.desloppify/**" in ignore_value
+            assert "**/.claude/**" in ignore_value
+            assert "**/build/**" in ignore_value
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=_fake_run), patch(
+            "tempfile.TemporaryDirectory"
+        ) as mock_td:
+            mock_td.return_value.__enter__.return_value = str(tmp_path)
+            mock_td.return_value.__exit__.return_value = None
+            result = detect_with_jscpd(tmp_path)
+        assert result == []
+
 
 # ── Extended ruff smells adapter ─────────────────────────────────────────────
 
@@ -615,7 +686,7 @@ class TestRuffSmellsAdapterExtended:
 # ── import-linter adapter ────────────────────────────────────────────────────
 
 
-from desloppify.languages.python.detectors.import_linter_adapter import (
+from desloppify.languages.python.detectors.import_linter_adapter import (  # noqa: E402
     detect_with_import_linter,
 )
 

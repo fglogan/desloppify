@@ -30,17 +30,18 @@ import desloppify.app.output.scorecard_parts.left_panel as scorecard_left_panel
 import desloppify.app.output.scorecard_parts.ornaments as scorecard_ornaments
 import desloppify.app.output.tree_text as tree_text_mod
 import desloppify.core.runtime_state as runtime_state
-import desloppify.engine.planning.common as plan_common
-import desloppify.engine.planning.scan as plan_scan
-import desloppify.engine.planning.select as plan_select
 import desloppify.engine._state.noise as noise
 import desloppify.engine._state.persistence as persistence
 import desloppify.engine._state.resolution as state_resolution
+import desloppify.engine.planning.common as plan_common
+import desloppify.engine.planning.scan as plan_scan
+import desloppify.engine.planning.select as plan_select
 import desloppify.intelligence.integrity as subjective_review_integrity
 import desloppify.intelligence.review._context.structure as review_context_structure
 import desloppify.intelligence.review.dimensions.holistic as review_dimensions_holistic
 import desloppify.intelligence.review.dimensions.validation as review_dimensions_validation
 import desloppify.languages as lang_pkg
+import desloppify.languages._framework.discovery as lang_discovery
 import desloppify.languages.csharp.extractors as csharp_extractors
 import desloppify.languages.csharp.extractors_classes as csharp_extractors_classes
 import desloppify.languages.dart.commands as dart_commands
@@ -48,7 +49,6 @@ import desloppify.languages.dart.extractors as dart_extractors
 import desloppify.languages.dart.move as dart_move
 import desloppify.languages.dart.phases as dart_phases
 import desloppify.languages.dart.review as dart_review
-import desloppify.languages._framework.discovery as lang_discovery
 import desloppify.languages.gdscript.commands as gdscript_commands
 import desloppify.languages.gdscript.extractors as gdscript_extractors
 import desloppify.languages.gdscript.move as gdscript_move
@@ -77,51 +77,62 @@ from desloppify.languages.csharp import review as csharp_review
 from desloppify.languages.typescript import review as ts_review
 
 
+def _assert_all_callables(*targets) -> None:
+    for target in targets:
+        assert callable(target)
+
+
 def test_smoke_parser():
     """Parser and CLI support modules."""
-    assert callable(cli_parser.create_parser)
-    assert callable(cli_parser_groups._add_scan_parser)
+    _assert_all_callables(
+        cli_parser.create_parser,
+        cli_parser_groups._add_scan_parser,
+    )
 
 
 def test_smoke_planning():
     """Planning modules: common, scan, select."""
-    assert callable(plan_common.is_subjective_phase)
+    _assert_all_callables(
+        plan_common.is_subjective_phase,
+        plan_scan.generate_findings,
+        plan_select.get_next_items,
+        plan_select.get_next_item,
+    )
     assert isinstance(plan_common.TIER_LABELS, dict)
     assert 1 in plan_common.TIER_LABELS
-    assert callable(plan_scan.generate_findings)
-    assert callable(plan_select.get_next_items)
-    assert callable(plan_select.get_next_item)
 
 
 def test_smoke_commands():
     """App command modules: config, plan, move, scan, next, review, status."""
-    assert callable(config_cmd.cmd_config)
-    assert callable(plan_cmd.cmd_plan_output)
-    assert callable(move_directory.run_directory_move)
-    assert callable(move_reporting.print_file_move_plan)
-    assert callable(move_reporting.print_directory_move_plan)
-    assert callable(scan_artifacts.build_scan_query_payload)
-    assert callable(scan_artifacts.emit_scorecard_badge)
-    assert callable(scan_workflow.prepare_scan_runtime)
-    assert callable(scan_workflow.run_scan_generation)
-    assert callable(scan_workflow.merge_scan_results)
-    assert callable(next_output.serialize_item)
-    assert callable(next_output.build_query_payload)
-    assert callable(next_render.render_queue_header)
-    assert callable(review_batch_core.merge_batch_results)
-    assert callable(review_batches.do_run_batches)
-    assert callable(review_import.do_import)
-    assert callable(review_import_helpers.load_import_findings_data)
-    assert callable(review_prepare.do_prepare)
-    assert callable(review_runner_helpers.run_codex_batch)
-    assert callable(review_runtime.setup_lang)
-    assert callable(status_render.show_tier_progress_table)
-    assert callable(status_summary.score_summary_lines)
-    assert callable(scan_reporting_presentation.show_score_model_breakdown)
-    assert callable(scan_reporting_presentation.show_detector_progress)
-    assert callable(scan_reporting_subjective.subjective_rerun_command)
-    assert callable(scan_reporting_subjective.subjective_integrity_followup)
-    assert callable(scan_reporting_subjective.build_subjective_followup)
+    _assert_all_callables(
+        config_cmd.cmd_config,
+        plan_cmd.cmd_plan_output,
+        move_directory.run_directory_move,
+        move_reporting.print_file_move_plan,
+        move_reporting.print_directory_move_plan,
+        scan_artifacts.build_scan_query_payload,
+        scan_artifacts.emit_scorecard_badge,
+        scan_workflow.prepare_scan_runtime,
+        scan_workflow.run_scan_generation,
+        scan_workflow.merge_scan_results,
+        next_output.serialize_item,
+        next_output.build_query_payload,
+        next_render.render_queue_header,
+        review_batch_core.merge_batch_results,
+        review_batches.do_run_batches,
+        review_import.do_import,
+        review_import_helpers.load_import_findings_data,
+        review_prepare.do_prepare,
+        review_runner_helpers.run_codex_batch,
+        review_runtime.setup_lang,
+        status_render.show_tier_progress_table,
+        status_summary.score_summary_lines,
+        scan_reporting_presentation.show_score_model_breakdown,
+        scan_reporting_presentation.show_detector_progress,
+        scan_reporting_subjective.subjective_rerun_command,
+        scan_reporting_subjective.subjective_integrity_followup,
+        scan_reporting_subjective.build_subjective_followup,
+    )
     assert isinstance(cmd_registry.get_command_handlers(), dict)
     assert "scan" in cmd_registry.get_command_handlers()
     runtime = runtime_state.current_runtime_context()
@@ -135,58 +146,70 @@ def test_smoke_commands():
 def test_smoke_engine():
     """Engine modules: state internals, python detectors."""
     # state internals
-    assert callable(persistence.load_state)
-    assert callable(persistence.save_state)
-    assert callable(state_resolution.match_findings)
-    assert callable(state_resolution.resolve_findings)
-    assert callable(noise.resolve_finding_noise_budget)
-    assert callable(noise.resolve_finding_noise_global_budget)
-    assert callable(noise.resolve_finding_noise_settings)
+    _assert_all_callables(
+        persistence.load_state,
+        persistence.save_state,
+        state_resolution.match_findings,
+        state_resolution.resolve_findings,
+        noise.resolve_finding_noise_budget,
+        noise.resolve_finding_noise_global_budget,
+        noise.resolve_finding_noise_settings,
+    )
 
     # python detector modules
-    assert callable(private_imports.detect_private_imports)
-    assert callable(private_imports._is_dunder)
-    assert private_imports._is_dunder("__all__")
-    assert callable(smells_ast.detect_ast_smells)
-    assert callable(smells_ast_shared._looks_like_path_var)
-    assert callable(smells_ast_source_detectors._detect_duplicate_constants)
-    assert callable(smells_ast_source_detectors._detect_vestigial_parameter)
-    assert callable(smells_ast_tree_context_detectors._detect_hardcoded_path_sep)
-    assert callable(smells_ast_tree_quality_detectors._detect_optional_param_sprawl)
-    assert callable(
-        smells_ast_tree_quality_detectors_types._detect_optional_param_sprawl
+    _assert_all_callables(
+        private_imports.detect_private_imports,
+        private_imports._is_dunder,
+        smells_ast.detect_ast_smells,
+        smells_ast_shared._looks_like_path_var,
+        smells_ast_source_detectors._detect_duplicate_constants,
+        smells_ast_source_detectors._detect_vestigial_parameter,
+        smells_ast_tree_context_detectors._detect_hardcoded_path_sep,
+        smells_ast_tree_quality_detectors._detect_optional_param_sprawl,
+        smells_ast_tree_quality_detectors_types._detect_optional_param_sprawl,
+        smells_ast_tree_safety_detectors._detect_silent_except,
+        smells_ast_tree_safety_detectors_runtime._detect_silent_except,
+        py_extractors_classes.extract_py_classes,
+        py_extractors_shared.extract_py_params,
+        py_phases_quality.phase_smells,
+        py_phases_quality.phase_dict_keys,
+        ts_smell_effects.detect_swallowed_errors,
+        ts_deps_runtime.build_dynamic_import_targets,
+        ts_extractors_components.extract_ts_components,
     )
-    assert callable(smells_ast_tree_safety_detectors._detect_silent_except)
-    assert callable(smells_ast_tree_safety_detectors_runtime._detect_silent_except)
-    assert callable(py_extractors_classes.extract_py_classes)
-    assert callable(py_extractors_shared.extract_py_params)
+    assert private_imports._is_dunder("__all__")
     assert isinstance(py_phases.PY_ENTRY_PATTERNS, list)
     assert isinstance(py_phases.PY_COMPLEXITY_SIGNALS, list)
     assert isinstance(py_phases.PY_GOD_RULES, list)
-    assert callable(py_phases_quality.phase_smells)
-    assert callable(py_phases_quality.phase_dict_keys)
-
-    # typescript detector modules
-    assert callable(ts_smell_effects.detect_swallowed_errors)
-    assert callable(ts_deps_runtime.build_dynamic_import_targets)
-    assert callable(ts_extractors_components.extract_ts_components)
 
 
 def test_smoke_lang_plugins():
     """Language plugin modules: package, discovery, resolution, per-lang."""
     # lang package/discovery/resolution
-    assert callable(lang_pkg.register_lang)
-    assert callable(lang_pkg.available_langs)
-    assert callable(lang_discovery.load_all)
-    assert callable(lang_discovery.raise_load_errors)
-    assert callable(lang_resolution.make_lang_config)
-    assert callable(lang_resolution.get_lang)
-    assert callable(lang_resolution.auto_detect_lang)
+    _assert_all_callables(
+        lang_pkg.register_lang,
+        lang_pkg.available_langs,
+        lang_discovery.load_all,
+        lang_discovery.raise_load_errors,
+        lang_resolution.make_lang_config,
+        lang_resolution.get_lang,
+        lang_resolution.auto_detect_lang,
+        csharp_extractors.find_csharp_files,
+        csharp_extractors.extract_csharp_functions,
+        csharp_extractors_classes.extract_csharp_classes,
+        dart_commands.get_detect_commands,
+        dart_extractors.find_dart_files,
+        dart_extractors.extract_functions,
+        dart_review.module_patterns,
+        dart_review.api_surface,
+        gdscript_commands.get_detect_commands,
+        gdscript_extractors.find_gdscript_files,
+        gdscript_extractors.extract_functions,
+        gdscript_review.module_patterns,
+        gdscript_review.api_surface,
+    )
 
     # csharp
-    assert callable(csharp_extractors.find_csharp_files)
-    assert callable(csharp_extractors.extract_csharp_functions)
-    assert callable(csharp_extractors_classes.extract_csharp_classes)
     assert isinstance(csharp_move.VERIFY_HINT, str)
     assert "dotnet build" in csharp_move.VERIFY_HINT
     assert csharp_move.find_replacements("a.cs", "b.cs", {}) == {}
@@ -208,50 +231,40 @@ def test_smoke_lang_plugins():
     assert isinstance(dart_move.get_verify_hint(), str)
     assert dart_move.find_replacements("a.dart", "b.dart", {}) == {}
     assert dart_move.find_self_replacements("a.dart", "b.dart", {}) == []
-    assert callable(dart_commands.get_detect_commands)
     assert isinstance(dart_commands.get_detect_commands(), dict)
-    assert callable(dart_extractors.find_dart_files)
-    assert callable(dart_extractors.extract_functions)
     assert isinstance(dart_phases.DART_COMPLEXITY_SIGNALS, list)
     assert callable(dart_phases._phase_structural)
     assert callable(dart_phases._phase_coupling)
     assert isinstance(dart_review.HOLISTIC_REVIEW_DIMENSIONS, list)
-    assert callable(dart_review.module_patterns)
-    assert callable(dart_review.api_surface)
 
     # gdscript
     assert isinstance(gdscript_move.get_verify_hint(), str)
     assert gdscript_move.find_replacements("a.gd", "b.gd", {}) == {}
     assert gdscript_move.find_self_replacements("a.gd", "b.gd", {}) == []
-    assert callable(gdscript_commands.get_detect_commands)
     assert isinstance(gdscript_commands.get_detect_commands(), dict)
-    assert callable(gdscript_extractors.find_gdscript_files)
-    assert callable(gdscript_extractors.extract_functions)
     assert isinstance(gdscript_phases.GDSCRIPT_COMPLEXITY_SIGNALS, list)
     assert callable(gdscript_phases._phase_structural)
     assert callable(gdscript_phases._phase_coupling)
     assert isinstance(gdscript_review.HOLISTIC_REVIEW_DIMENSIONS, list)
-    assert callable(gdscript_review.module_patterns)
-    assert callable(gdscript_review.api_surface)
 
 
 def test_smoke_intelligence():
     """Intelligence modules: review dimensions, context, prepare, integrity."""
     assert isinstance(review_dimensions_holistic.DIMENSIONS, list)
     assert "cross_module_architecture" in review_dimensions_holistic.DIMENSIONS
-    assert callable(review_prepare_batches.build_investigation_batches)
-    assert callable(review_context_structure.compute_structure_context)
-    assert callable(review_dimensions_validation.parse_dimensions_payload)
-    assert callable(subjective_review_integrity.subjective_review_open_breakdown)
-
-    # scorecard and output helpers
-    assert callable(scorecard_draw.draw_left_panel)
-    assert callable(scorecard_draw.draw_right_panel)
-    assert callable(scorecard_draw.draw_ornament)
-    assert callable(scorecard_left_panel.draw_left_panel)
-    assert callable(scorecard_ornaments.draw_ornament)
-    assert callable(viz_cmd_context.load_cmd_context)
-    assert callable(tree_text_mod._aggregate)
+    _assert_all_callables(
+        review_prepare_batches.build_investigation_batches,
+        review_context_structure.compute_structure_context,
+        review_dimensions_validation.parse_dimensions_payload,
+        subjective_review_integrity.subjective_review_open_breakdown,
+        scorecard_draw.draw_left_panel,
+        scorecard_draw.draw_right_panel,
+        scorecard_draw.draw_ornament,
+        scorecard_left_panel.draw_left_panel,
+        scorecard_ornaments.draw_ornament,
+        viz_cmd_context.load_cmd_context,
+        tree_text_mod._aggregate,
+    )
 
 
 # ---------------------------------------------------------------------------

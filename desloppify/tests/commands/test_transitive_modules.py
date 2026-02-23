@@ -17,14 +17,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ── 1. resolve/render.py ────────────────────────────────────────────────────
-
 from desloppify.app.commands.resolve.render import (
     _delta_suffix,
     _print_next_command,
     _print_resolve_summary,
     _print_score_movement,
-    _print_wontfix_batch_warning,
     _print_subjective_reset_hint,
+    _print_wontfix_batch_warning,
 )
 
 
@@ -246,7 +245,7 @@ class TestPrintSubjectiveResetHint:
 
 # ── 2. status_parts/strict_target.py ────────────────────────────────────────
 
-from desloppify.app.commands.status_parts.strict_target import (
+from desloppify.app.commands.status_parts.strict_target import (  # noqa: E402
     format_strict_target_progress,
 )
 
@@ -331,9 +330,9 @@ class TestFormatStrictTargetProgress:
 
 # ── 3. _show_terminal.py ────────────────────────────────────────────────────
 
-from desloppify.app.commands._show_terminal import (
-    show_fix_dry_run_samples,
+from desloppify.app.commands._show_terminal import (  # noqa: E402
     _print_fix_file_sample,
+    show_fix_dry_run_samples,
 )
 
 
@@ -414,8 +413,8 @@ class TestPrintFixFileSample:
 
 # ── 4. viz_cmd.py ────────────────────────────────────────────────────────────
 
-from desloppify.app.commands import viz_cmd
-from desloppify.app.commands.viz_cmd import cmd_tree, cmd_viz
+from desloppify.app.commands import viz_cmd  # noqa: E402
+from desloppify.app.commands.viz_cmd import cmd_tree, cmd_viz  # noqa: E402
 
 
 class TestVizCmd:
@@ -437,7 +436,7 @@ class TestVizCmd:
 
 # ── 5. review/entrypoint.py ─────────────────────────────────────────────────
 
-from desloppify.app.commands.review.entrypoint import cmd_review
+from desloppify.app.commands.review.entrypoint import cmd_review  # noqa: E402
 
 
 class TestCmdReviewEntrypoint:
@@ -452,7 +451,14 @@ class TestCmdReviewEntrypoint:
         rt.config = {}
         mock_runtime.return_value = rt
         mock_resolve_lang.return_value = MagicMock(name="python")
-        args = argparse.Namespace(run_batches=False, import_file=None)
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file=None,
+            validate_import_file=None,
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
 
         cmd_review(args)
 
@@ -469,11 +475,44 @@ class TestCmdReviewEntrypoint:
         rt.config = {}
         mock_runtime.return_value = rt
         mock_resolve_lang.return_value = MagicMock(name="python")
-        args = argparse.Namespace(run_batches=False, import_file="/tmp/review.json")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file="/tmp/review.json",
+            validate_import_file=None,
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
 
         cmd_review(args)
 
         mock_do_import.assert_called_once()
+
+    @patch("desloppify.app.commands.review.entrypoint.do_validate_import")
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_validate_import_path(
+        self, mock_runtime, mock_resolve_lang, mock_do_validate_import
+    ):
+        """When validate_import_file is set, calls do_validate_import."""
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file=None,
+            validate_import_file="/tmp/review.json",
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
+
+        cmd_review(args)
+
+        mock_do_validate_import.assert_called_once()
 
     @patch("desloppify.app.commands.review.entrypoint._do_run_batches")
     @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
@@ -486,11 +525,140 @@ class TestCmdReviewEntrypoint:
         rt.config = {}
         mock_runtime.return_value = rt
         mock_resolve_lang.return_value = MagicMock(name="python")
-        args = argparse.Namespace(run_batches=True, import_file=None)
+        args = argparse.Namespace(
+            run_batches=True,
+            import_file=None,
+            validate_import_file=None,
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
 
         cmd_review(args)
 
         mock_do_run_batches.assert_called_once()
+
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_run_batches_rejects_conflicting_import_modes(
+        self, mock_runtime, mock_resolve_lang
+    ):
+        """--run-batches cannot be mixed with import/validation flags."""
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=True,
+            import_file="/tmp/review.json",
+            validate_import_file=None,
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_review(args)
+        assert exc_info.value.code == 1
+
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_import_and_validate_reject_together(self, mock_runtime, mock_resolve_lang):
+        """--import and --validate-import are mutually exclusive."""
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file="/tmp/review.json",
+            validate_import_file="/tmp/review.json",
+            external_start=False,
+            external_submit=False,
+            session_id=None,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_review(args)
+        assert exc_info.value.code == 1
+
+    @patch("desloppify.app.commands.review.entrypoint.do_external_start")
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_external_start_path(self, mock_runtime, mock_resolve_lang, mock_external_start):
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file=None,
+            validate_import_file=None,
+            external_start=True,
+            external_submit=False,
+            session_id=None,
+        )
+
+        cmd_review(args)
+
+        mock_external_start.assert_called_once()
+
+    @patch("desloppify.app.commands.review.entrypoint.do_external_submit")
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_external_submit_path(self, mock_runtime, mock_resolve_lang, mock_external_submit):
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file="/tmp/review.json",
+            validate_import_file=None,
+            external_start=False,
+            external_submit=True,
+            session_id="ext_20260223_000000_deadbeef",
+            allow_partial=False,
+            scan_after_import=False,
+            path=".",
+            dry_run=False,
+        )
+
+        cmd_review(args)
+
+        mock_external_submit.assert_called_once()
+
+    @patch("desloppify.app.commands.review.entrypoint.resolve_lang")
+    @patch("desloppify.app.commands.review.entrypoint.command_runtime")
+    def test_external_submit_requires_import_and_session(
+        self, mock_runtime, mock_resolve_lang
+    ):
+        rt = MagicMock()
+        rt.state = {"findings": {}}
+        rt.state_path = "/tmp/state.json"
+        rt.config = {}
+        mock_runtime.return_value = rt
+        mock_resolve_lang.return_value = MagicMock(name="python")
+        args = argparse.Namespace(
+            run_batches=False,
+            import_file=None,
+            validate_import_file=None,
+            external_start=False,
+            external_submit=True,
+            session_id=None,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_review(args)
+        assert exc_info.value.code == 2
 
     @patch("desloppify.app.commands.review.entrypoint.resolve_lang", return_value=None)
     @patch("desloppify.app.commands.review.entrypoint.command_runtime")
@@ -511,11 +679,11 @@ class TestCmdReviewEntrypoint:
 
 # ── 6. update_skill.py ──────────────────────────────────────────────────────
 
-from desloppify.app.commands.update_skill import (
+from desloppify.app.commands.update_skill import (  # noqa: E402
     _build_section,
     _replace_section,
-    resolve_interface,
     cmd_update_skill,
+    resolve_interface,
     update_installed_skill,
 )
 

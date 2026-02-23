@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.text_utils import PROJECT_ROOT, strip_c_style_comments
 from desloppify.file_discovery import (
     find_ts_files,
     read_file_text,
@@ -20,7 +20,6 @@ from desloppify.file_discovery import (
     resolve_path,
     safe_write_text,
 )
-from desloppify.core._internal.text_utils import strip_c_style_comments
 from desloppify.utils import colorize, print_table
 
 TS6133_RE = re.compile(
@@ -156,7 +155,13 @@ def _detect_unused_fallback(path: Path, category: str) -> tuple[list[dict], int]
 
 
 def _contains_deno_markers(path: Path) -> bool:
-    markers = ("deno.json", "deno.jsonc", "import_map.json", "deno.lock")
+    """Return True when scan path is inside a Deno project boundary.
+
+    `deno.lock` alone is not sufficient in mixed repos (e.g., Supabase edge
+    functions + regular TypeScript app). It frequently exists at repo root and
+    would otherwise disable tsc-based unused detection globally.
+    """
+    markers = ("deno.json", "deno.jsonc", "import_map.json")
     current = path.resolve()
     root = PROJECT_ROOT.resolve()
     for parent in (current, *current.parents):

@@ -6,6 +6,7 @@ import os
 
 from desloppify.engine.detectors.coverage.mapping import (
     _analyze_test_quality,
+    _build_test_import_index,
     _get_test_files_for_prod,
     _import_based_mapping,
     _naming_based_mapping,
@@ -68,6 +69,8 @@ def detect_test_coverage(
     )
 
     return entries, potential
+
+
 def _generate_findings(
     scorable: set[str],
     directly_tested: set[str],
@@ -80,6 +83,12 @@ def _generate_findings(
     entries: list[dict] = []
     cmap = complexity_map or {}
     test_files = set(test_quality.keys())
+    production_scope = set(scorable) | set(directly_tested) | set(transitively_tested)
+    parsed_imports_by_test = _build_test_import_index(
+        test_files,
+        production_scope,
+        lang_name,
+    )
 
     for filepath in scorable:
         loc = _file_loc(filepath)
@@ -88,7 +97,11 @@ def _generate_findings(
 
         if filepath in directly_tested:
             related_tests = _get_test_files_for_prod(
-                filepath, test_files, graph, lang_name
+                filepath,
+                test_files,
+                graph,
+                lang_name,
+                parsed_imports_by_test=parsed_imports_by_test,
             )
             for test_file in related_tests:
                 quality = test_quality.get(test_file)
@@ -128,6 +141,8 @@ def _generate_findings(
         )
 
     return entries
+
+
 def _quality_issue_finding(
     *,
     prod_file: str,

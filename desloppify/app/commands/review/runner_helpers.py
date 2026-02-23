@@ -5,11 +5,32 @@ from __future__ import annotations
 import json
 import os
 import sys
+from hashlib import sha256
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+_BLIND_PACKET_DROP_KEYS = {
+    "narrative",
+    "next_command",
+    "score_snapshot",
+    "strict_target",
+    "strict_target_progress",
+    "subjective_at_target",
+}
+
+_BLIND_CONFIG_SCORE_HINT_KEYS = {
+    "target_strict_score",
+    "strict_target_score",
+    "target_score",
+    "strict_score",
+    "objective_score",
+    "overall_score",
+    "verified_strict_score",
+}
 
 
 @dataclass(frozen=True)
@@ -52,7 +73,7 @@ class BatchResult:
 
 def run_stamp() -> str:
     """Stable UTC run stamp for artifact paths."""
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def codex_batch_command(*, prompt: str, repo_root: Path, output_file: Path) -> list[str]:
@@ -181,14 +202,73 @@ def write_packet_snapshot(
 
 
 def _build_blind_packet(packet: dict) -> dict:
-    """Return a blind-review packet with target score metadata removed."""
+    """Return a blind-review packet with score anchoring metadata removed."""
     blind = deepcopy(packet)
+    for key in _BLIND_PACKET_DROP_KEYS:
+        blind.pop(key, None)
+
     config = blind.get("config")
     if isinstance(config, dict):
-        blind["config"] = {
-            key: value for key, value in config.items() if key != "target_strict_score"
-        }
+        sanitized = _sanitize_blind_config(config)
+        if sanitized:
+            blind["config"] = sanitized
+        else:
+            blind.pop("config", None)
     return blind
+
+
+def build_blind_packet(packet: dict) -> dict:
+    """Public wrapper for blind packet sanitization."""
+    return _build_blind_packet(packet)
+
+
+def _sanitize_blind_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop score/target hints from config while preserving unrelated options."""
+    sanitized: dict[str, Any] = {}
+    for key, value in config.items():
+        lowered = key.strip().lower()
+        if not lowered:
+            continue
+        if lowered in _BLIND_CONFIG_SCORE_HINT_KEYS:
+            continue
+        if "target" in lowered:
+            continue
+        if lowered.endswith("_score"):
+            continue
+        sanitized[key] = value
+    return sanitized
+
+
+def sha256_file(path: Path) -> str | None:
+    """Compute sha256 hex digest for path contents (or None on read failure)."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return sha256(data).hexdigest()
+
+
+def build_batch_import_provenance(
+    *,
+    runner: str,
+    blind_packet_path: Path,
+    run_stamp: str,
+    batch_indexes: list[int],
+) -> dict[str, Any]:
+    """Build provenance payload used to trust assessment-bearing imports."""
+    packet_hash = sha256_file(blind_packet_path)
+    batch_indexes_1 = sorted({int(index) + 1 for index in batch_indexes})
+    return {
+        "kind": "blind_review_batch_import",
+        "blind": True,
+        "runner": runner,
+        "run_stamp": run_stamp,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "batch_count": len(batch_indexes_1),
+        "batch_indexes": batch_indexes_1,
+        "packet_path": str(blind_packet_path),
+        "packet_sha256": packet_hash,
+    }
 
 
 def selected_batch_indexes(
@@ -346,6 +426,44 @@ def collect_batch_results(
     return batch_results, sorted(failure_set)
 
 
+def _runner_failure_hints(*, failures: list[int], logs_dir: Path) -> list[str]:
+    """Infer common runner environment failures from batch logs."""
+    hints: list[str] = []
+    for idx in sorted(set(failures)):
+        log_file = logs_dir / f"batch-{idx + 1}.log"
+        try:
+            raw = log_file.read_text()
+        except OSError:
+            continue
+        text = raw.lower()
+        if (
+            "codex not found" in text
+            or ("no such file or directory" in text and "$ codex " in text)
+            or ("errno 2" in text and "codex" in text)
+        ):
+            hint = (
+                "codex CLI not found on PATH. Install Codex CLI and verify `codex --version`."
+            )
+            if hint not in hints:
+                hints.append(hint)
+        if any(
+            phrase in text
+            for phrase in (
+                "not authenticated",
+                "authentication failed",
+                "unauthorized",
+                "forbidden",
+                "login required",
+                "please login",
+                "access token",
+            )
+        ):
+            hint = "codex runner appears unauthenticated. Run `codex login` and retry."
+            if hint not in hints:
+                hints.append(hint)
+    return hints
+
+
 def print_failures_and_exit(
     *,
     failures: list[int],
@@ -368,6 +486,11 @@ def print_failures_and_exit(
     for idx_1 in failed_1:
         log_file = logs_dir / f"batch-{idx_1}.log"
         print(colorize_fn(f"    log: {log_file}", "dim"), file=sys.stderr)
+    hints = _runner_failure_hints(failures=failures, logs_dir=logs_dir)
+    if hints:
+        print(colorize_fn("  Environment hints:", "yellow"), file=sys.stderr)
+        for hint in hints:
+            print(colorize_fn(f"    {hint}", "dim"), file=sys.stderr)
     sys.exit(1)
 
 
@@ -375,6 +498,9 @@ __all__ = [
     "BatchResult",
     "CodexBatchRunnerDeps",
     "FollowupScanDeps",
+    "build_batch_import_provenance",
+    "build_blind_packet",
+    "sha256_file",
     "codex_batch_command",
     "collect_batch_results",
     "execute_batches",

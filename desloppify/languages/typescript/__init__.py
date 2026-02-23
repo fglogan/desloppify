@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from desloppify.core._internal.text_utils import get_area
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
+from desloppify.file_discovery import find_ts_files
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
-from desloppify.languages._framework.treesitter.phases import make_cohesion_phase
 from desloppify.languages._framework.base.phase_builders import (
     detector_phase_security,
     detector_phase_signature,
@@ -22,6 +23,7 @@ from desloppify.languages._framework.base.types import (
     FixResult,
     LangConfig,
 )
+from desloppify.languages._framework.treesitter.phases import make_cohesion_phase
 from desloppify.languages.typescript import commands as ts_commands_mod
 from desloppify.languages.typescript import fixers as ts_fixers_mod
 from desloppify.languages.typescript import test_coverage as ts_test_coverage_hooks
@@ -38,13 +40,13 @@ from desloppify.languages.typescript.phases import TS_GOD_RULES as TS_GOD_RULES
 from desloppify.languages.typescript.phases import TS_SKIP_DIRS as TS_SKIP_DIRS
 from desloppify.languages.typescript.phases import TS_SKIP_NAMES as TS_SKIP_NAMES
 from desloppify.languages.typescript.phases import (
-    _phase_coupling,
-    _phase_deprecated,
-    _phase_exports,
-    _phase_logs,
-    _phase_smells,
-    _phase_structural,
-    _phase_unused,
+    phase_coupling,
+    phase_deprecated,
+    phase_exports,
+    phase_logs,
+    phase_smells,
+    phase_structural,
+    phase_unused,
 )
 from desloppify.languages.typescript.review import (
     HOLISTIC_REVIEW_DIMENSIONS as TS_HOLISTIC_REVIEW_DIMENSIONS,
@@ -63,8 +65,7 @@ from desloppify.languages.typescript.review import api_surface as ts_review_api_
 from desloppify.languages.typescript.review import (
     module_patterns as ts_review_module_patterns,
 )
-from desloppify.core._internal.text_utils import get_area
-from desloppify.file_discovery import find_ts_files
+
 
 def _ts_treesitter_phases() -> list[DetectorPhase]:
     """Cherry-pick tree-sitter phases that complement TS's own detectors.
@@ -256,18 +257,18 @@ class TypeScriptConfig(LangConfig):
             ],
             barrel_names={"index.ts", "index.tsx"},
             phases=[
-                DetectorPhase("Logs", _phase_logs),
-                DetectorPhase("Unused (tsc)", _phase_unused),
-                DetectorPhase("Dead exports", _phase_exports),
-                DetectorPhase("Deprecated", _phase_deprecated),
-                DetectorPhase("Structural analysis", _phase_structural),
+                DetectorPhase("Logs", phase_logs),
+                DetectorPhase("Unused (tsc)", phase_unused),
+                DetectorPhase("Dead exports", phase_exports),
+                DetectorPhase("Deprecated", phase_deprecated),
+                DetectorPhase("Structural analysis", phase_structural),
                 DetectorPhase(
-                    "Coupling + single-use + patterns + naming", _phase_coupling
+                    "Coupling + single-use + patterns + naming", phase_coupling
                 ),
                 *_ts_treesitter_phases(),
                 detector_phase_signature(),
                 detector_phase_test_coverage(),
-                DetectorPhase("Code smells", _phase_smells),
+                DetectorPhase("Code smells", phase_smells),
                 detector_phase_security(),
                 *shared_subjective_duplicates_tail(),
             ],

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +13,6 @@ from desloppify.search import (
     grep_files_containing,
 )
 from desloppify.versioning import check_tool_staleness, compute_tool_hash
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 

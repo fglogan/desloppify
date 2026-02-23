@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from desloppify import state as state_mod
-from desloppify.state import Finding
 from desloppify.engine.detectors import signature as signature_detector_mod
 from desloppify.engine.policy.zones import adjust_potential, filter_entries
 from desloppify.languages._framework.finding_factories import make_smell_findings
@@ -19,6 +18,7 @@ from desloppify.languages.python.detectors import (
 )
 from desloppify.languages.python.detectors import smells as smells_detector_mod
 from desloppify.languages.python.detectors.ruff_smells import detect_with_ruff_smells
+from desloppify.state import Finding
 from desloppify.utils import log
 
 

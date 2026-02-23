@@ -72,3 +72,4 @@ detect:  LangConfig.detect_commands[name](args) → display
 - **Scoring**: Weighted by tier (T4=4x, T1=1x). Strict score penalizes both open and wontfix.
 - **Cascade effects**: Fixing one category (e.g. unused imports) can surface work for the next (unused vars). Score can temporarily drop.
 - **Tree-sitter optional**: All tree-sitter features degrade gracefully. Without `tree-sitter-language-pack`, generic plugins fall back to tool-only mode.
+- **Bandit optional for Python depth**: Without `bandit`, Python-specific security checks are skipped; scan surfaces preflight/post-scan coverage warnings and marks score confidence reduced for security.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from desloppify.app.commands.helpers.runtime import CommandRuntime
@@ -247,7 +247,7 @@ class TestUpdateInvestigation:
 
 class TestExpireStaleHolistic:
     def test_expires_old_holistic(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         f = _finding(last_seen=old_date)
         state = _state_with(f)
         expired = expire_stale_holistic(state, max_age_days=30)
@@ -256,7 +256,7 @@ class TestExpireStaleHolistic:
         assert "expired" in state["findings"][f["id"]]["note"]
 
     def test_keeps_recent_holistic(self):
-        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(days=5)).isoformat()
         f = _finding(last_seen=recent)
         state = _state_with(f)
         expired = expire_stale_holistic(state, max_age_days=30)
@@ -264,7 +264,7 @@ class TestExpireStaleHolistic:
         assert state["findings"][f["id"]]["status"] == "open"
 
     def test_ignores_per_file_findings(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         f = _per_file_finding()
         f["last_seen"] = old_date
         state = _state_with(f)
@@ -273,7 +273,7 @@ class TestExpireStaleHolistic:
         assert state["findings"][f["id"]]["status"] == "open"
 
     def test_ignores_non_review_findings(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         f = _finding(last_seen=old_date)
         f["detector"] = "smells"
         state = _state_with(f)
@@ -281,14 +281,14 @@ class TestExpireStaleHolistic:
         assert expired == []
 
     def test_ignores_already_resolved(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         f = _finding(status="fixed", last_seen=old_date)
         state = _state_with(f)
         expired = expire_stale_holistic(state, max_age_days=30)
         assert expired == []
 
     def test_custom_max_age(self):
-        date_15d = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+        date_15d = (datetime.now(UTC) - timedelta(days=15)).isoformat()
         f = _finding(last_seen=date_15d)
         state = _state_with(f)
         # 10-day max: should expire

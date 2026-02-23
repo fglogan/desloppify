@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from desloppify.state import empty_state as make_empty_state
 from desloppify.intelligence.review.context import (
     ReviewContext,
     build_review_context,
@@ -22,6 +21,7 @@ from desloppify.intelligence.review.context_signals.migration import (
     classify_error_strategy,
     gather_migration_signals,
 )
+from desloppify.state import empty_state as make_empty_state
 
 
 def _test_rel(path: str) -> str:

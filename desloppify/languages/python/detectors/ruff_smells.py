@@ -34,6 +34,8 @@ from pathlib import Path
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.file_discovery import (
     get_exclusions as _get_exclusions,
+)
+from desloppify.file_discovery import (
     matches_exclusion as _matches_exclusion,
 )
 
