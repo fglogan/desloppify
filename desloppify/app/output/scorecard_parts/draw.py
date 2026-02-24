@@ -51,7 +51,7 @@ def draw_right_panel(
             width=1,
         )
 
-        name_col_width = scale(120)
+        name_col_width = scale(132)
         value_col_gap = scale(4)
         value_col_width = scale(34)
         total_content_width = (
