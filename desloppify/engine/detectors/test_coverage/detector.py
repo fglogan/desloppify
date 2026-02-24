@@ -21,6 +21,14 @@ from .discovery import (
 )
 from .metrics import _COMPLEXITY_TIER_UPGRADE, _file_loc, _loc_weight
 
+_QUALITY_ISSUE_PRIORITY = {
+    "assertion_free": 5,
+    "placeholder_smoke": 4,
+    "smoke": 3,
+    "over_mocked": 2,
+    "snapshot_heavy": 1,
+}
+
 
 def detect_test_coverage(
     graph: dict,
@@ -103,18 +111,14 @@ def _generate_findings(
                 lang_name,
                 parsed_imports_by_test=parsed_imports_by_test,
             )
-            for test_file in related_tests:
-                quality = test_quality.get(test_file)
-                if quality is None:
-                    continue
-                finding = _quality_issue_finding(
-                    prod_file=filepath,
-                    test_file=test_file,
-                    quality=quality,
-                    loc_weight=loc_weight,
-                )
-                if finding:
-                    entries.append(finding)
+            finding = _select_direct_test_quality_finding(
+                prod_file=filepath,
+                related_tests=related_tests,
+                test_quality=test_quality,
+                loc_weight=loc_weight,
+            )
+            if finding:
+                entries.append(finding)
             continue
 
         complexity = cmap.get(filepath, 0)
@@ -141,6 +145,59 @@ def _generate_findings(
         )
 
     return entries
+
+
+def _quality_issue_rank(quality_kind: object) -> int:
+    """Return severity rank for a quality issue kind (higher = more severe)."""
+    if not isinstance(quality_kind, str):
+        return 0
+    return _QUALITY_ISSUE_PRIORITY.get(quality_kind, 0)
+
+
+def _select_direct_test_quality_finding(
+    *,
+    prod_file: str,
+    related_tests: list[str],
+    test_quality: dict[str, dict],
+    loc_weight: float,
+) -> dict | None:
+    """Return one representative quality issue for a directly-tested module.
+
+    Avoid false positives from coverage-smoke suites by suppressing weak-test
+    findings when the module also has at least one adequate/thorough direct test.
+    """
+    has_adequate_direct_test = False
+    selected: tuple[int, str, dict] | None = None
+
+    for test_file in sorted(related_tests):
+        quality = test_quality.get(test_file)
+        if quality is None:
+            continue
+        quality_kind = quality.get("quality")
+        finding = _quality_issue_finding(
+            prod_file=prod_file,
+            test_file=test_file,
+            quality=quality,
+            loc_weight=loc_weight,
+        )
+        if finding is None:
+            if quality_kind in {"adequate", "thorough"}:
+                has_adequate_direct_test = True
+            continue
+
+        rank = _quality_issue_rank(quality_kind)
+        if selected is None:
+            selected = (rank, test_file, finding)
+            continue
+        prev_rank, prev_file, _ = selected
+        if rank > prev_rank or (rank == prev_rank and test_file < prev_file):
+            selected = (rank, test_file, finding)
+
+    if has_adequate_direct_test:
+        return None
+    if selected is None:
+        return None
+    return selected[2]
 
 
 def _quality_issue_finding(

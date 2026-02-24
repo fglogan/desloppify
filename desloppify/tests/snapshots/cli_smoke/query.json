@@ -361,7 +361,7 @@
     "dimensions": {
       "lowest_dimensions": [
         {
-          "name": "Naming Quality",
+          "name": "Naming quality",
           "strict": 0.0,
           "issues": 0,
           "impact": 0.0,
@@ -369,7 +369,7 @@
           "impact_description": "re-review to improve"
         },
         {
-          "name": "Error Consistency",
+          "name": "Error consistency",
           "strict": 0.0,
           "issues": 0,
           "impact": 0.0,
@@ -377,7 +377,7 @@
           "impact_description": "re-review to improve"
         },
         {
-          "name": "Abstraction Fit",
+          "name": "Abstraction fit",
           "strict": 0.0,
           "issues": 0,
           "impact": 0.0,

@@ -798,6 +798,107 @@ class TestDetectTestCoverage:
         assert len(placeholder_entries) == 1
         assert placeholder_entries[0]["file"] == prod_f
 
+    def test_placeholder_smoke_not_reported_when_adequate_direct_test_exists(
+        self, tmp_path
+    ):
+        """A good direct test should suppress placeholder-smoke quality noise."""
+        prod_f = _write_file(tmp_path, "utils.ts", "export const foo = 1;\n" * 12)
+        placeholder_test = _write_file(
+            tmp_path,
+            "utils.placeholder.test.ts",
+            (
+                "import './utils';\n"
+                "import { describe, it, expect } from 'vitest';\n\n"
+                "describe('coverage smoke: src/utils.ts', () => {\n"
+                "  it('has direct test coverage entry', () => {\n"
+                "    expect(true).toBe(true);\n"
+                "  });\n"
+                "});\n"
+            ),
+        )
+        adequate_test = _write_file(
+            tmp_path,
+            "utils.behavior.test.ts",
+            (
+                "import { describe, it, expect } from 'vitest';\n"
+                "import { foo } from './utils';\n\n"
+                "describe('utils', () => {\n"
+                "  it('keeps value stable', () => {\n"
+                "    expect(foo).toBe(1);\n"
+                "    expect(typeof foo).toBe('number');\n"
+                "    expect(foo > 0).toBe(true);\n"
+                "  });\n"
+                "});\n"
+            ),
+        )
+        zone_map = _make_zone_map([prod_f, placeholder_test, adequate_test])
+        graph = {
+            prod_f: {"imports": set(), "importer_count": 0},
+            placeholder_test: {"imports": {prod_f}},
+            adequate_test: {"imports": {prod_f}},
+        }
+
+        entries, _potential = detect_test_coverage(graph, zone_map, "typescript")
+        quality_entries = [e for e in entries if e.get("file") == prod_f and e.get("detail", {}).get("kind") in {
+            "assertion_free_test",
+            "placeholder_test",
+            "shallow_tests",
+            "over_mocked",
+            "snapshot_heavy",
+        }]
+        assert quality_entries == []
+
+    def test_multiple_weak_direct_tests_emit_single_highest_priority_issue(
+        self, tmp_path
+    ):
+        """Direct-test quality should produce one representative issue per module."""
+        prod_f = _write_file(tmp_path, "utils.ts", "export const foo = 1;\n" * 12)
+        placeholder_test = _write_file(
+            tmp_path,
+            "utils.placeholder.test.ts",
+            (
+                "import './utils';\n"
+                "import { describe, it, expect } from 'vitest';\n\n"
+                "describe('coverage smoke: src/utils.ts', () => {\n"
+                "  it('has direct test coverage entry', () => {\n"
+                "    expect(true).toBe(true);\n"
+                "  });\n"
+                "});\n"
+            ),
+        )
+        smoke_test = _write_file(
+            tmp_path,
+            "utils.smoke.test.ts",
+            (
+                "import { describe, it, expect } from 'vitest';\n"
+                "import { foo } from './utils';\n\n"
+                "describe('utils smoke', () => {\n"
+                "  it('a', () => {});\n"
+                "  it('b', () => {});\n"
+                "  it('c', () => { expect(foo).toBe(1); });\n"
+                "});\n"
+            ),
+        )
+        zone_map = _make_zone_map([prod_f, placeholder_test, smoke_test])
+        graph = {
+            prod_f: {"imports": set(), "importer_count": 0},
+            placeholder_test: {"imports": {prod_f}},
+            smoke_test: {"imports": {prod_f}},
+        }
+
+        entries, _potential = detect_test_coverage(graph, zone_map, "typescript")
+        quality_entries = [
+            e for e in entries if e.get("file") == prod_f and e.get("detail", {}).get("kind") in {
+                "assertion_free_test",
+                "placeholder_test",
+                "shallow_tests",
+                "over_mocked",
+                "snapshot_heavy",
+            }
+        ]
+        assert len(quality_entries) == 1
+        assert quality_entries[0]["detail"]["kind"] == "placeholder_test"
+
     def test_naming_convention_mapping(self, tmp_path):
         """Test file matched by naming convention (no graph import edge)."""
         prod_f = _write_file(tmp_path, "utils.py", "def foo():\n    return 1\n" * 10)

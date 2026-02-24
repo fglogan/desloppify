@@ -365,7 +365,7 @@
         "Nesting that is inherent to the problem (e.g., recursive tree processing)"
       ],
       "meta": {
-        "display_name": "Design Coherence",
+        "display_name": "Design coherence",
         "weight": 10.0,
         "reset_on_scan": true
       }

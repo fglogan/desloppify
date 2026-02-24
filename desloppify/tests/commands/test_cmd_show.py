@@ -270,13 +270,13 @@ class TestShowSubjectiveFollowup:
                 "reset_dimensions": ["naming_quality", "logic_clarity"],
             },
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 0.0,
                     "strict": 0.0,
                     "issues": 0,
                     "detectors": {"subjective_assessment": {}},
                 },
-                "Logic Clarity": {
+                "Logic clarity": {
                     "score": 0.0,
                     "strict": 0.0,
                     "issues": 0,

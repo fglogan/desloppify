@@ -7,32 +7,33 @@ from desloppify.engine._scoring.policy.core import SUBJECTIVE_CHECKS
 
 DISPLAY_NAMES: dict[str, str] = {
     # Holistic dimensions
-    "cross_module_architecture": "Cross-Module Arch",
-    "initialization_coupling": "Init Coupling",
-    "convention_outlier": "Convention Drift",
-    "error_consistency": "Error Consistency",
-    "abstraction_fitness": "Abstraction Fit",
-    "dependency_health": "Dep Health",
-    "test_strategy": "Test Strategy",
-    "api_surface_coherence": "API Coherence",
-    "authorization_consistency": "Auth Consistency",
-    "ai_generated_debt": "AI Generated Debt",
-    "incomplete_migration": "Stale Migration",
-    "package_organization": "Structure Nav",
-    "high_level_elegance": "High Elegance",
-    "mid_level_elegance": "Mid Elegance",
-    "low_level_elegance": "Low Elegance",
+    "cross_module_architecture": "Cross-module arch",
+    "initialization_coupling": "Init coupling",
+    "convention_outlier": "Convention drift",
+    "error_consistency": "Error consistency",
+    "abstraction_fitness": "Abstraction fit",
+    "dependency_health": "Dep health",
+    "test_strategy": "Test strategy",
+    "api_surface_coherence": "API coherence",
+    "authorization_consistency": "Auth consistency",
+    "ai_generated_debt": "AI generated debt",
+    "incomplete_migration": "Stale migration",
+    "package_organization": "Structure nav",
+    "high_level_elegance": "High elegance",
+    "mid_level_elegance": "Mid elegance",
+    "low_level_elegance": "Low elegance",
     # Design coherence (concerns bridge)
-    "design_coherence": "Design Coherence",
+    "design_coherence": "Design coherence",
     # Per-file review dimensions
-    "naming_quality": "Naming Quality",
-    "logic_clarity": "Logic Clarity",
-    "type_safety": "Type Safety",
+    "naming_quality": "Naming quality",
+    "logic_clarity": "Logic clarity",
+    "type_safety": "Type safety",
     "contract_coherence": "Contracts",
 }
 
 def _display_fallback(dim_name: str) -> str:
-    return dim_name.replace("_", " ").title()
+    words = dim_name.replace("_", " ")
+    return words[0].upper() + words[1:] if words else words
 
 
 def _normalize_dimension_key(dim_name: object) -> str:

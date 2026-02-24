@@ -31,7 +31,7 @@ def build_workflow_guide(attest_example: str) -> str:
 
         ### Understanding Dimensions
         - **Mechanical** (File health, Code quality, etc.): Fix code → rescan
-        - **Subjective** (Naming Quality, Logic Clarity, etc.): Address review findings → re-review
+        - **Subjective** (Naming quality, Logic clarity, etc.): Address review findings → re-review
         - **Health vs Strict**: Health ignores wontfix; Strict penalizes it. Focus on Strict.
         """
     ).strip()

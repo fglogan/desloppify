@@ -1899,6 +1899,55 @@ class TestAutoResolveOnReImport:
         ]
         assert len(still_open) == 1
 
+    def test_partial_holistic_reimport_only_resolves_imported_dimensions(self):
+        state = build_empty_state()
+
+        data1 = {
+            "findings": [
+                {
+                    "dimension": "cross_module_architecture",
+                    "identifier": "god_mod",
+                    "summary": "too central",
+                    "confidence": "high",
+                    "suggestion": "split it",
+                },
+                {
+                    "dimension": "abstraction_fitness",
+                    "identifier": "util_dump",
+                    "summary": "dumping ground",
+                    "confidence": "medium",
+                    "suggestion": "extract domains",
+                },
+            ],
+        }
+        diff1 = import_holistic_findings(_as_review_payload(data1), state, "typescript")
+        assert diff1["new"] == 2
+
+        by_summary = {f["summary"]: fid for fid, f in state["findings"].items()}
+        cross_mod_id = by_summary["too central"]
+        abstraction_id = by_summary["dumping ground"]
+
+        data2 = {
+            "findings": [
+                {
+                    "dimension": "abstraction_fitness",
+                    "identifier": "layout_bag",
+                    "summary": "controller bag still broad",
+                    "confidence": "high",
+                    "suggestion": "split into focused hooks",
+                },
+            ],
+            "review_scope": {
+                "full_sweep_included": False,
+                "imported_dimensions": ["abstraction_fitness"],
+            },
+        }
+        diff2 = import_holistic_findings(_as_review_payload(data2), state, "typescript")
+        assert diff2["new"] == 1
+        assert diff2["auto_resolved"] >= 1
+        assert state["findings"][abstraction_id]["status"] == "auto_resolved"
+        assert state["findings"][cross_mod_id]["status"] == "open"
+
     def test_per_file_auto_resolve_on_reimport(self):
         state = build_empty_state()
 

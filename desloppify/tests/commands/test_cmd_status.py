@@ -246,14 +246,14 @@ class TestStatusSubjectiveFollowup:
             }
         }
         dim_scores = {
-            "Naming Quality": {
+            "Naming quality": {
                 "score": 0.0,
                 "strict": 0.0,
                 "tier": 4,
                 "issues": 0,
                 "detectors": {"subjective_assessment": {}},
             },
-            "Logic Clarity": {
+            "Logic clarity": {
                 "score": 0.0,
                 "strict": 0.0,
                 "tier": 4,

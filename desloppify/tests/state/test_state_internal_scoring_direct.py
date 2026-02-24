@@ -83,11 +83,11 @@ def test_update_objective_health_resets_two_target_matched_subjective_dimensions
     )
 
     dim_scores = state["dimension_scores"]
-    assert dim_scores["Naming Quality"]["score"] == 0.0
-    assert dim_scores["Logic Clarity"]["score"] == 0.0
-    assert dim_scores["AI Generated Debt"]["score"] == 90.0
+    assert dim_scores["Naming quality"]["score"] == 0.0
+    assert dim_scores["Logic clarity"]["score"] == 0.0
+    assert dim_scores["AI generated debt"]["score"] == 90.0
     assert (
-        dim_scores["AI Generated Debt"]["detectors"]["subjective_assessment"][
+        dim_scores["AI generated debt"]["detectors"]["subjective_assessment"][
             "assessment_score"
         ]
         == 90.0
@@ -116,9 +116,9 @@ def test_update_objective_health_warns_single_target_matched_subjective_dimensio
     )
 
     dim_scores = state["dimension_scores"]
-    assert dim_scores["Naming Quality"]["score"] == 95.0
+    assert dim_scores["Naming quality"]["score"] == 95.0
     assert (
-        dim_scores["Naming Quality"]["detectors"]["subjective_assessment"][
+        dim_scores["Naming quality"]["detectors"]["subjective_assessment"][
             "assessment_score"
         ]
         == 95.0

@@ -408,9 +408,9 @@ class TestComputeDimensionScores:
         # No mechanical dimensions
         assert "Code quality" not in result
         # Subjective placeholders are explicit 0% until assessed.
-        assert "Naming Quality" in result
-        assert result["Naming Quality"]["score"] == 0.0
-        det = result["Naming Quality"]["detectors"]["subjective_assessment"]
+        assert "Naming quality" in result
+        assert result["Naming quality"]["score"] == 0.0
+        det = result["Naming quality"]["detectors"]["subjective_assessment"]
         assert det["placeholder"] is True
 
     def test_unassessed_dim_with_review_findings_still_zero(self):
@@ -420,10 +420,10 @@ class TestComputeDimensionScores:
         findings = _findings_dict(f)
         result = compute_dimension_scores(findings, {})
         # Review findings are tracked but don't change placeholder score.
-        assert "Naming Quality" in result
-        assert result["Naming Quality"]["score"] == 0.0
-        assert result["Naming Quality"]["issues"] == 1
-        det = result["Naming Quality"]["detectors"]["subjective_assessment"]
+        assert "Naming quality" in result
+        assert result["Naming quality"]["score"] == 0.0
+        assert result["Naming quality"]["issues"] == 1
+        det = result["Naming quality"]["detectors"]["subjective_assessment"]
         assert det["placeholder"] is True
 
     def test_with_some_findings(self):
@@ -629,7 +629,7 @@ class TestComputeHealthBreakdown:
                 "issues": 0,
                 "detectors": {},
             },
-            "High Elegance": {
+            "High elegance": {
                 "score": 80.0,
                 "tier": 4,
                 "checks": SUBJECTIVE_CHECKS,
@@ -643,8 +643,8 @@ class TestComputeHealthBreakdown:
         assert breakdown["overall_score"] == pytest.approx(88.0, abs=0.1)
 
         rows = {entry["name"]: entry for entry in breakdown["entries"]}
-        assert rows["High Elegance"]["pool"] == "subjective"
-        assert rows["High Elegance"]["overall_drag"] == pytest.approx(12.0, abs=0.1)
+        assert rows["High elegance"]["pool"] == "subjective"
+        assert rows["High elegance"]["overall_drag"] == pytest.approx(12.0, abs=0.1)
         assert rows["Code quality"]["pool"] == "mechanical"
         assert rows["Code quality"]["overall_contribution"] == pytest.approx(
             40.0, abs=0.1
@@ -899,8 +899,8 @@ class TestSubjectiveScoring:
         """One assessment adds a dimension with the right shape."""
         assessments = {"naming_quality": {"score": 75}}
         result = compute_dimension_scores({}, {}, subjective_assessments=assessments)
-        assert "Naming Quality" in result
-        dim = result["Naming Quality"]
+        assert "Naming quality" in result
+        dim = result["Naming quality"]
         # Assessment score drives dimension score directly.
         assert dim["score"] == 75.0
         assert dim["tier"] == 4
@@ -927,7 +927,7 @@ class TestSubjectiveScoring:
             subjective_assessments=assessments,
             allowed_subjective_dimensions={"naming_quality"},
         )
-        assert "Naming Quality" in result
+        assert "Naming quality" in result
         # Explicit assessment for custom_domain_fit still counts even though
         # it is not in the allowed set.
         assert "Custom Domain Fit" in result
@@ -940,10 +940,10 @@ class TestSubjectiveScoring:
             "error_handling": {"score": 60},
         }
         result = compute_dimension_scores({}, {}, subjective_assessments=assessments)
-        assert "Naming Quality" in result
+        assert "Naming quality" in result
         assert "Error Handling" in result
         # Assessment scores drive dimension scores directly.
-        assert result["Naming Quality"]["score"] == 80.0
+        assert result["Naming quality"]["score"] == 80.0
         assert result["Error Handling"]["score"] == 60.0
 
     def test_assessment_perfect_score(self):
@@ -975,7 +975,7 @@ class TestSubjectiveScoring:
             }
         }
         result = compute_dimension_scores({}, {}, subjective_assessments=assessments)
-        dim = result["Naming Quality"]
+        dim = result["Naming quality"]
         assert dim["score"] == 0.0
         det = dim["detectors"]["subjective_assessment"]
         assert det["pass_rate"] == 0.0
@@ -1047,7 +1047,7 @@ class TestSubjectiveScoring:
         result = compute_dimension_scores(
             findings, {}, subjective_assessments=assessments
         )
-        dim = result["Naming Quality"]
+        dim = result["Naming quality"]
         assert dim["issues"] == 2  # only the 2 open ones tracked
         det = dim["detectors"]["subjective_assessment"]
         assert det["issues"] == 2
@@ -1072,7 +1072,7 @@ class TestSubjectiveScoring:
             }
         }
         result = compute_dimension_scores({}, {}, subjective_assessments=assessments)
-        det = result["Abstraction Fit"]["detectors"]["subjective_assessment"]
+        det = result["Abstraction fit"]["detectors"]["subjective_assessment"]
         assert det["components"] == [
             "Abstraction Leverage",
             "Indirection Cost",
@@ -1091,7 +1091,7 @@ class TestSubjectiveScoring:
         result = compute_dimension_scores(
             findings, {}, subjective_assessments=assessments
         )
-        dim = result["Naming Quality"]
+        dim = result["Naming quality"]
         assert dim["issues"] == 0  # smells detector, not "review"
 
     def test_compute_score_impact_returns_zero_for_subjective(self):
@@ -1173,8 +1173,8 @@ class TestSubjectiveDimensionCollision:
         result = compute_dimension_scores(
             findings, potentials, subjective_assessments=assessments
         )
-        assert "Naming Quality" in result
-        assert "Naming Quality (subjective)" not in result
+        assert "Naming quality" in result
+        assert "Naming quality (subjective)" not in result
 
     def test_multiple_collisions(self):
         """Multiple assessment dims that collide get suffixed independently."""

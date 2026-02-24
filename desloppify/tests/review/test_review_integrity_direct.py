@@ -60,13 +60,13 @@ def test_subjective_review_open_breakdown_counts_reasons_and_holistic_reasons():
 
 def test_unassessed_subjective_dimensions_finds_zero_placeholder_dimensions():
     dim_scores = {
-        "High Elegance": {
+        "High elegance": {
             "score": 0.0,
             "strict": 0.0,
             "issues": 0,
             "detectors": {"subjective_assessment": {}},
         },
-        "Mid Elegance": {
+        "Mid elegance": {
             "score": 70.0,
             "strict": 70.0,
             "issues": 1,
@@ -80,4 +80,4 @@ def test_unassessed_subjective_dimensions_finds_zero_placeholder_dimensions():
         },
     }
 
-    assert unassessed_subjective_dimensions(dim_scores) == ["High Elegance"]
+    assert unassessed_subjective_dimensions(dim_scores) == ["High elegance"]

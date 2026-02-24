@@ -100,7 +100,7 @@ class TestFixReviewZeroCandidates:
         loaded_state = {
             "scan_path": ".",
             "dimension_scores": {
-                "High Elegance": {
+                "High elegance": {
                     "score": 0.0,
                     "strict": 0.0,
                     "issues": 0,

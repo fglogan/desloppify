@@ -376,16 +376,16 @@ class TestScorecardDimensionPolicy:
 
     def test_collapse_elegance_dimensions_averages_components(self):
         dims = [
-            ("Naming Quality", _mk_dim(90, strict=90)),
-            ("High Elegance", _mk_dim(80, strict=70, issues=1)),
-            ("Mid Elegance", _mk_dim(60, strict=50, issues=2)),
-            ("Low Elegance", _mk_dim(100, strict=90, issues=0)),
+            ("Naming quality", _mk_dim(90, strict=90)),
+            ("High elegance", _mk_dim(80, strict=70, issues=1)),
+            ("Mid elegance", _mk_dim(60, strict=50, issues=2)),
+            ("Low elegance", _mk_dim(100, strict=90, issues=0)),
         ]
         collapsed = collapse_elegance_dimensions(dims, lang_key="python")
         names = [name for name, _ in collapsed]
-        assert "High Elegance" not in names
-        assert "Mid Elegance" not in names
-        assert "Low Elegance" not in names
+        assert "High elegance" not in names
+        assert "Mid elegance" not in names
+        assert "Low elegance" not in names
         assert "Elegance" in names
         combined = dict(collapsed)["Elegance"]
         assert combined["score"] == 80.0
@@ -401,12 +401,12 @@ class TestScorecardDimensionPolicy:
             ("Duplication", _mk_dim(98, subjective=False)),
             ("Security", _mk_dim(97, subjective=False)),
             ("Test health", _mk_dim(96, subjective=False)),
-            ("Naming Quality", _mk_dim(80)),
-            ("Error Consistency", _mk_dim(81)),
-            ("Abstraction Fit", _mk_dim(82)),
-            ("Logic Clarity", _mk_dim(83)),
-            ("AI Generated Debt", _mk_dim(84)),
-            ("Type Safety", _mk_dim(85)),
+            ("Naming quality", _mk_dim(80)),
+            ("Error consistency", _mk_dim(81)),
+            ("Abstraction fit", _mk_dim(82)),
+            ("Logic clarity", _mk_dim(83)),
+            ("AI generated debt", _mk_dim(84)),
+            ("Type safety", _mk_dim(85)),
             ("Contracts", _mk_dim(86)),
             ("Elegance", _mk_dim(87)),
         ]
@@ -418,7 +418,7 @@ class TestScorecardDimensionPolicy:
         # Contracts has the highest score among non-preferred extras, so it's
         # dropped first when budget is exhausted.
         assert "Contracts" not in names
-        assert "Type Safety" in names
+        assert "Type safety" in names
 
     def test_limit_scorecard_dimensions_typescript_keeps_type_safety_not_contracts(
         self,
@@ -429,12 +429,12 @@ class TestScorecardDimensionPolicy:
             ("Duplication", _mk_dim(98, subjective=False)),
             ("Security", _mk_dim(97, subjective=False)),
             ("Test health", _mk_dim(96, subjective=False)),
-            ("Naming Quality", _mk_dim(80)),
-            ("Error Consistency", _mk_dim(81)),
-            ("Abstraction Fit", _mk_dim(82)),
-            ("Logic Clarity", _mk_dim(83)),
-            ("AI Generated Debt", _mk_dim(84)),
-            ("Type Safety", _mk_dim(85)),
+            ("Naming quality", _mk_dim(80)),
+            ("Error consistency", _mk_dim(81)),
+            ("Abstraction fit", _mk_dim(82)),
+            ("Logic clarity", _mk_dim(83)),
+            ("AI generated debt", _mk_dim(84)),
+            ("Type safety", _mk_dim(85)),
             ("Contracts", _mk_dim(86)),
             ("Elegance", _mk_dim(87)),
         ]
@@ -443,7 +443,7 @@ class TestScorecardDimensionPolicy:
         )
         names = {name for name, _ in limited}
         assert len(limited) == 12
-        assert "Type Safety" in names
+        assert "Type safety" in names
         assert "Contracts" not in names
 
     def test_prepare_scorecard_dimensions_collapses_elegance(self):
@@ -455,16 +455,16 @@ class TestScorecardDimensionPolicy:
                 "Duplication": _mk_dim(98, subjective=False),
                 "Security": _mk_dim(97, subjective=False),
                 "Test health": _mk_dim(96, subjective=False),
-                "Naming Quality": _mk_dim(80),
-                "Error Consistency": _mk_dim(81),
-                "Abstraction Fit": _mk_dim(82),
-                "Logic Clarity": _mk_dim(83),
-                "AI Generated Debt": _mk_dim(84),
-                "Type Safety": _mk_dim(85),
+                "Naming quality": _mk_dim(80),
+                "Error consistency": _mk_dim(81),
+                "Abstraction fit": _mk_dim(82),
+                "Logic clarity": _mk_dim(83),
+                "AI generated debt": _mk_dim(84),
+                "Type safety": _mk_dim(85),
                 "Contracts": _mk_dim(86),
-                "High Elegance": _mk_dim(87),
-                "Mid Elegance": _mk_dim(88),
-                "Low Elegance": _mk_dim(89),
+                "High elegance": _mk_dim(87),
+                "Mid elegance": _mk_dim(88),
+                "Low elegance": _mk_dim(89),
             },
         }
 
@@ -473,9 +473,9 @@ class TestScorecardDimensionPolicy:
         # 5 mechanical + 7 non-elegance subjective + 1 collapsed Elegance = 13
         assert len(rows) == 13
         assert "Elegance" in names
-        assert "High Elegance" not in names
-        assert "Mid Elegance" not in names
-        assert "Low Elegance" not in names
+        assert "High elegance" not in names
+        assert "Mid elegance" not in names
+        assert "Low elegance" not in names
 
     def test_prepare_scorecard_dimensions_omits_missing_dimensions(self):
         """Dynamic scorecard only shows dimensions with real data — missing
@@ -488,12 +488,12 @@ class TestScorecardDimensionPolicy:
                 "Duplication": _mk_dim(98, subjective=False),
                 "Security": _mk_dim(97, subjective=False),
                 "Test health": _mk_dim(96, subjective=False),
-                "Naming Quality": _mk_dim(80),
-                "Error Consistency": _mk_dim(81),
-                "Abstraction Fit": _mk_dim(82),
-                "Logic Clarity": _mk_dim(83),
-                "AI Generated Debt": _mk_dim(84),
-                # Missing: Type Safety + all elegance component rows
+                "Naming quality": _mk_dim(80),
+                "Error consistency": _mk_dim(81),
+                "Abstraction fit": _mk_dim(82),
+                "Logic clarity": _mk_dim(83),
+                "AI generated debt": _mk_dim(84),
+                # Missing: Type safety + all elegance component rows
             },
         }
 
@@ -501,5 +501,5 @@ class TestScorecardDimensionPolicy:
         values = dict(rows)
         # 5 mechanical + 5 subjective = 10 (no fabricated placeholders)
         assert len(rows) == 10
-        assert "Type Safety" not in values
+        assert "Type safety" not in values
         assert "Elegance" not in values

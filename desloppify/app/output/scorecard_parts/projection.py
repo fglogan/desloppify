@@ -44,7 +44,7 @@ def scorecard_dimension_cli_keys(name: str, data: dict) -> list[str]:
                 "mid_level_elegance",
                 "low_level_elegance",
             ]
-    elif name in ("Abstraction Fit", "Abstraction Fit (combined)"):
+    elif name in ("Abstraction fit", "Abstraction fit (combined)"):
         components = (
             data.get("detectors", {})
             .get("subjective_assessment", {})

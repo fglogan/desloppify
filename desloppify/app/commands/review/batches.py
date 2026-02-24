@@ -745,6 +745,17 @@ def do_run_batches(
     merged_assessment_dims = _normalize_dimension_list(
         list((merged.get("assessments") or {}).keys())
     )
+    merged_finding_dims = _normalize_dimension_list(
+        [
+            finding.get("dimension")
+            for finding in (merged.get("findings") or [])
+            if isinstance(finding, dict)
+        ]
+    )
+    merged_imported_dims = _normalize_dimension_list(
+        merged_assessment_dims + merged_finding_dims
+    )
+    review_scope["imported_dimensions"] = merged_imported_dims
     missing_after_import = _print_import_dimension_coverage_notice(
         assessed_dims=merged_assessment_dims,
         scored_dims=scored_dimensions,

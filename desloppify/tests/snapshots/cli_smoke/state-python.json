@@ -95,27 +95,27 @@
           "score": 100.0,
           "strict": 100.0
         },
-        "Naming Quality": {
+        "Naming quality": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Error Consistency": {
+        "Error consistency": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Abstraction Fit": {
+        "Abstraction fit": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Logic Clarity": {
+        "Logic clarity": {
           "score": 0.0,
           "strict": 0.0
         },
-        "AI Generated Debt": {
+        "AI generated debt": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Type Safety": {
+        "Type safety": {
           "score": 0.0,
           "strict": 0.0
         },
@@ -123,15 +123,15 @@
           "score": 0.0,
           "strict": 0.0
         },
-        "High Elegance": {
+        "High elegance": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Mid Elegance": {
+        "Mid elegance": {
           "score": 0.0,
           "strict": 0.0
         },
-        "Low Elegance": {
+        "Low elegance": {
           "score": 0.0,
           "strict": 0.0
         }
@@ -220,7 +220,7 @@
       },
       "strict": 100.0
     },
-    "Naming Quality": {
+    "Naming quality": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -238,7 +238,7 @@
       },
       "strict": 0.0
     },
-    "Error Consistency": {
+    "Error consistency": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -256,7 +256,7 @@
       },
       "strict": 0.0
     },
-    "Abstraction Fit": {
+    "Abstraction fit": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -274,7 +274,7 @@
       },
       "strict": 0.0
     },
-    "Logic Clarity": {
+    "Logic clarity": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -292,7 +292,7 @@
       },
       "strict": 0.0
     },
-    "AI Generated Debt": {
+    "AI generated debt": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -310,7 +310,7 @@
       },
       "strict": 0.0
     },
-    "Type Safety": {
+    "Type safety": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -346,7 +346,7 @@
       },
       "strict": 0.0
     },
-    "High Elegance": {
+    "High elegance": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -364,7 +364,7 @@
       },
       "strict": 0.0
     },
-    "Mid Elegance": {
+    "Mid elegance": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,
@@ -382,7 +382,7 @@
       },
       "strict": 0.0
     },
-    "Low Elegance": {
+    "Low elegance": {
       "score": 0.0,
       "strict_score": 0.0,
       "checks": 10,

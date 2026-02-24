@@ -669,7 +669,7 @@ class TestShowPostScanAnalysis:
             "objective_score": 50,
             "strict_score": 50,
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 88.0,
                     "strict": 88.0,
                     "detectors": {"subjective_assessment": {"issues": 2}},
@@ -703,7 +703,7 @@ class TestShowPostScanAnalysis:
             "strict_score": 50,
             "review_cache": {"files": {"src/a.py": {"reviewed_at": "2026-01-01T00:00:00+00:00"}}},
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 88.0,
                     "strict": 88.0,
                     "detectors": {"subjective_assessment": {"issues": 2}},
@@ -733,7 +733,7 @@ class TestShowPostScanAnalysis:
             "objective_score": 95,
             "strict_score": 95,
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 95.0,
                     "strict": 95.0,
                     "detectors": {"subjective_assessment": {"issues": 0}},

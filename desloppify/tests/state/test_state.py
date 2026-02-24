@@ -833,8 +833,8 @@ class TestScoreAntiGaming:
 
         assert reloaded["subjective_integrity"]["status"] == "penalized"
         assert reloaded["subjective_integrity"]["target_score"] == 95.0
-        assert reloaded["dimension_scores"]["Naming Quality"]["score"] == 0.0
-        assert reloaded["dimension_scores"]["Logic Clarity"]["score"] == 0.0
+        assert reloaded["dimension_scores"]["Naming quality"]["score"] == 0.0
+        assert reloaded["dimension_scores"]["Logic clarity"]["score"] == 0.0
 
     def test_manual_fixed_does_not_improve_verified_until_scan_confirms(self):
         from desloppify.state import resolve_findings

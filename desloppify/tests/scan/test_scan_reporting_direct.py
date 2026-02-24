@@ -390,7 +390,7 @@ def test_print_llm_summary_respects_env_and_includes_dimension_table(
                 "checks": 1,
                 "tier": 1,
             },
-            "Naming Quality": {
+            "Naming quality": {
                 "score": 75.0,
                 "strict": 65.0,
                 "issues": 1,
@@ -442,7 +442,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
                 },
             ),
             (
-                "Naming Quality",
+                "Naming quality",
                 {
                     "score": 88.0,
                     "strict": 85.0,
@@ -459,7 +459,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
         "Scorecard dimensions (matches scorecard.png)" in progress_out
         or "Subjective measures (matches scorecard.png)" in progress_out
     )
-    assert "Naming Quality" in progress_out
+    assert "Naming quality" in progress_out
     if "Scorecard dimensions (matches scorecard.png)" in progress_out:
         assert "File health" in progress_out
 
@@ -486,7 +486,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
     scan_reporting_dimensions_mod.show_low_dimension_hints(
         {
             "File health": {"score": 52.0, "strict": 40.0},
-            "Naming Quality": {"score": 55.0, "strict": 45.0},
+            "Naming quality": {"score": 55.0, "strict": 45.0},
         }
     )
     hint_out = capsys.readouterr().out
@@ -597,7 +597,7 @@ def test_show_scorecard_dimensions_uses_scorecard_rows(monkeypatch, capsys):
         lambda _state, **_kwargs: [
             ("File health", {"score": 90.0, "strict": 88.0, "detectors": {}}),
             (
-                "Naming Quality",
+                "Naming quality",
                 {
                     "score": 96.0,
                     "strict": 94.0,
@@ -620,7 +620,7 @@ def test_show_scorecard_dimensions_uses_scorecard_rows(monkeypatch, capsys):
         "Scorecard dimensions (matches scorecard.png):" in out
         or "Subjective measures (matches scorecard.png):" in out
     )
-    assert "Naming Quality" in out
+    assert "Naming quality" in out
     assert "96.0%" in out
     assert "strict  94.0%" in out
     assert "Elegance" in out
@@ -638,7 +638,7 @@ def test_show_score_model_breakdown_prints_recipe_and_drags(capsys):
                 "issues": 0,
                 "detectors": {},
             },
-            "High Elegance": {
+            "High elegance": {
                 "score": 80.0,
                 "tier": 4,
                 "checks": 10,
@@ -652,7 +652,7 @@ def test_show_score_model_breakdown_prints_recipe_and_drags(capsys):
     assert "Score recipe:" in out
     assert "40% mechanical + 60% subjective" in out
     assert "Biggest weighted drags" in out
-    assert "High Elegance" in out
+    assert "High elegance" in out
 
 
 def test_subjective_rerun_command_builds_dimension_and_holistic_variants():
@@ -687,7 +687,7 @@ def test_subjective_integrity_followup_handles_none_threshold_and_target():
         },
         [
             {
-                "name": "Naming Quality",
+                "name": "Naming quality",
                 "score": 96.0,
                 "strict": 96.0,
                 "issues": 0,
@@ -721,7 +721,7 @@ def test_show_subjective_paths_prioritizes_integrity_gap(monkeypatch, capsys):
     scan_reporting_dimensions_mod.show_subjective_paths_section(
         {"findings": {}, "scan_path": ".", "strict_score": 80.0},
         {
-            "High Elegance": {
+            "High elegance": {
                 "score": 0.0,
                 "strict": 0.0,
                 "issues": 0,
@@ -733,7 +733,7 @@ def test_show_subjective_paths_prioritizes_integrity_gap(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "High-priority integrity gap:" in out
     assert "review --run-batches --runner codex --parallel --scan-after-import" in out
-    assert "Unassessed (0% placeholder): High Elegance" in out
+    assert "Unassessed (0% placeholder): High elegance" in out
 
 
 def test_show_subjective_paths_prints_out_of_scope_subjective_breakdown(monkeypatch, capsys):
@@ -742,7 +742,7 @@ def test_show_subjective_paths_prints_out_of_scope_subjective_breakdown(monkeypa
         "_scorecard_dimension_rows",
         lambda _state, **_kwargs: [
             (
-                "Naming Quality",
+                "Naming quality",
                 {
                     "score": 100.0,
                     "strict": 100.0,
@@ -773,7 +773,7 @@ def test_show_subjective_paths_prints_out_of_scope_subjective_breakdown(monkeypa
             },
         },
         {
-            "Naming Quality": {
+            "Naming quality": {
                 "score": 100.0,
                 "strict": 100.0,
                 "issues": 0,
@@ -807,13 +807,13 @@ def test_show_subjective_paths_shows_target_match_reset_warning(monkeypatch, cap
             },
         },
         {
-            "Naming Quality": {
+            "Naming quality": {
                 "score": 0.0,
                 "strict": 0.0,
                 "issues": 0,
                 "detectors": {"subjective_assessment": {}},
             },
-            "Logic Clarity": {
+            "Logic clarity": {
                 "score": 0.0,
                 "strict": 0.0,
                 "issues": 0,

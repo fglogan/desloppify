@@ -485,7 +485,7 @@ def batch_concerns(concerns: list) -> dict | None:
     if types:
         why_parts.append(f"concern types: {', '.join(types)}")
     return {
-        "name": "Design Coherence — Mechanical Concern Signals",
+        "name": "Design coherence — Mechanical Concern Signals",
         "dimensions": ["design_coherence"],
         "files_to_read": sorted({c.file for c in concerns if c.file}),
         "why": "; ".join(why_parts),

@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.intelligence.review.dimensions import normalize_dimension_name
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
 from desloppify.intelligence.review.importing.shared import (
     _lang_potentials,
@@ -176,14 +177,69 @@ def _validate_and_build_findings(
     return review_findings, skipped, dismissed_concerns
 
 
+def _collect_imported_dimensions(
+    *,
+    findings_list: list[dict],
+    review_findings: list[dict[str, Any]],
+    assessments: dict[str, Any] | None,
+    review_scope: dict[str, Any] | None,
+    valid_dimensions: set[str],
+) -> set[str]:
+    """Return normalized dimensions this import explicitly covered."""
+    imported_dimensions: set[str] = set()
+
+    if isinstance(review_scope, dict):
+        scope_dims = review_scope.get("imported_dimensions")
+        if isinstance(scope_dims, list):
+            for raw_dim in scope_dims:
+                normalized = normalize_dimension_name(str(raw_dim))
+                if normalized in valid_dimensions:
+                    imported_dimensions.add(normalized)
+
+    for finding in findings_list:
+        if not isinstance(finding, dict):
+            continue
+        normalized = normalize_dimension_name(str(finding.get("dimension", "")))
+        if normalized in valid_dimensions:
+            imported_dimensions.add(normalized)
+
+    for finding in review_findings:
+        detail = finding.get("detail")
+        if not isinstance(detail, dict):
+            continue
+        normalized = normalize_dimension_name(str(detail.get("dimension", "")))
+        if normalized in valid_dimensions:
+            imported_dimensions.add(normalized)
+
+    for raw_dim in (assessments or {}):
+        normalized = normalize_dimension_name(str(raw_dim))
+        if normalized in valid_dimensions:
+            imported_dimensions.add(normalized)
+
+    return imported_dimensions
+
+
 def _auto_resolve_stale_holistic(
     state: dict[str, Any],
     new_ids: set[str],
     diff: dict[str, Any],
     utc_now_fn,
+    *,
+    imported_dimensions: set[str] | None = None,
+    full_sweep_included: bool | None = None,
 ) -> None:
     """Auto-resolve open holistic findings not present in the latest import."""
     diff.setdefault("auto_resolved", 0)
+    scope_dimensions = {
+        normalize_dimension_name(dim)
+        for dim in (imported_dimensions or set())
+        if isinstance(dim, str) and dim.strip()
+    }
+    scoped_reimport = full_sweep_included is False
+    # Partial re-import with unknown dimension scope: do not auto-resolve.
+    if scoped_reimport and not scope_dimensions:
+        return
+
     for finding_id, finding in state.get("findings", {}).items():
         if (
             finding["status"] == "open"
@@ -191,6 +247,13 @@ def _auto_resolve_stale_holistic(
             and finding.get("detail", {}).get("holistic")
             and finding_id not in new_ids
         ):
+            if scoped_reimport:
+                detail = finding.get("detail")
+                if not isinstance(detail, dict):
+                    continue
+                dimension = normalize_dimension_name(str(detail.get("dimension", "")))
+                if dimension not in scope_dimensions:
+                    continue
             finding["status"] = "auto_resolved"
             finding["resolved_at"] = utc_now_fn()
             finding["note"] = "not reported in latest holistic re-import"
@@ -216,6 +279,9 @@ def import_holistic_findings(
     )
     if not isinstance(review_scope, dict):
         review_scope = {}
+    scope_full_sweep = review_scope.get("full_sweep_included")
+    if not isinstance(scope_full_sweep, bool):
+        scope_full_sweep = None
     if assessments:
         store_assessments(
             state,
@@ -225,8 +291,20 @@ def import_holistic_findings(
         )
 
     _, holistic_prompts, _ = load_dimensions_for_lang(lang_name)
+    valid_dimensions = {
+        normalize_dimension_name(dim)
+        for dim in holistic_prompts
+        if isinstance(dim, str)
+    }
     review_findings, skipped, dismissed_concerns = _validate_and_build_findings(
         findings_list, holistic_prompts, lang_name
+    )
+    imported_dimensions = _collect_imported_dimensions(
+        findings_list=findings_list,
+        review_findings=review_findings,
+        assessments=assessments if isinstance(assessments, dict) else None,
+        review_scope=review_scope,
+        valid_dimensions=valid_dimensions,
     )
 
     # Store dismissed concern verdicts for suppression in future concern generation.
@@ -273,7 +351,14 @@ def import_holistic_findings(
     )
 
     new_ids = {finding["id"] for finding in review_findings}
-    _auto_resolve_stale_holistic(state, new_ids, diff, utc_now_fn)
+    _auto_resolve_stale_holistic(
+        state,
+        new_ids,
+        diff,
+        utc_now_fn,
+        imported_dimensions=imported_dimensions,
+        full_sweep_included=scope_full_sweep,
+    )
 
     if skipped:
         diff["skipped"] = len(skipped)

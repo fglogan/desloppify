@@ -118,7 +118,7 @@ class TestReviewFindingsExcludedFromScoring:
         state = {
             "potentials": {"python": {"unused": 10}},
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 75.0,
                     "strict": 75.0,
                     "tier": 4,
@@ -142,7 +142,7 @@ class TestReviewFindingsExcludedFromScoring:
         }
 
         entries = scorecard_dimension_entries(state)
-        naming = [e for e in entries if e["name"] == "Naming Quality"]
+        naming = [e for e in entries if e["name"] == "Naming quality"]
         assert len(naming) == 1
         assert naming[0]["stale"] is True
 
@@ -155,7 +155,7 @@ class TestReviewFindingsExcludedFromScoring:
         state = {
             "potentials": {"python": {"unused": 10}},
             "dimension_scores": {
-                "Naming Quality": {
+                "Naming quality": {
                     "score": 75.0,
                     "strict": 75.0,
                     "tier": 4,
@@ -175,7 +175,7 @@ class TestReviewFindingsExcludedFromScoring:
         }
 
         entries = scorecard_dimension_entries(state)
-        naming = [e for e in entries if e["name"] == "Naming Quality"]
+        naming = [e for e in entries if e["name"] == "Naming quality"]
         assert len(naming) == 1
         assert naming[0]["stale"] is False
 

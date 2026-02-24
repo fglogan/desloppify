@@ -313,7 +313,7 @@ class TestPlanTierSections:
         state = {
             "findings": findings,
             "dimension_scores": {
-                "Naming Quality": {"score": 94.0, "strict": 94.0, "issues": 2}
+                "Naming quality": {"score": 94.0, "strict": 94.0, "issues": 2}
             },
         }
         lines = _plan_tier_sections(findings, state=state)
@@ -541,8 +541,8 @@ class TestGetNextItems:
         st = _state(
             [standard, holistic],
             dimension_scores={
-                "Naming Quality": {"score": 92.0, "strict": 92.0, "issues": 2},
-                "Logic Clarity": {"score": 88.0, "strict": 88.0, "issues": 3},
+                "Naming quality": {"score": 92.0, "strict": 92.0, "issues": 2},
+                "Logic clarity": {"score": 88.0, "strict": 88.0, "issues": 3},
             },
         )
         items = get_next_items(st, count=2)

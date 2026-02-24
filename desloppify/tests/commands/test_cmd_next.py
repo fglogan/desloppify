@@ -212,13 +212,13 @@ class TestCmdNextOutput:
             state={
                 "findings": {},
                 "dimension_scores": {
-                    "Naming Quality": {
+                    "Naming quality": {
                         "score": 94.0,
                         "strict": 94.0,
                         "issues": 2,
                         "detectors": {"subjective_assessment": {}},
                     },
-                    "Logic Clarity": {
+                    "Logic clarity": {
                         "score": 96.0,
                         "strict": 96.0,
                         "issues": 1,
@@ -263,7 +263,7 @@ class TestCmdNextOutput:
         cmd_next(_args())
         out = capsys.readouterr().out
         assert "North star: strict 94.0/100 → target 95.0 (+1.0 needed)" in out
-        assert "Subjective quality (<95%): Naming Quality 94.0%" in out
+        assert "Subjective quality (<95%): Naming quality 94.0%" in out
         assert (
             "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality"
             in out
@@ -335,7 +335,7 @@ class TestCmdNextOutput:
             state={
                 "findings": {},
                 "dimension_scores": {
-                    "High Elegance": {
+                    "High elegance": {
                         "score": 0.0,
                         "strict": 0.0,
                         "issues": 0,
@@ -381,7 +381,7 @@ class TestCmdNextOutput:
         out = capsys.readouterr().out
         assert "Subjective integrity gap:" in out
         assert "Priority: `desloppify review --prepare`" in out
-        assert "Unassessed (0% placeholder): High Elegance" in out
+        assert "Unassessed (0% placeholder): High elegance" in out
 
     def test_holistic_subjective_signal_is_called_out(self, monkeypatch, capsys):
         _patch_common(
@@ -446,7 +446,7 @@ class TestCmdNextOutput:
             state={
                 "findings": {},
                 "dimension_scores": {
-                    "Naming Quality": {
+                    "Naming quality": {
                         "score": 96.0,
                         "strict": 96.0,
                         "issues": 1,
@@ -492,7 +492,7 @@ class TestCmdNextOutput:
         cmd_next(_args())
         out = capsys.readouterr().out
         assert "North star: strict 96.0/100 → target 97.0 (+1.0 needed)" in out
-        assert "Subjective quality (<97%): Naming Quality 96.0%" in out
+        assert "Subjective quality (<97%): Naming quality 96.0%" in out
 
     def test_subjective_integrity_penalty_is_always_reported(self, monkeypatch, capsys):
         _patch_common(
@@ -507,13 +507,13 @@ class TestCmdNextOutput:
                     "reset_dimensions": ["naming_quality", "logic_clarity"],
                 },
                 "dimension_scores": {
-                    "Naming Quality": {
+                    "Naming quality": {
                         "score": 0.0,
                         "strict": 0.0,
                         "issues": 0,
                         "detectors": {"subjective_assessment": {}},
                     },
-                    "Logic Clarity": {
+                    "Logic clarity": {
                         "score": 0.0,
                         "strict": 0.0,
                         "issues": 0,
@@ -595,8 +595,8 @@ class TestCmdNextOutput:
                         "confidence": "medium",
                         "detector": "subjective_assessment",
                         "file": ".",
-                        "summary": "Subjective dimension below target: Naming Quality (94.0%)",
-                        "detail": {"dimension_name": "Naming Quality"},
+                        "summary": "Subjective dimension below target: Naming quality (94.0%)",
+                        "detail": {"dimension_name": "Naming quality"},
                         "status": "open",
                         "subjective_score": 94.0,
                         "primary_command": "desloppify review --prepare",
@@ -632,14 +632,14 @@ class TestLowSubjectiveDimensions:
                 "issues": 1,
                 "detectors": {},
             },
-            "Naming Quality": {
+            "Naming quality": {
                 "score": 94.0,
                 "strict": 94.0,
                 "tier": 4,
                 "issues": 2,
                 "detectors": {"subjective_assessment": {}},
             },
-            "Logic Clarity": {
+            "Logic clarity": {
                 "score": 96.0,
                 "strict": 96.0,
                 "tier": 4,
@@ -657,5 +657,5 @@ class TestLowSubjectiveDimensions:
         low = _low_subjective_dimensions({"dimension_scores": dim_scores}, dim_scores, threshold=95.0)
         assert low == [
             ("Custom Subjective", 91.0, 1),
-            ("Naming Quality", 94.0, 2),
+            ("Naming quality", 94.0, 2),
         ]

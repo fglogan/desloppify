@@ -199,9 +199,9 @@ class TestScoringIntegration:
         dim_scores = compute_dimension_scores(
             empty_state["findings"], potentials, subjective_assessments=assessments
         )
-        assert "Naming Quality" in dim_scores
-        assert dim_scores["Naming Quality"]["score"] == 75.0
-        det = dim_scores["Naming Quality"]["detectors"]["subjective_assessment"]
+        assert "Naming quality" in dim_scores
+        assert dim_scores["Naming quality"]["score"] == 75.0
+        det = dim_scores["Naming quality"]["detectors"]["subjective_assessment"]
         assert det["assessment_score"] == 75.0
 
     def test_review_findings_not_auto_resolved_by_scan(

@@ -186,7 +186,7 @@ def test_normalize_dimension_inputs_separates_invalid():
 def test_normalize_dimension_inputs_normalizes_names():
     policy = build_dimension_policy()
     valid, invalid = normalize_dimension_inputs(
-        ["Naming-Quality", "Logic Clarity"], policy=policy
+        ["Naming-Quality", "Logic clarity"], policy=policy
     )
     assert valid == ["naming_quality", "logic_clarity"]
 

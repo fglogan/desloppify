@@ -97,7 +97,7 @@ def slugify(text: str) -> str:
 
 
 def _canonical_subjective_dimension_key(display_name: str) -> str:
-    """Map a display label (e.g. 'Mid Elegance') to its canonical dimension key."""
+    """Map a display label (e.g. 'Mid elegance') to its canonical dimension key."""
     cleaned = display_name.replace(" (subjective)", "").strip()
     target = cleaned.lower()
 
