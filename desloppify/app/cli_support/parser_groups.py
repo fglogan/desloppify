@@ -222,6 +222,12 @@ def _add_resolve_parser(sub) -> None:
             '--attest "I have actually [DESCRIBE THE CONCRETE CHANGE YOU MADE] and I am not gaming the score by resolving without fixing."'
         ),
     )
+    p_resolve.add_argument(
+        "--confirm-batch-wontfix",
+        action="store_true",
+        default=False,
+        help="Confirm large wontfix batch (>10 findings)",
+    )
     p_resolve.add_argument("--state", type=str, default=None)
 
 
