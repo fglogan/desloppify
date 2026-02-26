@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
-from desloppify import file_discovery as file_discovery_mod
-from desloppify import utils as utils_mod
 from desloppify.app.cli_support.parser import create_parser as _create_parser
 from desloppify.app.commands.helpers.lang import LangResolutionError, resolve_lang
 from desloppify.app.commands.helpers.runtime import CommandRuntime
 from desloppify.app.commands.helpers.state import state_path
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.text_utils import get_project_root
 from desloppify.core.config import load_config
+from desloppify.core.discovery_api import set_exclusions
+from desloppify.core.output_api import colorize
+from desloppify.core.paths_api import get_default_path
 from desloppify.core.runtime_state import runtime_scope
 from desloppify.languages import available_langs
 from desloppify.state import load_state
-from desloppify.utils import DEFAULT_PATH, colorize
 
 _DETECTOR_NAMES: list[str] | None = None
 logger = logging.getLogger(__name__)
+# Backward-compatible test patch hook; runtime path resolution uses get_project_root().
+PROJECT_ROOT = get_project_root()
+_PROJECT_ROOT_SENTINEL = PROJECT_ROOT
 
 
 def _get_detector_names() -> list[str]:
@@ -43,15 +47,15 @@ def _apply_persisted_exclusions(args, config: dict):
     combined = list(cli_exclusions) + [e for e in persisted if e not in cli_exclusions]
     if not combined:
         return
-    file_discovery_mod.set_exclusions(combined)
+    set_exclusions(combined)
     if cli_exclusions:
         print(
-            utils_mod.colorize(f"  Excluding: {', '.join(combined)}", "dim"),
+            colorize(f"  Excluding: {', '.join(combined)}", "dim"),
             file=sys.stderr,
         )
         return
     print(
-        utils_mod.colorize(
+        colorize(
             f"  Excluding (from config): {', '.join(combined)}", "dim"
         ),
         file=sys.stderr,
@@ -67,6 +71,11 @@ def _resolve_default_path(args) -> None:
     """
     if getattr(args, "path", None) is not None:
         return
+    runtime_root = (
+        PROJECT_ROOT.resolve()
+        if PROJECT_ROOT is not _PROJECT_ROOT_SENTINEL and isinstance(PROJECT_ROOT, Path)
+        else get_project_root()
+    )
     if getattr(args, "command", None) == "review":
         try:
             state_file = state_path(args)
@@ -74,15 +83,15 @@ def _resolve_default_path(args) -> None:
                 saved = load_state(state_file)
                 saved_path = saved.get("scan_path")
                 if saved_path:
-                    args.path = str((PROJECT_ROOT / saved_path).resolve())
+                    args.path = str((runtime_root / saved_path).resolve())
                     return
         except (OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("Failed to resolve default path from saved state: %s", exc)
     lang = resolve_lang(args)
     if lang:
-        args.path = str(PROJECT_ROOT / lang.default_src)
+        args.path = str(runtime_root / lang.default_src)
     else:
-        args.path = str(DEFAULT_PATH)
+        args.path = str(get_default_path())
 
 
 def _load_shared_runtime(args) -> None:

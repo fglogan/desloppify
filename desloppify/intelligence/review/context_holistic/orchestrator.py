@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     disable_file_cache,
     enable_file_cache,
     is_file_cache_enabled,
@@ -20,6 +20,7 @@ from desloppify.intelligence.review.context_signals.migration import (
 )
 
 from .budget import _abstractions_context, _codebase_stats
+from .mechanical import gather_mechanical_evidence
 from .readers import _read_file_contents
 from .selection import (
     _api_surface_context,
@@ -100,4 +101,34 @@ def _build_holistic_context_inner(
         context.migration_signals = migration
 
     context.codebase_stats = _codebase_stats(file_contents)
+
+    # Enrich with aggregated mechanical detector evidence.
+    evidence = gather_mechanical_evidence(state)
+    if evidence:
+        context.scan_evidence = evidence
+        _enrich_sections_from_evidence(context, evidence)
+
+    context.normalize_sections(strict=True)
     return context
+
+
+def _enrich_sections_from_evidence(
+    context: HolisticContext, evidence: dict
+) -> None:
+    """Merge mechanical evidence into existing holistic context sections."""
+    if "complexity_hotspots" in evidence:
+        context.abstractions["complexity_hotspots"] = evidence["complexity_hotspots"]
+    if "error_hotspots" in evidence:
+        context.errors["exception_hotspots"] = evidence["error_hotspots"]
+    if "mutable_globals" in evidence:
+        context.errors["mutable_globals"] = evidence["mutable_globals"]
+    if "boundary_violations" in evidence:
+        context.coupling["boundary_violations"] = evidence["boundary_violations"]
+    if "deferred_import_density" in evidence:
+        context.dependencies["deferred_import_density"] = evidence["deferred_import_density"]
+    if "duplicate_clusters" in evidence:
+        context.conventions["duplicate_clusters"] = evidence["duplicate_clusters"]
+    if "naming_drift" in evidence:
+        context.conventions["naming_drift"] = evidence["naming_drift"]
+    if "flat_dir_findings" in evidence:
+        context.structure["flat_dir_findings"] = evidence["flat_dir_findings"]

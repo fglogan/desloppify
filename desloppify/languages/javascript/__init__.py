@@ -1,7 +1,7 @@
 """JavaScript/JSX language plugin — ESLint."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import JS_SPEC
+from desloppify.languages._framework.treesitter import JS_SPEC
 
 generic_lang(
     name="javascript",

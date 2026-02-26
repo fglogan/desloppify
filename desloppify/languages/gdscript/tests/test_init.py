@@ -38,10 +38,10 @@ def test_file_finder_skips_godot_artifacts(tmp_path):
 
     cfg = GdscriptConfig()
     from desloppify.core.runtime_state import RuntimeContext, runtime_scope
-    from desloppify.file_discovery import _clear_source_file_cache
+    from desloppify.core.source_discovery import clear_source_file_cache_for_tests
     ctx = RuntimeContext(project_root=tmp_path)
     with runtime_scope(ctx):
-        _clear_source_file_cache()
+        clear_source_file_cache_for_tests()
         files = cfg.file_finder(tmp_path)
 
     assert files == ["src/player.gd"]

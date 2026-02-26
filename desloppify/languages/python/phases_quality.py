@@ -19,7 +19,7 @@ from desloppify.languages.python.detectors import (
 from desloppify.languages.python.detectors import smells as smells_detector_mod
 from desloppify.languages.python.detectors.ruff_smells import detect_with_ruff_smells
 from desloppify.state import Finding
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 
 def phase_smells(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:

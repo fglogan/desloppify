@@ -17,7 +17,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 
 logger = logging.getLogger(__name__)
 

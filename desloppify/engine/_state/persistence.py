@@ -7,6 +7,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
+from typing import cast
 
 __all__ = [
     "load_state",
@@ -24,7 +25,7 @@ from desloppify.engine._state.schema import (
     validate_state_invariants,
 )
 from desloppify.engine._state.scoring import _recompute_stats
-from desloppify.file_discovery import safe_write_text
+from desloppify.core.discovery_api import safe_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,11 @@ def _load_json(path: Path) -> dict[str, object]:
     return data
 
 
-def _normalize_loaded_state(data: dict[str, object]) -> dict[str, object]:
-    normalized = ensure_state_defaults(data)
+def _normalize_loaded_state(data: object) -> dict[str, object]:
+    if not isinstance(data, dict):
+        raise ValueError("state file root must be a JSON object")
+    ensure_state_defaults(data)
+    normalized = cast(StateModel, data)
     validate_state_invariants(normalized)
     return normalized
 
@@ -65,6 +69,8 @@ def load_state(path: Path | None = None) -> StateModel:
                 UnicodeDecodeError,
                 OSError,
                 ValueError,
+                TypeError,
+                AttributeError,
             ) as backup_ex:
                 logger.debug("Backup state load failed from %s: %s", backup, backup_ex)
 
@@ -92,7 +98,14 @@ def load_state(path: Path | None = None) -> StateModel:
             file=sys.stderr,
         )
 
-    return _normalize_loaded_state(data)
+    try:
+        return _normalize_loaded_state(data)
+    except (ValueError, TypeError, AttributeError) as normalize_ex:
+        print(
+            f"  ⚠ State invariants invalid ({normalize_ex}). Starting fresh.",
+            file=sys.stderr,
+        )
+        return empty_state()
 
 
 def _coerce_integrity_target(value: object) -> float | None:

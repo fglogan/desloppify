@@ -71,7 +71,7 @@ def test_no_tier_fallback_returns_empty_with_reason():
     assert queue["fallback_reason"] == "Requested T4 has 0 open."
 
 
-def test_review_finding_is_forced_to_t1():
+def test_review_finding_uses_natural_tier():
     review = _finding(
         "review::src/a.py::naming",
         detector="review",
@@ -88,11 +88,11 @@ def test_review_finding_is_forced_to_t1():
 
     queue = build_work_queue(state, count=None, include_subjective=False)
     by_id = {item["id"]: item for item in queue["items"] if item["kind"] == "finding"}
-    assert by_id["review::src/a.py::naming"]["effective_tier"] == 1
+    assert by_id["review::src/a.py::naming"]["effective_tier"] == 2
     assert by_id["smells::src/a.py::x"]["effective_tier"] == 3
 
 
-def test_review_items_outrank_mechanical_findings():
+def test_review_items_ranked_by_tier_like_mechanical():
     urgent = _finding(
         "security::src/a.py::x", detector="security", tier=1, confidence="high"
     )
@@ -111,12 +111,13 @@ def test_review_items_outrank_mechanical_findings():
     )
 
     queue = build_work_queue(state, count=None, include_subjective=False)
-    assert queue["items"][0]["id"] == "review::src/a.py::naming"
+    # T1 security outranks T2 review
+    assert queue["items"][0]["id"] == "security::src/a.py::x"
     assert queue["items"][0]["effective_tier"] == 1
-    assert queue["items"][1]["effective_tier"] == 1
+    assert queue["items"][1]["effective_tier"] == 2
 
 
-def test_review_items_sort_by_issue_weight():
+def test_review_items_sort_by_issue_weight_within_tier():
     standard = _finding(
         "review::src/a.py::naming",
         detector="review",
@@ -128,7 +129,7 @@ def test_review_items_sort_by_issue_weight():
         "review::src/a.py::logic",
         detector="review",
         tier=2,
-        confidence="low",
+        confidence="high",
         detail={"dimension": "logic_clarity", "holistic": True},
     )
     state = _state(
@@ -140,11 +141,12 @@ def test_review_items_sort_by_issue_weight():
     )
 
     queue = build_work_queue(state, count=None, include_subjective=False)
+    # Within same tier and confidence, holistic (higher review_weight) sorts first
     assert [item["id"] for item in queue["items"][:2]] == [
         "review::src/a.py::logic",
         "review::src/a.py::naming",
     ]
-    assert all(item["effective_tier"] == 1 for item in queue["items"][:2])
+    assert all(item["effective_tier"] == 2 for item in queue["items"][:2])
 
 
 def test_tier4_queue_contains_mechanical_and_synthetic_subjective_items():
@@ -204,7 +206,7 @@ def test_subjective_items_respect_target_threshold():
     assert "subjective::ai_generated_debt" not in ids
 
 
-def test_subjective_item_uses_issues_action_when_matching_review_findings_exist():
+def test_subjective_item_uses_show_review_when_matching_review_findings_exist():
     review = _finding(
         "review::.::holistic::mid_level_elegance::split::abc12345",
         detector="review",
@@ -225,7 +227,7 @@ def test_subjective_item_uses_issues_action_when_matching_review_findings_exist(
         item for item in queue["items"] if item["kind"] == "subjective_dimension"
     )
     assert subj["id"] == "subjective::mid_level_elegance"
-    assert subj["primary_command"] == "desloppify issues"
+    assert subj["primary_command"] == "desloppify show review --status open"
     assert subj["detail"]["open_review_findings"] == 1
 
 
@@ -258,7 +260,7 @@ def test_subjective_review_finding_points_to_review_triage():
 
     queue = build_work_queue(state, count=None, include_subjective=False)
     item = queue["items"][0]
-    assert item["primary_command"] == "desloppify show subjective_review --status open"
+    assert item["primary_command"] == "desloppify show subjective"
 
 
 def test_holistic_subjective_review_finding_points_to_holistic_refresh():

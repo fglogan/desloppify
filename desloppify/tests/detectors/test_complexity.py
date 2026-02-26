@@ -2,6 +2,8 @@
 
 import textwrap
 
+import pytest
+
 from desloppify.engine.detectors.base import ComplexitySignal
 from desloppify.engine.detectors.complexity import detect_complexity
 
@@ -144,6 +146,41 @@ def test_compute_returning_none_is_skipped(tmp_path):
     assert len(entries) == 0
 
 
+def test_signal_compute_exceptions_are_best_effort(tmp_path):
+    """Signal compute errors should not abort scanning the file."""
+    lines = ["if True:\n"] * 60
+    fp = _write_file(tmp_path, "resilient.py", "".join(lines))
+
+    def broken_signal(content, lines):
+        raise TypeError("bad signal")
+
+    signals = [
+        ComplexitySignal(name="broken", compute=broken_signal, weight=10, threshold=0),
+        ComplexitySignal(name="ifs", pattern=r"^if\b", weight=1, threshold=0),
+    ]
+    finder = _file_finder_for(fp)
+
+    entries, total = detect_complexity(tmp_path, signals, finder, threshold=1, min_loc=10)
+    assert total == 1
+    assert len(entries) == 1
+    assert entries[0]["file"] == fp
+
+
+def test_unexpected_signal_exceptions_propagate(tmp_path):
+    """Unexpected runtime exceptions should not be silently downgraded."""
+    lines = ["if True:\n"] * 60
+    fp = _write_file(tmp_path, "crash.py", "".join(lines))
+
+    def broken_signal(content, lines):
+        raise RuntimeError("unexpected runtime error")
+
+    signals = [ComplexitySignal(name="broken", compute=broken_signal, weight=1, threshold=0)]
+    finder = _file_finder_for(fp)
+
+    with pytest.raises(RuntimeError, match="unexpected runtime error"):
+        detect_complexity(tmp_path, signals, finder, threshold=1, min_loc=10)
+
+
 # ── Multiple signals ─────────────────────────────────────────
 
 
@@ -202,6 +239,22 @@ def test_unreadable_file_is_skipped(tmp_path):
     )
     assert total == 1
     assert len(entries) == 0
+
+
+def test_relative_paths_resolve_against_scan_root(tmp_path):
+    """Relative file_finder paths should be resolved against the provided scan root."""
+    scan_root = tmp_path / "workspace"
+    target = scan_root / "src" / "local.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("".join(["if True:\n"] * 30 + ["x = 1\n"] * 30))
+
+    signals = [ComplexitySignal(name="ifs", pattern=r"^if\b", weight=1, threshold=0)]
+    finder = _file_finder_for("src/local.py")
+
+    entries, total = detect_complexity(scan_root, signals, finder, threshold=1, min_loc=10)
+    assert total == 1
+    assert len(entries) == 1
+    assert entries[0]["file"] == "src/local.py"
 
 
 def test_empty_file_list(tmp_path):

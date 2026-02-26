@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from desloppify.core.file_paths import resolve_scan_file
 from desloppify.engine.policy.zones import FileZoneMap
 
 from .filters import _is_test_file, _should_scan_file, _should_skip_line
@@ -17,18 +18,23 @@ def detect_security_issues(
     files: list[str],
     zone_map: FileZoneMap | None,
     lang_name: str,
+    *,
+    scan_root: Path | None = None,
 ) -> tuple[list[dict], int]:
     """Detect cross-language security issues in source files."""
     _ = lang_name
     entries: list[dict] = []
     scanned = 0
 
+    resolved_scan_root = scan_root.resolve() if isinstance(scan_root, Path) else Path.cwd()
+
     for filepath in files:
         if not _should_scan_file(filepath, zone_map):
             continue
 
         try:
-            content = Path(filepath).read_text(errors="replace")
+            resolved_path = resolve_scan_file(filepath, scan_root=resolved_scan_root)
+            content = resolved_path.read_text(errors="replace")
         except OSError as exc:
             logger.debug(
                 "Skipping unreadable file in security detector: %s (%s)", filepath, exc

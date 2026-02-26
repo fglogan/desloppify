@@ -11,17 +11,15 @@ import json
 import logging
 import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.file_discovery import find_ts_files, rel, resolve_path
+from desloppify.core.discovery_api import find_ts_files, rel, resolve_path
+from desloppify.core.grep import grep_files
+from desloppify.core.output_api import colorize, print_table
 from desloppify.languages.typescript.detectors.contracts import DetectorResult
-from desloppify.utils import (
-    colorize,
-    grep_files,
-    print_table,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +126,7 @@ def _fix_logs(by_file: dict[str, list]):
             os.replace(str(tmp), str(p))
         except OSError as e:
             failed += 1
-            print(colorize(f"  Failed to fix {filepath}: {e}", "red"))
+            print(colorize(f"  Failed to fix {filepath}: {e}", "red"), file=sys.stderr)
             try:
                 tmp.unlink(missing_ok=True)
             except OSError as cleanup_exc:

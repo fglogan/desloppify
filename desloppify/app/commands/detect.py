@@ -8,9 +8,13 @@ import sys
 from desloppify import languages as lang_api
 from desloppify.app.commands.helpers.lang import resolve_lang, resolve_lang_settings
 from desloppify.app.commands.helpers.runtime import command_runtime
-from desloppify.app.commands.helpers.runtime_options import resolve_lang_runtime_options
+from desloppify.app.commands.helpers.runtime_options import (
+    LangRuntimeOptionsError,
+    print_lang_runtime_options_error,
+    resolve_lang_runtime_options,
+)
 from desloppify.languages import runtime as lang_runtime
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def _resolve_detector_key(
@@ -68,7 +72,11 @@ def cmd_detect(args: argparse.Namespace) -> None:
 
     runtime = command_runtime(args)
     lang_settings = resolve_lang_settings(runtime.config, lang_cfg)
-    lang_options = resolve_lang_runtime_options(args, lang_cfg)
+    try:
+        lang_options = resolve_lang_runtime_options(args, lang_cfg)
+    except LangRuntimeOptionsError as exc:
+        print_lang_runtime_options_error(exc, lang_name=lang_cfg.name)
+        sys.exit(2)
     lang = lang_runtime.make_lang_run(
         lang_cfg,
         overrides=lang_runtime.LangRunOverrides(

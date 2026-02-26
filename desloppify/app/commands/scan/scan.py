@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import argparse
 
-from desloppify.app.commands.helpers.query import QUERY_FILE
+from desloppify.app.commands.helpers.lang import resolve_lang
+from desloppify.app.commands.helpers.query import query_file_path
+from desloppify.app.commands.helpers.runtime_options import (
+    LangRuntimeOptionsError,
+    print_lang_runtime_options_error,
+)
 from desloppify.app.commands.helpers.score import target_strict_score_from_config
 from desloppify.app.commands.scan.scan_artifacts import (
     build_scan_query_payload,
@@ -15,33 +20,29 @@ from desloppify.app.commands.scan.scan_helpers import (  # noqa: F401 (re-export
     _collect_codebase_metrics,
     _effective_include_slow,
     _format_delta,
-    _format_hidden_by_detector,
     _resolve_scan_profile,
     _warn_explicit_lang_with_no_files,
 )
 from desloppify.app.commands.scan.scan_reporting_analysis import (
     show_post_scan_analysis,
-    show_score_integrity,
 )
 from desloppify.app.commands.scan.scan_reporting_dimensions import (
     show_dimension_deltas,
-    show_low_dimension_hints,
     show_score_model_breakdown,
     show_scorecard_subjective_measures,
-    show_subjective_paths_section,
 )
 from desloppify.app.commands.scan.scan_reporting_llm import (
     _print_llm_summary,
     auto_update_skill,
 )
 from desloppify.app.commands.scan.scan_reporting_summary import (  # noqa: F401
-    show_concern_count,
     show_diff_summary,
     show_score_delta,
     show_strict_target_progress,
 )
 from desloppify.app.commands.scan.scan_orchestrator import ScanOrchestrator
 from desloppify.app.commands.scan.scan_workflow import (
+    ScanStateContractError,
     merge_scan_results,
     persist_reminder_history,
     prepare_scan_runtime,
@@ -49,7 +50,7 @@ from desloppify.app.commands.scan.scan_workflow import (
     run_scan_generation,
 )
 from desloppify.core.query import write_query
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def _print_scan_header(lang_label: str) -> None:
@@ -73,16 +74,10 @@ def _show_scan_visibility(noise, effective_include_slow: bool) -> None:
     if noise.budget_warning:
         print(colorize(f"  * {noise.budget_warning}", "yellow"))
     if noise.hidden_total:
-        global_label = (
-            f", {noise.global_noise_budget} global"
-            if noise.global_noise_budget > 0
-            else ""
-        )
         print(
             colorize(
-                f"  * Noise budget: {noise.noise_budget}/detector{global_label} "
-                f"({noise.hidden_total} findings hidden in show output: "
-                f"{_format_hidden_by_detector(noise.hidden_by_detector)})",
+                f"  * {noise.hidden_total} findings hidden (showing {noise.noise_budget}/detector). "
+                "Use `desloppify show <detector>` to see all.",
                 "dim",
             )
         )
@@ -112,7 +107,16 @@ def _show_coverage_preflight(runtime) -> None:
 
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run all detectors, update persistent state, show diff."""
-    runtime = prepare_scan_runtime(args)
+    try:
+        runtime = prepare_scan_runtime(args)
+    except LangRuntimeOptionsError as exc:
+        lang_cfg = resolve_lang(args)
+        lang_name = lang_cfg.name if lang_cfg else "selected"
+        print_lang_runtime_options_error(exc, lang_name=lang_name)
+        raise SystemExit(2) from exc
+    except ScanStateContractError as exc:
+        print(colorize(f"  {exc}", "red"))
+        raise SystemExit(2) from exc
     orchestrator = ScanOrchestrator(
         runtime,
         run_scan_generation_fn=run_scan_generation,
@@ -163,17 +167,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
     new_dim_scores = runtime.state.get("dimension_scores", {})
     if new_dim_scores and merge.prev_dim_scores:
         show_dimension_deltas(merge.prev_dim_scores, new_dim_scores)
-    if new_dim_scores:
-        show_low_dimension_hints(new_dim_scores)
-        show_subjective_paths_section(
-            runtime.state,
-            new_dim_scores,
-            threshold=target_value,
-            target_strict_score=target_value,
-        )
 
-    show_score_integrity(runtime.state, merge.diff)
-    show_concern_count(runtime.state, lang_name=runtime.lang.name if runtime.lang else None)
     warnings, narrative = show_post_scan_analysis(
         merge.diff,
         runtime.state,
@@ -193,10 +187,14 @@ def cmd_scan(args: argparse.Namespace) -> None:
             merge,
             noise,
         ),
-        query_file=QUERY_FILE,
+        query_file=query_file_path(),
     )
 
-    badge_path = emit_scorecard_badge(args, runtime.config, runtime.state)
+    badge_emit = emit_scorecard_badge(args, runtime.config, runtime.state)
+    if isinstance(badge_emit, tuple):
+        badge_path, _badge_result = badge_emit
+    else:  # Backward-compatible shape for monkeypatched tests.
+        badge_path = badge_emit
     _print_llm_summary(runtime.state, badge_path, narrative, merge.diff)
     auto_update_skill()
 

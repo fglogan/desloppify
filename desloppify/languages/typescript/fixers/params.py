@@ -2,7 +2,7 @@
 
 import re
 
-from desloppify.languages.typescript.fixers.common import apply_fixer
+from desloppify.languages.typescript.fixers.fixer_io import apply_fixer
 
 
 def fix_unused_params(entries: list[dict], *, dry_run: bool = False) -> list[dict]:

@@ -108,6 +108,37 @@ def test_auto_detect_lang_markerless_fallback(monkeypatch, tmp_path):
     assert len(cfg_by_name["typescript"].file_finder(tmp_path)) == 2
 
 
+def test_auto_detect_lang_supports_glob_markers(monkeypatch, tmp_path):
+    (tmp_path / "sample.fsproj").write_text("<Project></Project>\n")
+    (tmp_path / "package.json").write_text("{}\n")
+
+    monkeypatch.setattr(
+        registry_state,
+        "_registry",
+        {"fsharp": object(), "typescript": object()},
+    )
+    monkeypatch.setattr(lang_resolution_mod, "load_all", lambda: None)
+
+    cfg_by_name = {
+        "fsharp": SimpleNamespace(
+            detect_markers=["*.fsproj"],
+            file_finder=lambda _root: ["Program.fs", "Helpers.fs"],
+        ),
+        "typescript": SimpleNamespace(
+            detect_markers=["package.json"],
+            file_finder=lambda _root: ["index.ts"],
+        ),
+    }
+    monkeypatch.setattr(
+        lang_resolution_mod,
+        "make_lang_config",
+        lambda name, _cfg_cls: cfg_by_name[name],
+    )
+
+    detected = lang_resolution_mod.auto_detect_lang(tmp_path)
+    assert detected == "fsharp"
+
+
 def test_available_langs_returns_sorted_list(monkeypatch):
     monkeypatch.setattr(
         registry_state, "_registry", {"zeta": object(), "alpha": object()}

@@ -388,3 +388,88 @@ class TestCmdShowBackendIntegration:
         queue_options = captured["options"]
         assert queue_options.chronic is True
         assert queue_options.status == "open"
+
+    def test_show_subjective_renders_dashboard(self, monkeypatch, capsys):
+        self._patch_common(
+            monkeypatch,
+            state={
+                "last_scan": "2026-01-01",
+                "findings": {},
+                "scan_path": ".",
+                "dimension_scores": {
+                    "Naming quality": {
+                        "score": 88.0,
+                        "strict": 85.0,
+                        "issues": 2,
+                        "detectors": {"subjective_assessment": {}},
+                    },
+                },
+            },
+        )
+        monkeypatch.setattr(show_cmd_mod, "write_query", lambda _payload: None)
+
+        args = SimpleNamespace(
+            pattern="subjective",
+            status="open",
+            chronic=False,
+            code=False,
+            top=20,
+            output=None,
+            lang=None,
+            path=".",
+            notes=None,
+        )
+        cmd_show(args)
+        out = capsys.readouterr().out
+        assert "Subjective quality" in out
+        assert "Naming quality" in out
+
+    def test_show_subjective_dimension_by_key(self, monkeypatch, capsys):
+        """show naming_quality → shows score + subjective explanation, not 'No findings'."""
+        self._patch_common(
+            monkeypatch,
+            state={
+                "last_scan": "2026-01-01",
+                "findings": {
+                    "review::src/a.py::1": {
+                        "id": "review::src/a.py::1",
+                        "detector": "review",
+                        "status": "open",
+                        "file": "src/a.py",
+                        "detail": {"dimension": "naming_quality"},
+                    },
+                },
+                "scan_path": ".",
+                "dimension_scores": {
+                    "Naming quality": {
+                        "score": 90.0,
+                        "strict": 88.0,
+                        "issues": 1,
+                        "detectors": {"subjective_assessment": {}},
+                    },
+                },
+            },
+        )
+        monkeypatch.setattr(show_cmd_mod, "write_query", lambda _payload: None)
+        monkeypatch.setattr(show_cmd_mod, "check_skill_version", lambda: None)
+
+        def fake_queue(_state, **kwargs):
+            return {"items": []}
+
+        monkeypatch.setattr(show_scope_mod, "build_work_queue", fake_queue)
+        args = SimpleNamespace(
+            pattern="naming_quality",
+            status="open",
+            chronic=False,
+            code=False,
+            top=20,
+            output=None,
+            lang=None,
+            path=".",
+        )
+        cmd_show(args)
+        out = capsys.readouterr().out
+        assert "Naming quality" in out
+        assert "90.0%" in out
+        assert "subjective dimension" in out
+        assert "No open findings matching" not in out

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.file_discovery import find_py_files
+from desloppify.core.discovery_api import find_py_files
 from desloppify.languages.python.detectors.smells_ast import (
     collect_module_constants,
     detect_ast_smells,
@@ -168,6 +168,21 @@ SMELL_CHECKS = [
     ),
     _smell(
         "annotation_quality", "Loose type annotation — use specific types", "medium"
+    ),
+    _smell(
+        "nested_closure",
+        "Deeply nested inner functions — extract to module level",
+        "medium",
+    ),
+    _smell(
+        "mutable_ref_hack",
+        "Mutable-list ref hack — use nonlocal or a dataclass",
+        "medium",
+    ),
+    _smell(
+        "high_cyclomatic_complexity",
+        "High cyclomatic complexity (>12 decision points)",
+        "medium",
     ),
 ]
 

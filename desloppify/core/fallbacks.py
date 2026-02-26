@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
-from desloppify.utils import colorize
+from desloppify.core.output import colorize
 
 
 def log_best_effort_failure(
@@ -23,7 +24,17 @@ def print_error(message: str) -> None:
 
 def warn_best_effort(message: str) -> None:
     """Emit a consistent user-facing warning for non-fatal fallback failures."""
-    print(colorize(f"  WARNING: {message}", "red"), file=sys.stderr)
+    print(colorize(f"  WARNING: {message}", "yellow"), file=sys.stderr)
+
+
+def print_write_error(
+    path: str | Path,
+    exc: Exception,
+    *,
+    label: str = "output",
+) -> None:
+    """Print a standardized write-failure error for command output files."""
+    print_error(f"Could not write {label} to {path}: {exc}")
 
 
 def restore_files_best_effort(
@@ -43,6 +54,7 @@ def restore_files_best_effort(
 __all__ = [
     "log_best_effort_failure",
     "print_error",
+    "print_write_error",
     "restore_files_best_effort",
     "warn_best_effort",
 ]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     dimension_cli_key,
     scorecard_dimension_cli_keys,
     scorecard_dimensions_payload,

@@ -215,3 +215,19 @@ class TestDetectDuplicates:
         assert entries[0]["kind"] == "near-duplicate"
         assert entries[0]["similarity"] >= 0.9
         assert total == 2
+
+    def test_same_file_same_name_pairs_do_not_collapse(self):
+        """Same-file/same-name functions at different lines keep distinct pair keys."""
+        body_a = "x = 1\ny = 2\nreturn x + y"
+        body_b = "a = 10\nb = 20\nreturn a - b"
+        fns = [
+            _make_fn("dup", "same.py", body_a, line=1),
+            _make_fn("dup", "same.py", body_a, line=20),
+            _make_fn("dup", "same.py", body_b, line=40),
+            _make_fn("dup", "same.py", body_b, line=60),
+        ]
+
+        entries, total = detect_duplicates(fns)
+        assert total == 4
+        assert len(entries) == 2
+        assert all(entry["kind"] == "exact" for entry in entries)

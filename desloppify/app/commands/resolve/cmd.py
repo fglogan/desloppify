@@ -15,7 +15,7 @@ from desloppify.core.fallbacks import print_error
 from desloppify.engine.work_queue import ATTEST_EXAMPLE
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.state import coerce_assessment_score
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 from .apply import _resolve_all_patterns, _write_resolve_query_entry
 from .render import (
@@ -33,6 +33,24 @@ from .selection import (
     _validate_attestation,
     _validate_resolve_inputs,
 )
+
+
+def _save_state_or_exit(state: dict, state_file: str) -> None:
+    """Persist state with a consistent CLI error boundary."""
+    try:
+        state_mod.save_state(state, state_file)
+    except OSError as exc:
+        print_error(f"could not save state: {exc}")
+        sys.exit(1)
+
+
+def _save_config_or_exit(config: dict) -> None:
+    """Persist config with a consistent CLI error boundary."""
+    try:
+        config_mod.save_config(config)
+    except OSError as exc:
+        print_error(f"could not save config: {exc}")
+        sys.exit(1)
 
 
 def cmd_resolve(args: argparse.Namespace) -> None:
@@ -66,7 +84,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         )
         return
 
-    state_mod.save_state(state, state_file)
+    _save_state_or_exit(state, state_file)
     _print_resolve_summary(status=args.status, all_resolved=all_resolved)
     _print_wontfix_batch_warning(
         state,
@@ -132,11 +150,7 @@ def cmd_ignore_pattern(args: argparse.Namespace) -> None:
 
     config = command_runtime(args).config
     config_mod.add_ignore_pattern(config, args.pattern)
-    try:
-        config_mod.save_config(config)
-    except OSError as e:
-        print_error(f"could not save config: {e}")
-        sys.exit(1)
+    _save_config_or_exit(config)
 
     removed = state_mod.remove_ignored_findings(state, args.pattern)
     state.setdefault("attestation_log", []).append(
@@ -148,7 +162,7 @@ def cmd_ignore_pattern(args: argparse.Namespace) -> None:
             "affected": removed,
         }
     )
-    state_mod.save_state(state, state_file)
+    _save_state_or_exit(state, state_file)
 
     print(colorize(f"Added ignore pattern: {args.pattern}", "green"))
     if removed:

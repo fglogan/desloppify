@@ -75,10 +75,10 @@ class TestCmdResolve:
         with pytest.raises(SystemExit) as exc_info:
             cmd_resolve(FakeArgs())
         assert exc_info.value.code == 1
-        out = capsys.readouterr().out
-        assert "Manual resolve requires --attest" in out
-        assert "Required keywords: 'I have actually' and 'not gaming'." in out
-        assert f'--attest "{ATTEST_EXAMPLE}"' in out
+        err = capsys.readouterr().err
+        assert "Manual resolve requires --attest" in err
+        assert "Required keywords: 'I have actually' and 'not gaming'." in err
+        assert f'--attest "{ATTEST_EXAMPLE}"' in err
 
     def test_fixed_with_incomplete_attestation_exits(self, monkeypatch, capsys):
         monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
@@ -94,10 +94,10 @@ class TestCmdResolve:
         with pytest.raises(SystemExit) as exc_info:
             cmd_resolve(FakeArgs())
         assert exc_info.value.code == 1
-        out = capsys.readouterr().out
-        assert "missing required keyword(s)" in out
-        assert "'i have actually'" in out
-        assert "'not gaming'" in out
+        err = capsys.readouterr().err
+        assert "missing required keyword(s)" in err
+        assert "'i have actually'" in err
+        assert "'not gaming'" in err
 
     def test_resolve_no_matches(self, monkeypatch, capsys):
         """When no findings match, should print a warning."""
@@ -175,6 +175,49 @@ class TestCmdResolve:
         assert "Resolved 1" in out
         assert "Scores:" in out
 
+    def test_wontfix_shows_strict_cost_warning(self, monkeypatch, capsys):
+        """Wontfix resolution should warn about strict score impact."""
+        monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
+        monkeypatch.setattr(resolve_apply_mod, "write_query", lambda payload: None)
+
+        fake_state = {
+            "findings": {"f1": {"status": "wontfix", "detector": "smells"}},
+            "overall_score": 90,
+            "objective_score": 88,
+            "strict_score": 80,
+            "verified_strict_score": 79,
+            "stats": {},
+            "scan_count": 2,
+            "last_scan": "2025-01-01",
+        }
+        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(state_mod, "save_state", lambda state, sp: None)
+        monkeypatch.setattr(
+            state_mod,
+            "resolve_findings",
+            lambda state, pattern, status, note, **kwargs: ["f1"],
+        )
+        monkeypatch.setattr(
+            narrative_mod,
+            "compute_narrative",
+            lambda state, **kw: {"headline": "test", "milestone": None},
+        )
+        monkeypatch.setattr(cli_mod, "resolve_lang", lambda args: None)
+
+        class FakeArgs:
+            status = "wontfix"
+            note = "intentional pattern"
+            attest = "I have actually reviewed this and I am not gaming the score."
+            patterns = ["f1"]
+            lang = None
+            path = "."
+            confirm_batch_wontfix = False
+
+        cmd_resolve(FakeArgs())
+        out = capsys.readouterr().out
+        assert "wontfix items still count against strict score" in out
+        assert "hidden debt" in out
+
     def test_reopen_without_attestation_allowed(self, monkeypatch, capsys):
         monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
         monkeypatch.setattr(resolve_apply_mod, "write_query", lambda payload: None)
@@ -215,6 +258,45 @@ class TestCmdResolve:
         out = capsys.readouterr().out
         assert "Reopened 1" in out
 
+    def test_resolve_save_state_error_exits(self, monkeypatch, capsys):
+        monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
+
+        fake_state = {
+            "findings": {"f1": {"status": "fixed"}},
+            "overall_score": 60,
+            "objective_score": 58,
+            "strict_score": 50,
+            "verified_strict_score": 49,
+            "stats": {},
+            "scan_count": 1,
+            "last_scan": "2025-01-01",
+        }
+        monkeypatch.setattr(state_mod, "load_state", lambda sp: fake_state)
+        monkeypatch.setattr(
+            state_mod,
+            "resolve_findings",
+            lambda state, pattern, status, note, **kwargs: ["f1"],
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "save_state",
+            lambda state, sp: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        class FakeArgs:
+            status = "fixed"
+            note = "done"
+            attest = "I have actually fixed this and I am not gaming the score."
+            patterns = ["f1"]
+            lang = None
+            path = "."
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_resolve(FakeArgs())
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "could not save state" in err
+
     def test_large_wontfix_batch_requires_confirmation(self, monkeypatch, capsys):
         monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
 
@@ -249,10 +331,10 @@ class TestCmdResolve:
         with pytest.raises(SystemExit) as exc_info:
             cmd_resolve(FakeArgs())
         assert exc_info.value.code == 1
-        out = capsys.readouterr().out
-        assert "Large wontfix batch detected" in out
-        assert "Estimated strict-score debt added now: 2.4 points." in out
-        assert "--confirm-batch-wontfix" in out
+        err = capsys.readouterr().err
+        assert "Large wontfix batch detected" in err
+        assert "Estimated strict-score debt added now: 2.4 points." in err
+        assert "--confirm-batch-wontfix" in err
 
 
 class TestCmdIgnore:
@@ -269,7 +351,34 @@ class TestCmdIgnore:
         with pytest.raises(SystemExit) as exc_info:
             cmd_ignore_pattern(FakeArgs())
         assert exc_info.value.code == 1
-        out = capsys.readouterr().out
-        assert "Ignore requires --attest" in out
-        assert "Required keywords: 'I have actually' and 'not gaming'." in out
-        assert f'--attest "{ATTEST_EXAMPLE}"' in out
+        err = capsys.readouterr().err
+        assert "Ignore requires --attest" in err
+        assert "Required keywords: 'I have actually' and 'not gaming'." in err
+        assert f'--attest "{ATTEST_EXAMPLE}"' in err
+
+    def test_ignore_save_state_error_exits(self, monkeypatch, capsys):
+        monkeypatch.setattr(resolve_mod, "state_path", lambda a: "/tmp/fake.json")
+        monkeypatch.setattr(state_mod, "load_state", lambda sp: {"findings": {}})
+        monkeypatch.setattr(
+            state_mod,
+            "save_state",
+            lambda state, sp: (_ for _ in ()).throw(OSError("readonly")),
+        )
+        monkeypatch.setattr(state_mod, "remove_ignored_findings", lambda state, pattern: 0)
+        monkeypatch.setattr(
+            resolve_mod.config_mod, "save_config", lambda config: None
+        )
+        monkeypatch.setattr(resolve_mod, "resolve_lang", lambda args: None)
+
+        class FakeArgs:
+            pattern = "unused::*"
+            attest = "I have actually reviewed this and I am not gaming the score."
+            _config = {}
+            lang = None
+            path = "."
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_ignore_pattern(FakeArgs())
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "could not save state" in err

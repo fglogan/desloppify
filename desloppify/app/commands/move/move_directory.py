@@ -20,8 +20,8 @@ from desloppify.app.commands.move.move_planning import (
     collect_source_files,
 )
 from desloppify.app.commands.move.move_reporting import print_directory_move_plan
-from desloppify.file_discovery import rel
-from desloppify.utils import colorize
+from desloppify.core.discovery_api import rel
+from desloppify.core.output_api import colorize
 
 
 def run_directory_move(args, source_abs: str, resolve_path_fn) -> None:

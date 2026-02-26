@@ -7,7 +7,7 @@ import sys
 
 from desloppify.app.commands.helpers.lang import resolve_lang
 from desloppify.app.commands.helpers.runtime import command_runtime
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 from .batch import _do_run_batches
 from .external import do_external_start, do_external_submit
@@ -15,8 +15,22 @@ from .import_cmd import do_import, do_validate_import
 from .prepare import do_prepare
 
 
+def _enable_live_review_output() -> None:
+    """Best-effort: force line-buffered review output for non-TTY runners."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(line_buffering=True, write_through=True)
+        except (OSError, ValueError, TypeError):
+            continue
+
+
 def cmd_review(args: argparse.Namespace) -> None:
     """Prepare or import subjective code review findings."""
+    _enable_live_review_output()
     runtime = command_runtime(args)
     state_file = runtime.state_path
     state = runtime.state
@@ -29,6 +43,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    merge = bool(getattr(args, "merge", False))
     run_batches = bool(getattr(args, "run_batches", False))
     external_start = bool(getattr(args, "external_start", False))
     external_submit = bool(getattr(args, "external_submit", False))
@@ -37,6 +52,7 @@ def cmd_review(args: argparse.Namespace) -> None:
 
     import_mode = bool(import_file) and not external_submit
     mode_flags = [
+        merge,
         run_batches,
         external_start,
         external_submit,
@@ -47,7 +63,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         print(
             colorize(
                 "  Error: choose one review mode per command "
-                "(--run-batches | --external-start | --external-submit | --import | --validate-import).",
+                "(--merge | --run-batches | --external-start | --external-submit | --import | --validate-import).",
                 "red",
             ),
             file=sys.stderr,
@@ -73,6 +89,12 @@ def cmd_review(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
+
+    if merge:
+        from desloppify.app.commands.review.merge import do_merge
+
+        do_merge(args)
+        return
 
     if run_batches:
         _do_run_batches(

@@ -170,6 +170,7 @@ class LangConfig:
     # Structural analysis thresholds
     large_threshold: int = 500
     complexity_threshold: int = 15
+    props_threshold: int = 14
     default_scan_profile: str = "full"
 
     # Language-specific persisted settings and per-run runtime options.

@@ -953,7 +953,7 @@ class TestBuildHolisticContext:
         assert "migration_signals" in ctx
 
     def test_no_auth_section_when_no_routes(self, mock_lang, empty_state):
-        """build_holistic_context should NOT include authorization when no route handlers."""
+        """build_holistic_context emits an empty authorization section when no routes exist."""
         content = "def helper():\n    return 42\n"
 
         with patch(
@@ -966,7 +966,8 @@ class TestBuildHolisticContext:
                 files=["/project/src/util.py"],
             )
 
-        assert "authorization" not in ctx
+        assert "authorization" in ctx
+        assert ctx["authorization"] == {}
 
     def test_authorization_section_present_with_rls_only(self, mock_lang, empty_state):
         """Holistic context should include authorization for non-route RLS evidence."""
@@ -1009,7 +1010,7 @@ class TestBuildHolisticContext:
         assert any(path.endswith("/src/client.ts") for path in usage)
 
     def test_no_ai_debt_when_clean(self, mock_lang, empty_state):
-        """build_holistic_context should NOT include ai_debt_signals when no signals."""
+        """build_holistic_context emits empty ai_debt_signals when no signals exist."""
         content = "def add(a, b):\n    return a + b\n"
 
         with patch(
@@ -1022,7 +1023,8 @@ class TestBuildHolisticContext:
                 files=["/project/src/clean.py"],
             )
 
-        assert "ai_debt_signals" not in ctx
+        assert "ai_debt_signals" in ctx
+        assert ctx["ai_debt_signals"] == {}
 
     def test_codebase_stats_always_present(self, mock_lang, empty_state):
         """build_holistic_context should always include codebase_stats."""

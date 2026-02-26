@@ -13,7 +13,7 @@ from desloppify.engine.detectors.review_coverage import (
     detect_holistic_review_staleness,
     detect_review_coverage,
 )
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.intelligence.review import (
     DIMENSION_PROMPTS,
 )

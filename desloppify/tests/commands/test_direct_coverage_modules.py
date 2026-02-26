@@ -7,8 +7,9 @@ import desloppify.app.cli_support.parser_groups as cli_parser_groups
 import desloppify.app.commands.config_cmd as config_cmd
 import desloppify.app.commands.move.move_directory as move_directory
 import desloppify.app.commands.move.move_reporting as move_reporting
-import desloppify.app.commands.next_output as next_output
-import desloppify.app.commands.next_render as next_render
+import desloppify.app.commands.move as move_pkg
+import desloppify.app.commands.next_parts.output as next_output
+import desloppify.app.commands.next_parts.render as next_render
 import desloppify.app.commands.plan_cmd as plan_cmd
 import desloppify.app.commands.registry as cmd_registry
 import desloppify.app.commands.review.batch_core as review_batch_core
@@ -18,6 +19,7 @@ import desloppify.app.commands.review.import_helpers as review_import_helpers
 import desloppify.app.commands.review.prepare as review_prepare
 import desloppify.app.commands.review.runner_helpers as review_runner_helpers
 import desloppify.app.commands.review.runtime as review_runtime
+import desloppify.app.commands.scan as scan_pkg
 import desloppify.app.commands.scan.scan_artifacts as scan_artifacts
 import desloppify.app.commands.scan.scan_reporting_presentation as scan_reporting_presentation
 import desloppify.app.commands.scan.scan_reporting_subjective as scan_reporting_subjective
@@ -110,6 +112,8 @@ def test_smoke_commands():
         move_directory.run_directory_move,
         move_reporting.print_file_move_plan,
         move_reporting.print_directory_move_plan,
+        move_pkg.cmd_move,
+        scan_pkg.cmd_scan,
         scan_artifacts.build_scan_query_payload,
         scan_artifacts.emit_scorecard_badge,
         scan_workflow.prepare_scan_runtime,

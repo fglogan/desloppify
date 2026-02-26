@@ -12,8 +12,10 @@ import pytest
 
 from desloppify.app.commands.review.batches import _require_batches
 from desloppify.app.commands.review.import_helpers import (
+    ImportPayloadLoadError,
     assessment_mode_label,
     load_import_findings_data,
+    print_import_load_errors,
     print_assessment_mode_banner,
 )
 from desloppify.app.commands.review.prepare import do_prepare
@@ -22,6 +24,20 @@ from desloppify.app.commands.review.runner_helpers import write_packet_snapshot
 
 def _colorize(text: str, _style: str) -> str:
     return text
+
+
+def _render_import_load_error(
+    exc: ImportPayloadLoadError,
+    *,
+    import_file: Path | str,
+    capsys,
+) -> str:
+    print_import_load_errors(
+        exc.errors,
+        import_file=str(import_file),
+        colorize_fn=_colorize,
+    )
+    return capsys.readouterr().err
 
 
 def test_assessment_mode_label_mappings():
@@ -60,7 +76,7 @@ def test_import_untrusted_assessments_are_dropped_by_default(tmp_path):
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     policy = parsed.get("_assessment_policy", {})
     assert policy["mode"] == "findings_only"
     assert policy["trusted"] is False
@@ -74,14 +90,13 @@ def test_import_manual_override_requires_attestation(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
             manual_override=True,
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "--manual-override requires --attest" in err
 
 
@@ -112,7 +127,7 @@ def test_import_manual_override_rejects_allow_partial_combo(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
@@ -120,8 +135,7 @@ def test_import_manual_override_rejects_allow_partial_combo(tmp_path, capsys):
             manual_override=True,
             manual_attest="operator note",
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "--manual-override cannot be combined with --allow-partial" in err
 
 
@@ -133,15 +147,14 @@ def test_import_attested_external_requires_attest_phrases(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
             attested_external=True,
             manual_attest="looks good",
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "--attested-external requires --attest containing both" in err
     assert "Hint: rerun with the required attestation template" in err
     assert "review --validate-import" in err
@@ -155,7 +168,7 @@ def test_import_attested_external_rejects_untrusted_provenance(tmp_path, capsys)
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
@@ -165,8 +178,7 @@ def test_import_attested_external_rejects_untrusted_provenance(tmp_path, capsys)
                 "and is unbiased."
             ),
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "--attested-external requires valid blind packet provenance" in err
     assert "Hint: if provenance is valid, rerun with" in err
     assert "Findings-only fallback" in err
@@ -225,7 +237,7 @@ def test_import_attested_external_rejects_non_claude_runner(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
@@ -235,8 +247,7 @@ def test_import_attested_external_rejects_non_claude_runner(tmp_path, capsys):
                 "and is unbiased."
             ),
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "supports runner='claude'" in err
     assert "Hint: if provenance is valid, rerun with" in err
 
@@ -249,7 +260,7 @@ def test_import_attested_external_rejects_allow_partial_combo(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
@@ -260,8 +271,7 @@ def test_import_attested_external_rejects_allow_partial_combo(tmp_path, capsys):
             ),
             allow_partial=True,
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "--attested-external cannot be combined with --allow-partial" in err
 
 
@@ -295,7 +305,7 @@ def test_import_external_trusted_provenance_still_defaults_to_findings_only(tmp_
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     policy = parsed.get("_assessment_policy", {})
     assert policy["mode"] == "findings_only"
     assert policy["trusted"] is False
@@ -343,7 +353,7 @@ def test_import_hash_mismatch_falls_back_to_findings_only(tmp_path):
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     policy = parsed.get("_assessment_policy", {})
     assert policy["mode"] == "findings_only"
     assert "hash mismatch" in policy["reason"]
@@ -371,7 +381,7 @@ def test_import_dimension_feedback_without_trusted_provenance_still_drops_assess
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     assert parsed["_assessment_policy"]["mode"] == "findings_only"
 
 
@@ -391,17 +401,44 @@ def test_import_rejects_findings_missing_schema_fields(tmp_path, capsys):
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
             lang_name="typescript",
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "schema validation failed" in err
     assert "related_files" in err
     assert "evidence" in err
+
+
+def test_import_rejects_invalid_assessments_shape(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "assessments": ["naming_quality", 95],
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ImportPayloadLoadError) as exc:
+        load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
+    assert "assessments must be an object when provided" in err
+
+
+def test_import_rejects_invalid_reviewed_files_shape(tmp_path, capsys):
+    payload = {
+        "findings": [],
+        "reviewed_files": "src/a.py",
+    }
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ImportPayloadLoadError) as exc:
+        load_import_findings_data(str(findings_path), colorize_fn=_colorize)
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
+    assert "reviewed_files must be an array when provided" in err
 
 
 def test_import_allow_partial_bypasses_schema_gate(tmp_path):
@@ -426,7 +463,7 @@ def test_import_allow_partial_bypasses_schema_gate(tmp_path):
         lang_name="typescript",
         allow_partial=True,
     )
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     assert parsed["_assessment_policy"]["mode"] == "findings_only"
 
 
@@ -439,7 +476,7 @@ def test_import_accepts_perfect_assessment_without_feedback(tmp_path):
     findings_path.write_text(json.dumps(payload))
 
     parsed = load_import_findings_data(str(findings_path), colorize_fn=_colorize)
-    assert "assessments" not in parsed
+    assert parsed["assessments"] == {}
     assert parsed["_assessment_policy"]["mode"] == "findings_only"
 
 
@@ -478,15 +515,14 @@ def test_import_trusted_internal_rejects_sub100_without_feedback(tmp_path, capsy
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
             trusted_assessment_source=True,
             trusted_assessment_label="internal batch import test",
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "assessments below 100.0 must include explicit feedback" in err
 
 
@@ -506,15 +542,14 @@ def test_import_trusted_internal_rejects_low_score_without_finding(tmp_path, cap
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ImportPayloadLoadError) as exc:
         load_import_findings_data(
             str(findings_path),
             colorize_fn=_colorize,
             trusted_assessment_source=True,
             trusted_assessment_label="internal batch import test",
         )
-    assert exc.value.code == 1
-    err = capsys.readouterr().err
+    err = _render_import_load_error(exc.value, import_file=findings_path, capsys=capsys)
     assert "assessments below 85.0 must include at least one finding" in err
 
 

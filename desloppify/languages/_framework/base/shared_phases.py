@@ -5,11 +5,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.coercions import coerce_confidence
+from desloppify.core._internal.text_utils import get_project_root
 from desloppify.engine.detectors.base import ComplexitySignal
 from desloppify.engine.detectors.complexity import detect_complexity
 from desloppify.engine.detectors.dupes import detect_duplicates
-from desloppify.engine.detectors.flat_dirs import detect_flat_dirs
+from desloppify.engine.detectors.flat_dirs import (
+    detect_flat_dirs,
+    format_flat_dir_summary,
+)
 from desloppify.engine.detectors.graph import detect_cycles
 from desloppify.engine.detectors.jscpd_adapter import detect_with_jscpd
 from desloppify.engine.detectors.large import detect_large_files
@@ -30,7 +34,7 @@ from desloppify.engine.policy.zones import (
     filter_entries,
     should_skip_finding,
 )
-from desloppify.file_discovery import rel
+from desloppify.core.file_paths import rel
 from desloppify.languages._framework.base.structural import (
     add_structural_signal,
     merge_structural_signals,
@@ -45,12 +49,12 @@ from desloppify.languages._framework.finding_factories import (
     make_orphaned_findings,
     make_single_use_findings,
 )
-from desloppify.languages._framework.runtime import LangRun
+from desloppify.languages._framework.runtime import LangRuntimeContract
 from desloppify.state import Finding, make_finding
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 
-def phase_dupes(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_dupes(path: Path, lang: LangRuntimeContract) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase runner: detect duplicate functions via lang.extract_functions.
 
     When a zone map is available, filters out functions from zone-excluded files
@@ -77,7 +81,7 @@ def phase_dupes(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int
 
 def phase_boilerplate_duplication(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
 ) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase runner: detect repeated boilerplate code via jscpd."""
     entries = detect_with_jscpd(path)
@@ -163,14 +167,15 @@ def _filter_boilerplate_entries_by_zone(entries: list[dict], zone_map) -> list[d
     return filtered
 
 
-def find_external_test_files(path: Path, lang: LangRun) -> set[str]:
+def find_external_test_files(path: Path, lang: LangRuntimeContract) -> set[str]:
     """Find test files in standard locations outside the scanned path."""
     extra = set()
     path_root = path.resolve()
+    project_root = get_project_root()
     test_dirs = lang.external_test_dirs or ["tests", "test"]
     exts = tuple(lang.test_file_extensions or lang.extensions)
     for test_dir in test_dirs:
-        d = PROJECT_ROOT / test_dir
+        d = project_root / test_dir
         if not d.is_dir():
             continue
         if d.resolve().is_relative_to(path_root):
@@ -218,19 +223,11 @@ def _log_phase_summary(label: str, results: list[Finding], potential: int, unit:
         log(f"         {label}: clean ({potential} {unit})")
 
 
-def _coerce_coverage_confidence(value: object, *, default: float = 1.0) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(0.0, min(1.0, parsed))
-
-
 def _coverage_to_dict(coverage: DetectorCoverageStatus) -> dict[str, object]:
     return {
         "detector": coverage.detector,
         "status": coverage.status,
-        "confidence": round(_coerce_coverage_confidence(coverage.confidence), 2),
+        "confidence": round(coerce_confidence(coverage.confidence), 2),
         "summary": coverage.summary,
         "impact": coverage.impact,
         "remediation": coverage.remediation,
@@ -252,8 +249,8 @@ def _merge_detector_coverage(
     )
     merged["confidence"] = round(
         min(
-            _coerce_coverage_confidence(existing.get("confidence")),
-            _coerce_coverage_confidence(incoming.get("confidence")),
+            coerce_confidence(existing.get("confidence")),
+            coerce_confidence(incoming.get("confidence")),
         ),
         2,
     )
@@ -268,7 +265,7 @@ def _merge_detector_coverage(
     return merged
 
 
-def _record_detector_coverage(lang: LangRun, coverage: DetectorCoverageStatus | None) -> None:
+def _record_detector_coverage(lang: LangRuntimeContract, coverage: DetectorCoverageStatus | None) -> None:
     if coverage is None:
         return
     normalized = _coverage_to_dict(coverage)
@@ -282,23 +279,32 @@ def _record_detector_coverage(lang: LangRun, coverage: DetectorCoverageStatus | 
         lang.detector_coverage[detector] = normalized
 
 
-def phase_security(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_security(path: Path, lang: LangRuntimeContract) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect security issues (cross-language + lang-specific)."""
     zone_map = lang.zone_map
     files = lang.file_finder(path) if lang.file_finder else []
-    entries, potential = detect_security_issues(files, zone_map, lang.name)
+    entries, cross_lang_scanned = detect_security_issues(
+        files,
+        zone_map,
+        lang.name,
+        scan_root=path,
+    )
+    lang_scanned = 0
 
     # Also call lang-specific security detectors.
     lang_result = lang.detect_lang_security_detailed(files, zone_map)
     if isinstance(lang_result, LangSecurityResult):
         lang_entries = lang_result.entries
+        lang_scanned = max(0, int(lang_result.files_scanned))
         _record_detector_coverage(lang, lang_result.coverage)
     else:
         # Backwards compatibility for legacy plugins returning tuple[list[dict], int].
-        lang_entries, _ = lang_result
+        lang_entries, legacy_scanned = lang_result
+        lang_scanned = max(0, int(legacy_scanned or 0))
     entries.extend(lang_entries)
 
     entries = filter_entries(zone_map, entries, "security")
+    potential = max(cross_lang_scanned, lang_scanned)
 
     results = _entries_to_findings(
         "security",
@@ -325,7 +331,7 @@ def phase_security(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
 
 def phase_test_coverage(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
 ) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect test coverage gaps."""
     zone_map = lang.zone_map
@@ -351,7 +357,7 @@ def phase_test_coverage(
 
 def phase_private_imports(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
 ) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect cross-module private imports."""
     zone_map = lang.zone_map
@@ -368,7 +374,7 @@ def phase_private_imports(
 
 def phase_subjective_review(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
 ) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase: detect files missing subjective design review."""
     zone_map = lang.zone_map
@@ -415,7 +421,7 @@ def phase_subjective_review(
     return results, {"subjective_review": potential}
 
 
-def phase_signature(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, int]]:
+def phase_signature(path: Path, lang: LangRuntimeContract) -> tuple[list[Finding], dict[str, int]]:
     """Shared phase runner: detect signature variance via lang.extract_functions.
 
     Backend-agnostic — works with any extractor that returns FunctionInfo objects
@@ -452,7 +458,7 @@ def phase_signature(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str,
 
 def run_structural_phase(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
     *,
     complexity_signals: list[ComplexitySignal],
     log_fn,
@@ -509,8 +515,10 @@ def run_structural_phase(
             log_fn(f"         god classes: {len(god_entries)}")
 
     results = merge_structural_signals(structural, log_fn)
-    flat_entries, dir_count = detect_flat_dirs(path, file_finder=lang.file_finder)
+    flat_entries, analyzed_dir_count = detect_flat_dirs(path, file_finder=lang.file_finder)
     for entry in flat_entries:
+        child_dir_count = int(entry.get("child_dir_count", 0))
+        combined_score = int(entry.get("combined_score", entry.get("file_count", 0)))
         results.append(
             make_finding(
                 "flat_dirs",
@@ -518,25 +526,38 @@ def run_structural_phase(
                 "",
                 tier=3,
                 confidence="medium",
-                summary=(
-                    f"Flat directory: {entry['file_count']} files — consider grouping by domain"
-                ),
-                detail={"file_count": entry["file_count"]},
+                summary=format_flat_dir_summary(entry),
+                detail={
+                    "file_count": entry["file_count"],
+                    "child_dir_count": child_dir_count,
+                    "combined_score": combined_score,
+                    "kind": entry.get("kind", "overload"),
+                    "parent_sibling_count": int(entry.get("parent_sibling_count", 0)),
+                    "wrapper_item_count": int(entry.get("wrapper_item_count", 0)),
+                    "sparse_child_count": int(entry.get("sparse_child_count", 0)),
+                    "sparse_child_ratio": float(entry.get("sparse_child_ratio", 0.0)),
+                    "sparse_child_file_threshold": int(
+                        entry.get("sparse_child_file_threshold", 0)
+                    ),
+                },
             )
         )
     if flat_entries:
-        log_fn(f"         flat dirs: {len(flat_entries)} directories with 20+ files")
+        log_fn(
+            f"         flat dirs: {len(flat_entries)} overloaded directories "
+            "(files/subdirs/combined)"
+        )
 
     potentials = {
         "structural": adjust_potential(lang.zone_map, file_count),
-        "flat_dirs": dir_count,
+        "flat_dirs": analyzed_dir_count,
     }
     return results, potentials
 
 
 def run_coupling_phase(
     path: Path,
-    lang: LangRun,
+    lang: LangRuntimeContract,
     *,
     build_dep_graph_fn,
     log_fn,
@@ -594,8 +615,40 @@ def run_coupling_phase(
     return results, potentials
 
 
+def make_structural_coupling_phase_pair(
+    *,
+    complexity_signals: list[ComplexitySignal],
+    build_dep_graph_fn,
+    log_fn,
+) -> tuple:
+    """Create default structural/coupling phase callables for a language.
+
+    This keeps language phase modules declarative by letting them provide only
+    their complexity signals and dependency-graph builder.
+    """
+
+    def phase_structural(path: Path, lang: LangRuntimeContract) -> tuple[list[dict], dict[str, int]]:
+        return run_structural_phase(
+            path,
+            lang,
+            complexity_signals=complexity_signals,
+            log_fn=log_fn,
+        )
+
+    def phase_coupling(path: Path, lang: LangRuntimeContract) -> tuple[list[dict], dict[str, int]]:
+        return run_coupling_phase(
+            path,
+            lang,
+            build_dep_graph_fn=build_dep_graph_fn,
+            log_fn=log_fn,
+        )
+
+    return phase_structural, phase_coupling
+
+
 __all__ = [
     "find_external_test_files",
+    "make_structural_coupling_phase_pair",
     "phase_boilerplate_duplication",
     "phase_dupes",
     "phase_private_imports",

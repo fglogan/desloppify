@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from desloppify.languages.typescript.fixers.common import (
-    apply_fixer,
+from desloppify.languages.typescript.fixers.fixer_io import apply_fixer
+from desloppify.languages.typescript.fixers.syntax_scan import (
     collapse_blank_lines,
     find_balanced_end,
 )

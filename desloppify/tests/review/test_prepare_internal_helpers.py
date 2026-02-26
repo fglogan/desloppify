@@ -26,6 +26,8 @@ class _ZoneMap:
 def test_holistic_workflow_has_expected_steps():
     assert len(HOLISTIC_WORKFLOW) >= 5
     assert any("review --import" in step for step in HOLISTIC_WORKFLOW)
+    assert any("start from listed seed files" in step for step in HOLISTIC_WORKFLOW)
+    assert not any("read the listed files" in step for step in HOLISTIC_WORKFLOW)
 
 
 def test_append_full_sweep_batch_skips_non_production_files():

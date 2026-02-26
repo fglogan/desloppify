@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 
 HOLISTIC_REVIEW_DIMENSIONS: list[str] = [
     "cross_module_architecture",

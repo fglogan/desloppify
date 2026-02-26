@@ -12,16 +12,18 @@ from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.score import target_strict_score_from_config
 from desloppify.app.commands.helpers.state import require_completed_scan
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     scorecard_dimensions_payload,
 )
 from desloppify.engine.work_queue import (
     QueueBuildOptions,
     build_work_queue,
 )
-from desloppify.file_discovery import safe_write_text
+from desloppify.core.output_api import colorize
+from desloppify.core.skill_docs import check_skill_version
+from desloppify.core.tooling import check_tool_staleness
+from desloppify.core.discovery_api import safe_write_text
 from desloppify.intelligence.narrative import NarrativeContext, compute_narrative
-from desloppify.utils import check_skill_version, check_tool_staleness, colorize
 
 
 def _scorecard_subjective(
@@ -149,8 +151,15 @@ def _get_items(args, state: dict, config: dict) -> None:
         state.get("findings", {}),
         state.get("scan_path"),
     )
+    raw_potentials = state.get("potentials", {})
+    try:
+        from desloppify.scoring import merge_potentials
+        potentials = merge_potentials(raw_potentials) or None
+    except (ImportError, TypeError, ValueError):
+        potentials = raw_potentials or None
     next_render_mod.render_terminal_items(
-        items, dim_scores, findings_scoped, group=group, explain=explain
+        items, dim_scores, findings_scoped, group=group, explain=explain,
+        potentials=potentials,
     )
     next_render_mod.render_single_item_resolution_hint(items)
     next_render_mod.render_followup_nudges(

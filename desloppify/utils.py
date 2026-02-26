@@ -1,15 +1,40 @@
-"""Compatibility facade over focused core utility modules."""
+"""Deprecated compatibility facade for legacy imports.
+
+Use focused public APIs instead:
+- ``desloppify.core.paths_api``
+- ``desloppify.core.discovery_api``
+- ``desloppify.core.output_api``
+- ``desloppify.core.tooling``
+- ``desloppify.core.skill_docs``
+
+Compatibility exports remain for downstream callers and tests.
+Planned removal: 2026-09-30 (or later major version).
+"""
 
 from __future__ import annotations
 
-import os
-import re
-from dataclasses import dataclass
+from pathlib import Path
 
-from desloppify.core import tooling as _tooling
-from desloppify.core._internal import text_utils as _text_utils
+from desloppify.core.discovery_api import (
+    DEFAULT_EXCLUSIONS,
+    clear_source_file_cache_for_tests,
+    disable_file_cache,
+    enable_file_cache,
+    find_py_files,
+    find_source_files,
+    find_ts_files,
+    find_tsx_files,
+    get_exclusions,
+    is_file_cache_enabled,
+    matches_exclusion,
+    read_file_text,
+    rel,
+    resolve_path,
+    safe_write_text,
+    set_exclusions,
+)
 from desloppify.core.grep import grep_count_files, grep_files, grep_files_containing
-from desloppify.core.output import (
+from desloppify.core.output_api import (
     COLORS,
     LOC_COMPACT_THRESHOLD,
     NO_COLOR,
@@ -18,14 +43,68 @@ from desloppify.core.output import (
     log,
     print_table,
 )
+from desloppify.core.paths_api import (
+    DEFAULT_PATH,
+    PROJECT_ROOT,
+    SRC_PATH,
+    get_default_path,
+    get_project_root,
+    get_src_path,
+    read_code_snippet,
+)
+from desloppify.core.skill_docs import (
+    SKILL_BEGIN,
+    SKILL_END,
+    SKILL_OVERLAY_RE,
+    SKILL_SEARCH_PATHS,
+    SKILL_TARGETS,
+    SKILL_VERSION,
+    SKILL_VERSION_RE,
+    SkillInstall,
+    check_skill_version,
+    find_installed_skill,
+)
+from desloppify.core import tooling as _tooling
+
+TOOL_DIR = _tooling.TOOL_DIR
+
+
+def compute_tool_hash() -> str:
+    """Compatibility wrapper honoring ``utils.TOOL_DIR`` test overrides."""
+    return _tooling.compute_tool_hash(tool_dir=Path(TOOL_DIR))
+
+
+def check_tool_staleness(state: dict) -> str | None:
+    """Compatibility wrapper honoring ``utils.TOOL_DIR`` test overrides."""
+    return _tooling.check_tool_staleness(state, tool_dir=Path(TOOL_DIR))
 
 __all__ = [
-    # Path constants
+    # Path constants + helpers
     "PROJECT_ROOT",
     "DEFAULT_PATH",
     "SRC_PATH",
-    # Grep helpers
+    "get_project_root",
+    "get_default_path",
+    "get_src_path",
     "read_code_snippet",
+    # Discovery helpers retained for legacy callsites
+    "DEFAULT_EXCLUSIONS",
+    "set_exclusions",
+    "get_exclusions",
+    "matches_exclusion",
+    "rel",
+    "resolve_path",
+    "safe_write_text",
+    "enable_file_cache",
+    "disable_file_cache",
+    "is_file_cache_enabled",
+    "read_file_text",
+    "clear_source_file_cache_for_tests",
+    "find_source_files",
+    "find_ts_files",
+    "find_tsx_files",
+    "find_py_files",
+    # Grep helpers
     "grep_files",
     "grep_files_containing",
     "grep_count_files",
@@ -53,122 +132,3 @@ __all__ = [
     "find_installed_skill",
     "check_skill_version",
 ]
-
-_get_project_root = _text_utils.get_project_root
-
-PROJECT_ROOT = _text_utils.PROJECT_ROOT
-DEFAULT_PATH = PROJECT_ROOT / "src"
-SRC_PATH = PROJECT_ROOT / os.environ.get("DESLOPPIFY_SRC", "src")
-TOOL_DIR = _tooling.TOOL_DIR
-
-
-def read_code_snippet(filepath: str, line: int, context: int = 1) -> str | None:
-    """Read a snippet around a 1-based line number."""
-    return _text_utils.read_code_snippet(
-        filepath,
-        line,
-        context,
-        project_root=_get_project_root(),
-    )
-
-
-def compute_tool_hash() -> str:
-    """Compute a content hash of tool code honoring ``utils.TOOL_DIR`` overrides."""
-    original_tool_dir = _tooling.TOOL_DIR
-    _tooling.TOOL_DIR = TOOL_DIR
-    try:
-        return _tooling.compute_tool_hash()
-    finally:
-        _tooling.TOOL_DIR = original_tool_dir
-
-
-def check_tool_staleness(state: dict) -> str | None:
-    """Return warning if tool code changed, honoring ``utils.TOOL_DIR`` overrides."""
-    original_tool_dir = _tooling.TOOL_DIR
-    _tooling.TOOL_DIR = TOOL_DIR
-    try:
-        return _tooling.check_tool_staleness(state)
-    finally:
-        _tooling.TOOL_DIR = original_tool_dir
-
-
-# ── Skill document version tracking ─────────────────────────
-# Bump this integer whenever docs/SKILL.md changes in a way that agents
-# should pick up (new commands, changed workflows, removed sections).
-SKILL_VERSION = 1
-
-SKILL_VERSION_RE = re.compile(r"<!--\s*desloppify-skill-version:\s*(\d+)\s*-->")
-SKILL_OVERLAY_RE = re.compile(r"<!--\s*desloppify-overlay:\s*(\w+)\s*-->")
-
-SKILL_BEGIN = "<!-- desloppify-begin -->"
-SKILL_END = "<!-- desloppify-end -->"
-
-# Locations where the skill doc might be installed, relative to PROJECT_ROOT.
-SKILL_SEARCH_PATHS = (
-    ".claude/skills/desloppify/SKILL.md",
-    ".opencode/skills/desloppify/SKILL.md",
-    "AGENTS.md",
-    "CLAUDE.md",
-    ".cursor/rules/desloppify.md",
-    ".github/copilot-instructions.md",
-)
-
-# Interface name → (target file, overlay filename, dedicated).
-# Dedicated files are overwritten entirely; shared files get section replacement.
-SKILL_TARGETS: dict[str, tuple[str, str, bool]] = {
-    "claude": (".claude/skills/desloppify/SKILL.md", "CLAUDE", True),
-    # OpenCode support added with thanks to @H3xKatana.
-    "opencode": (".opencode/skills/desloppify/SKILL.md", "OPENCODE", True),
-    "codex": ("AGENTS.md", "CODEX", False),
-    "cursor": (".cursor/rules/desloppify.md", "CURSOR", True),
-    "copilot": (".github/copilot-instructions.md", "COPILOT", False),
-    "windsurf": ("AGENTS.md", "WINDSURF", False),
-    "gemini": ("AGENTS.md", "GEMINI", False),
-}
-
-
-@dataclass
-class SkillInstall:
-    """Detected skill document installation."""
-
-    rel_path: str
-    version: int
-    overlay: str | None
-    stale: bool
-
-
-def find_installed_skill() -> SkillInstall | None:
-    """Find installed skill document metadata, or None."""
-    for rel_path in SKILL_SEARCH_PATHS:
-        full = _get_project_root() / rel_path
-        if not full.is_file():
-            continue
-        try:
-            content = full.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        version_match = SKILL_VERSION_RE.search(content)
-        if not version_match:
-            continue
-        installed_version = int(version_match.group(1))
-        overlay_match = SKILL_OVERLAY_RE.search(content)
-        overlay = overlay_match.group(1) if overlay_match else None
-        return SkillInstall(
-            rel_path=rel_path,
-            version=installed_version,
-            overlay=overlay,
-            stale=installed_version < SKILL_VERSION,
-        )
-    return None
-
-
-def check_skill_version() -> str | None:
-    """Return a warning if installed skill doc is outdated."""
-    install = find_installed_skill()
-    if not install or not install.stale:
-        return None
-    return (
-        f"Your desloppify skill document is outdated "
-        f"(v{install.version}, current v{SKILL_VERSION}). "
-        "Run: desloppify update-skill"
-    )

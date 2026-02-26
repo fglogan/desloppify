@@ -17,7 +17,7 @@ def patch_project_root(monkeypatch):
         monkeypatch.setattr(ctx, "project_root", tmp_path)
         monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(utils_text_mod, "PROJECT_ROOT", tmp_path)
-        file_discovery_mod._clear_source_file_cache()
+        file_discovery_mod.clear_source_file_cache_for_tests()
     return _patch
 
 

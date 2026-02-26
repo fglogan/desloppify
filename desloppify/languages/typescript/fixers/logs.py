@@ -3,14 +3,14 @@
 import re
 import sys
 
-from desloppify.file_discovery import rel
-from desloppify.languages.typescript.fixers.common import (
-    apply_fixer,
+from desloppify.core.discovery_api import rel
+from desloppify.languages.typescript.fixers.fixer_io import apply_fixer
+from desloppify.languages.typescript.fixers.syntax_scan import (
     collapse_blank_lines,
     extract_body_between_braces,
     find_balanced_end,
 )
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 _LOGGER_WRAPPER_NAMES = frozenset(
     {

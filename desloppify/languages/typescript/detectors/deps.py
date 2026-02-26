@@ -12,27 +12,23 @@ from typing import Any
 
 from desloppify.core._internal.text_utils import get_project_root
 from desloppify.core.fallbacks import log_best_effort_failure
+from desloppify.core.file_paths import rel, resolve_path
+from desloppify.core.grep import grep_files
+from desloppify.core.output import colorize, print_table
 from desloppify.engine.detectors.graph import (
     detect_cycles,
     finalize_graph,
     get_coupling_score,
 )
-from desloppify.file_discovery import (
+from desloppify.core.source_discovery import (
     find_source_files,
     find_ts_files,
-    rel,
-    resolve_path,
 )
 from desloppify.languages.typescript.detectors.deps_runtime import (
     build_dynamic_import_targets as _build_dynamic_import_targets,
 )
 from desloppify.languages.typescript.detectors.deps_runtime import (
     ts_alias_resolver as _ts_alias_resolver,
-)
-from desloppify.utils import (
-    colorize,
-    grep_files,
-    print_table,
 )
 
 _FRAMEWORK_EXTENSIONS = (".svelte", ".vue", ".astro")

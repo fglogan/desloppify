@@ -12,7 +12,7 @@ from desloppify.engine.detectors import coupling as coupling_detector_mod
 from desloppify.engine.detectors import dupes as dupes_detector_mod
 from desloppify.engine.detectors import gods as gods_detector_mod
 from desloppify.engine.detectors import orphaned as orphaned_detector_mod
-from desloppify.file_discovery import find_ts_files, rel
+from desloppify.core.discovery_api import find_ts_files, rel
 from desloppify.languages._framework.commands_base import (
     make_cmd_complexity,
     make_cmd_facade,
@@ -36,12 +36,12 @@ from desloppify.languages.typescript.phases import (
     TS_SKIP_DIRS,
     TS_SKIP_NAMES,
 )
-from desloppify.utils import (
-    SRC_PATH,
+from desloppify.core.output_api import (
     colorize,
     display_entries,
     print_table,
 )
+from desloppify.core.paths_api import get_src_path
 
 cmd_large = make_cmd_large(find_ts_files, default_threshold=500, module_name=__name__)
 cmd_complexity = make_cmd_complexity(
@@ -230,8 +230,9 @@ def cmd_react(args: argparse.Namespace) -> None:
 
 def cmd_coupling(args: argparse.Namespace) -> None:
     graph = deps_detector_mod.build_dep_graph(Path(args.path))
-    shared_prefix = f"{SRC_PATH}/shared/"
-    tools_prefix = f"{SRC_PATH}/tools/"
+    src_path = get_src_path()
+    shared_prefix = f"{src_path}/shared/"
+    tools_prefix = f"{src_path}/tools/"
     violations, _ = coupling_detector_mod.detect_coupling_violations(
         Path(args.path), graph, shared_prefix=shared_prefix, tools_prefix=tools_prefix
     )

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import desloppify.languages.typescript.phases as phases
+from desloppify.engine.detectors.coupling import CouplingEdgeCounts
 
 
 class _FakeLang:
@@ -102,11 +103,17 @@ def test_phase_coupling_passes_orphaned_options(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "desloppify.engine.detectors.coupling.detect_coupling_violations",
-        lambda _path, _graph, shared_prefix, tools_prefix: ([], 0),
+        lambda _path, _graph, shared_prefix, tools_prefix: (
+            [],
+            CouplingEdgeCounts(violating_edges=0, eligible_edges=0),
+        ),
     )
     monkeypatch.setattr(
         "desloppify.engine.detectors.coupling.detect_cross_tool_imports",
-        lambda _path, _graph, tools_prefix: ([], 0),
+        lambda _path, _graph, tools_prefix: (
+            [],
+            CouplingEdgeCounts(violating_edges=0, eligible_edges=0),
+        ),
     )
     monkeypatch.setattr(
         "desloppify.languages.typescript.phases._make_boundary_findings",

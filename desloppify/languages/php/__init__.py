@@ -1,7 +1,7 @@
 """PHP language plugin — phpstan."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import PHP_SPEC
+from desloppify.languages._framework.treesitter import PHP_SPEC
 
 generic_lang(
     name="php",

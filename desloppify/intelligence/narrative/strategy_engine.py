@@ -324,10 +324,10 @@ def compute_strategy(
 
     hint = compute_strategy_hint(fixer_leverage, lanes, can_parallelize, phase)
     review_action = next(
-        (action for action in actions if action.get("type") == "issue_queue"), None
+        (action for action in actions if action.get("detector") == "review"), None
     )
     if review_action:
-        hint += f" Review: {review_action['count']} finding(s) — `desloppify issues`."
+        hint += f" Review: {review_action['count']} finding(s) — `desloppify show review --status open`."
 
     return {
         "fixer_leverage": fixer_leverage,

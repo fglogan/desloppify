@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 import desloppify.languages.typescript.test_coverage as ts_cov
 from desloppify.engine.detectors.coverage.mapping import (
     _analyze_test_quality,
@@ -18,11 +20,12 @@ from desloppify.engine.detectors.coverage.mapping import (
     _strip_test_markers,
     _transitive_coverage,
 )
-from desloppify.engine.detectors.test_coverage import (
-    _file_loc,
-    _has_testable_logic,
-    detect_test_coverage,
+from desloppify.engine.detectors.test_coverage import detect_test_coverage
+from desloppify.engine.detectors.test_coverage.heuristics import _has_testable_logic
+from desloppify.engine.detectors.test_coverage.io import (
+    clear_coverage_read_warning_cache_for_tests,
 )
+from desloppify.engine.detectors.test_coverage.metrics import _file_loc
 from desloppify.engine.policy.zones import FileZoneMap, Zone, ZoneRule
 from desloppify.languages.python.test_coverage import _strip_py_comment
 from desloppify.languages.typescript.test_coverage import (
@@ -46,6 +49,13 @@ def _write_file(tmp_path, relpath: str, content: str = "") -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
     return str(p)
+
+
+@pytest.fixture(autouse=True)
+def _reset_read_warning_cache():
+    clear_coverage_read_warning_cache_for_tests()
+    yield
+    clear_coverage_read_warning_cache_for_tests()
 
 
 # ── _strip_test_markers ───────────────────────────────────
@@ -1651,9 +1661,9 @@ class TestHasTestableLogic:
         f = _write_file(tmp_path, "config.py", content)
         assert _has_testable_logic(f, "python") is True
 
-    def test_nonexistent_file_assumed_testable(self):
-        """Unreadable file is assumed testable (conservative)."""
-        assert _has_testable_logic("/no/such/file.py", "python") is True
+    def test_nonexistent_file_not_testable(self):
+        """Unreadable file follows the detector's non-testable fallback."""
+        assert _has_testable_logic("/no/such/file.py", "python") is False
 
     # ── Integration: non-testable files excluded from scorable set ──
 

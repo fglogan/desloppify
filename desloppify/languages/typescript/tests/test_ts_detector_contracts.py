@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from desloppify.languages.typescript.detectors.contracts import (
     DetectorResult,
 )
 from desloppify.languages.typescript.detectors.deprecated import (
+    cmd_deprecated,
     detect_deprecated,
     detect_deprecated_result,
 )
@@ -95,3 +97,8 @@ def test_detector_result_as_tuple_returns_live_entries_alias():
     tuple_entries, _ = result.as_tuple()
     tuple_entries.append({"id": "b"})
     assert result.entries == [{"id": "a"}, {"id": "b"}]
+
+
+def test_cmd_deprecated_uses_structured_result_api():
+    source = inspect.getsource(cmd_deprecated)
+    assert "detect_deprecated_result" in source

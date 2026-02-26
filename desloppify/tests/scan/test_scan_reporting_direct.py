@@ -65,14 +65,74 @@ def test_show_score_delta_prints_scores_and_wontfix_gap(monkeypatch, capsys):
     assert "objective 88.0/100" in out
     assert "strict 80.0/100" in out
     assert "verified 79.0/100" in out
-    assert "12 wontfix" in out
-    assert "open (in-scope): 4" in out
-    assert "open (out-of-scope carried): 0" in out
-    assert "open (global): 4" in out
     assert "gap between overall and strict" in out
 
 
-def test_show_score_delta_prints_scope_split_for_out_of_scope_open(monkeypatch, capsys):
+def test_show_score_delta_prints_legend_on_first_scan(monkeypatch, capsys):
+    import desloppify.state as state_mod
+
+    monkeypatch.setattr(state_mod, "get_overall_score", lambda _state: 90.0)
+    monkeypatch.setattr(state_mod, "get_objective_score", lambda _state: 88.0)
+    monkeypatch.setattr(state_mod, "get_strict_score", lambda _state: 85.0)
+    monkeypatch.setattr(state_mod, "get_verified_strict_score", lambda _state: 84.0)
+
+    scan_reporting_summary_mod.show_score_delta(
+        state={"stats": {"open": 2, "total": 5, "wontfix": 0}, "scan_count": 1},
+        prev_overall=None,
+        prev_objective=None,
+        prev_strict=None,
+        prev_verified=None,
+    )
+    out = capsys.readouterr().out
+    assert "Score guide:" in out
+    assert "your north star" in out
+    assert "40% mechanical + 60% subjective" in out
+
+
+def test_show_score_delta_hides_legend_on_subsequent_scans(monkeypatch, capsys):
+    import desloppify.state as state_mod
+
+    monkeypatch.setattr(state_mod, "get_overall_score", lambda _state: 95.0)
+    monkeypatch.setattr(state_mod, "get_objective_score", lambda _state: 94.0)
+    monkeypatch.setattr(state_mod, "get_strict_score", lambda _state: 93.0)
+    monkeypatch.setattr(state_mod, "get_verified_strict_score", lambda _state: 92.0)
+    # Ensure not in agent environment so the non-agent path hides the legend
+    monkeypatch.setattr(scan_reporting_summary_mod, "_is_agent_environment", lambda: False)
+
+    scan_reporting_summary_mod.show_score_delta(
+        state={"stats": {"open": 1, "total": 5, "wontfix": 0}, "scan_count": 5},
+        prev_overall=94.0,
+        prev_objective=93.0,
+        prev_strict=92.0,
+        prev_verified=91.0,
+    )
+    out = capsys.readouterr().out
+    assert "Score guide:" not in out
+
+
+def test_show_score_delta_shows_legend_in_agent_environment(monkeypatch, capsys):
+    """Agent environments always see the score legend, even on subsequent scans."""
+    import desloppify.state as state_mod
+
+    monkeypatch.setattr(state_mod, "get_overall_score", lambda _state: 95.0)
+    monkeypatch.setattr(state_mod, "get_objective_score", lambda _state: 94.0)
+    monkeypatch.setattr(state_mod, "get_strict_score", lambda _state: 93.0)
+    monkeypatch.setattr(state_mod, "get_verified_strict_score", lambda _state: 92.0)
+    monkeypatch.setattr(scan_reporting_summary_mod, "_is_agent_environment", lambda: True)
+
+    scan_reporting_summary_mod.show_score_delta(
+        state={"stats": {"open": 1, "total": 5, "wontfix": 0}, "scan_count": 5},
+        prev_overall=94.0,
+        prev_objective=93.0,
+        prev_strict=92.0,
+        prev_verified=91.0,
+    )
+    out = capsys.readouterr().out
+    assert "Score guide:" in out
+    assert "your north star" in out
+
+
+def test_show_score_delta_prints_scores_without_open_breakdown(monkeypatch, capsys):
     import desloppify.state as state_mod
 
     monkeypatch.setattr(state_mod, "get_overall_score", lambda _state: 95.0)
@@ -95,9 +155,9 @@ def test_show_score_delta_prints_scope_split_for_out_of_scope_open(monkeypatch, 
         prev_verified=90.0,
     )
     out = capsys.readouterr().out
-    assert "open (in-scope): 1" in out
-    assert "open (out-of-scope carried): 1" in out
-    assert "open (global): 2" in out
+    # Scores present, open-count breakdown moved to status
+    assert "overall 95.0/100" in out
+    assert "open (in-scope)" not in out
 
 
 def test_show_score_delta_surfaces_subjective_integrity_penalty(monkeypatch, capsys):
@@ -160,9 +220,8 @@ def test_show_score_delta_escalates_repeated_subjective_integrity_penalty(
     assert "review_packet_blind.json" in out
 
 
-def test_show_post_scan_analysis_surfaces_warnings_and_actions(monkeypatch, capsys):
+def test_show_post_scan_analysis_surfaces_warnings_and_headline(monkeypatch, capsys):
     import desloppify.intelligence.narrative as narrative_mod
-    import desloppify.state as state_mod
 
     monkeypatch.setattr(
         narrative_mod,
@@ -181,16 +240,6 @@ def test_show_post_scan_analysis_surfaces_warnings_and_actions(monkeypatch, caps
             ],
         },
     )
-    monkeypatch.setattr(
-        state_mod,
-        "path_scoped_findings",
-        lambda *_args, **_kwargs: {
-            "r1": {"status": "open", "detector": "review", "file": "a.py"},
-            "s1": {"status": "wontfix", "detector": "smells", "file": "b.py"},
-            "s2": {"status": "wontfix", "detector": "smells", "file": "c.py"},
-            "s3": {"status": "wontfix", "detector": "structural", "file": "d.py"},
-        },
-    )
 
     warnings, narrative = scan_reporting_analysis_mod.show_post_scan_analysis(
         diff={
@@ -206,38 +255,23 @@ def test_show_post_scan_analysis_surfaces_warnings_and_actions(monkeypatch, caps
     assert any("reopened" in warning for warning in warnings)
     assert any("cascading" in warning.lower() for warning in warnings)
     assert any("chronic reopener" in warning.lower() for warning in warnings)
-    assert "Strategy:" in out
-    assert "Agent focus: `desloppify next`" in out
-    assert "Review: 1 finding pending" in out
-    assert "complex files have never been reviewed" in out
+    # Slimmed scan: headline + pointers only (no Agent Plan, no review nudge)
+    assert "AGENT PLAN" not in out
     assert "Tighten structural debt first" in out
+    assert "desloppify next" in out
+    assert "desloppify status" in out
     assert narrative["headline"] == "Tighten structural debt first"
 
 
-def test_show_post_scan_analysis_flags_holistic_subjective_integrity(
+def test_show_post_scan_analysis_no_committee_sections(
     monkeypatch, capsys
 ):
     import desloppify.intelligence.narrative as narrative_mod
-    import desloppify.state as state_mod
 
     monkeypatch.setattr(
         narrative_mod,
         "compute_narrative",
         lambda *_args, **_kwargs: {"headline": None, "strategy": {}, "actions": []},
-    )
-    monkeypatch.setattr(
-        state_mod,
-        "path_scoped_findings",
-        lambda *_args, **_kwargs: {
-            "subjective_review::.::holistic_stale": {
-                "id": "subjective_review::.::holistic_stale",
-                "status": "open",
-                "detector": "subjective_review",
-                "file": ".",
-                "summary": "Holistic review is stale",
-                "detail": {"reason": "stale"},
-            }
-        },
     )
 
     scan_reporting_analysis_mod.show_post_scan_analysis(
@@ -246,8 +280,15 @@ def test_show_post_scan_analysis_flags_holistic_subjective_integrity(
         lang=SimpleNamespace(name="python"),
     )
     out = capsys.readouterr().out
-    assert "Subjective integrity:" in out
-    assert "review --run-batches --runner codex --parallel --scan-after-import" in out
+    # Slimmed scan: no committee sections
+    assert "AGENT PLAN" not in out
+    assert "Subjective integrity:" not in out
+    assert "Subjective coverage:" not in out
+    assert "Review:" not in out
+    assert "complex files have never been reviewed" not in out
+    # Pointers are always present
+    assert "desloppify next" in out
+    assert "desloppify status" in out
 
 
 def test_show_post_scan_analysis_warns_when_scan_coverage_reduced(monkeypatch, capsys):
@@ -421,6 +462,8 @@ def test_print_llm_summary_respects_env_and_includes_dimension_table(
     assert "Ignored: 4 (by 2 patterns)" in out
     assert "Top action: `desloppify next` — Resolve top finding" in out
     assert "A scorecard image was saved to" in out
+    assert "Score guide:" in out
+    assert "your north star" in out
 
 
 def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
@@ -429,7 +472,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
 
     monkeypatch.setattr(
         scan_reporting_dimensions_mod,
-        "_scorecard_dimension_rows",
+        "scorecard_dimension_rows",
         lambda _state, **_kwargs: [
             (
                 "File health",
@@ -512,7 +555,7 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         scan_reporting_dimensions_mod,
-        "_scorecard_dimension_rows",
+        "scorecard_dimension_rows",
         lambda _state, **_kwargs: [
             (
                 "High Level Elegance",
@@ -537,7 +580,22 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
         ],
     )
     scan_reporting_dimensions_mod.show_subjective_paths_section(
-        {"findings": {}, "scan_path": ".", "strict_score": 90.0},
+        {
+            "findings": {
+                "sr1": {
+                    "detector": "subjective_review",
+                    "status": "open",
+                    "detail": {"reason": "changed"},
+                },
+                "sr2": {
+                    "detector": "subjective_review",
+                    "status": "open",
+                    "detail": {"reason": "unreviewed"},
+                },
+            },
+            "scan_path": ".",
+            "strict_score": 90.0,
+        },
         {
             "High Level Elegance": {
                 "score": 78.0,
@@ -552,22 +610,12 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
                 "detectors": {"subjective_assessment": {}},
             },
         },
-        target_strict_score=95.0,
     )
     subjective_out = capsys.readouterr().out
-    assert "Subjective path:" in subjective_out
-    assert "scan --path . --reset-subjective" in subjective_out
-    assert "North star: strict 90.0/100 → target 95.0 (+5.0 needed)" in subjective_out
-    assert "Quality below target (<95%)" in subjective_out
-    assert (
-        "review --run-batches --runner codex --parallel --scan-after-import --dimensions mid_level_elegance,high_level_elegance"
-        in subjective_out
-    )
-    assert "Coverage debt: 2 files need review" in subjective_out
-    assert "Scope split: open (in-scope) 2" in subjective_out
-    assert "open (out-of-scope carried) 0" in subjective_out
-    assert "open (global) 2" in subjective_out
-    assert "show subjective_review --status open" in subjective_out
+    assert "Subjective:" in subjective_out
+    assert "2 below target (95%)" in subjective_out
+    assert "files need review" in subjective_out
+    assert "show subjective" in subjective_out
 
     scan_reporting_dimensions_mod.show_subjective_paths_section(
         {"findings": {}, "scan_path": ".", "strict_score": 96.0},
@@ -580,20 +628,17 @@ def test_show_scorecard_dimensions_and_dimension_hints(monkeypatch, capsys):
             },
         },
         threshold=97.0,
-        target_strict_score=97.0,
     )
     subjective_custom_target = capsys.readouterr().out
-    assert (
-        "North star: strict 96.0/100 → target 97.0 (+1.0 needed)"
-        in subjective_custom_target
-    )
-    assert "Quality below target (<97%)" in subjective_custom_target
+    assert "Subjective:" in subjective_custom_target
+    assert "below target (97%)" in subjective_custom_target
+    assert "show subjective" in subjective_custom_target
 
 
 def test_show_scorecard_dimensions_uses_scorecard_rows(monkeypatch, capsys):
     monkeypatch.setattr(
         scan_reporting_dimensions_mod,
-        "_scorecard_dimension_rows",
+        "scorecard_dimension_rows",
         lambda _state, **_kwargs: [
             ("File health", {"score": 90.0, "strict": 88.0, "detectors": {}}),
             (
@@ -728,18 +773,17 @@ def test_show_subjective_paths_prioritizes_integrity_gap(monkeypatch, capsys):
                 "detectors": {"subjective_assessment": {}},
             },
         },
-        target_strict_score=95.0,
     )
     out = capsys.readouterr().out
-    assert "High-priority integrity gap:" in out
-    assert "review --run-batches --runner codex --parallel --scan-after-import" in out
-    assert "Unassessed (0% placeholder): High elegance" in out
+    assert "Subjective:" in out
+    assert "unassessed" in out
+    assert "show subjective" in out
 
 
 def test_show_subjective_paths_prints_out_of_scope_subjective_breakdown(monkeypatch, capsys):
     monkeypatch.setattr(
         scan_reporting_dimensions_mod,
-        "_scorecard_dimension_rows",
+        "scorecard_dimension_rows",
         lambda _state, **_kwargs: [
             (
                 "Naming quality",
@@ -780,13 +824,11 @@ def test_show_subjective_paths_prints_out_of_scope_subjective_breakdown(monkeypa
                 "detectors": {"subjective_assessment": {}},
             }
         },
-        target_strict_score=98.0,
     )
     out = capsys.readouterr().out
-    assert "Scope split: open (in-scope) 1" in out
-    assert "open (out-of-scope carried) 1" in out
-    assert "open (global) 2" in out
-    assert "Out-of-scope carried reasons: 1 unreviewed" in out
+    assert "Subjective:" in out
+    assert "files need review" in out
+    assert "show subjective" in out
 
 
 def test_show_subjective_paths_shows_target_match_reset_warning(monkeypatch, capsys):
@@ -820,7 +862,6 @@ def test_show_subjective_paths_shows_target_match_reset_warning(monkeypatch, cap
                 "detectors": {"subjective_assessment": {}},
             },
         },
-        target_strict_score=95.0,
     )
     out = capsys.readouterr().out
     assert "were reset to 0.0 this scan" in out
@@ -829,3 +870,36 @@ def test_show_subjective_paths_shows_target_match_reset_warning(monkeypatch, cap
         "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality,logic_clarity"
         in out
     )
+
+
+def test_show_subjective_paths_does_not_swallow_stale_only_entries(monkeypatch, capsys):
+    """Stale-only entries (above threshold, not unassessed) must not be swallowed by the early exit."""
+    monkeypatch.setattr(
+        scan_reporting_dimensions_mod,
+        "scorecard_subjective_entries",
+        lambda _state, **_kwargs: [
+            {
+                "name": "High Level Elegance",
+                "score": 97.0,
+                "strict": 97.0,
+                "issues": 0,
+                "placeholder": False,
+                "stale": True,
+                "cli_keys": ["high_level_elegance"],
+            }
+        ],
+    )
+    scan_reporting_dimensions_mod.show_subjective_paths_section(
+        {"findings": {}, "scan_path": "."},
+        {
+            "High Level Elegance": {
+                "score": 97.0,
+                "strict": 97.0,
+                "issues": 0,
+                "detectors": {"subjective_assessment": {}},
+            },
+        },
+    )
+    out = capsys.readouterr().out
+    assert "stale" in out
+    assert "show subjective" in out

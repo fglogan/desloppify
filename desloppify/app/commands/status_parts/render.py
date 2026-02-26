@@ -18,7 +18,7 @@ from desloppify.app.commands.status_parts.summary import (
     print_scan_metrics,
     score_summary_lines,
 )
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     scorecard_subjective_entries,
 )
 from desloppify.core._internal.text_utils import get_area
@@ -29,7 +29,7 @@ from desloppify.scoring import (
     compute_score_impact,
     merge_potentials,
 )
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 
 def show_tier_progress_table(by_tier: dict) -> None:
@@ -557,7 +557,7 @@ def show_review_summary(state: dict):
     parts = [f"{len(review_open)} finding{'s' if len(review_open) != 1 else ''} open"]
     if uninvestigated:
         parts.append(f"{uninvestigated} uninvestigated")
-    print(colorize(f"  Review: {', '.join(parts)} — `desloppify issues`", "cyan"))
+    print(colorize(f"  Review: {', '.join(parts)} — `desloppify show review --status open`", "cyan"))
     dim_scores = state.get("dimension_scores", {})
     if "Test health" in dim_scores:
         print(

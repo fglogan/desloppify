@@ -33,7 +33,7 @@ def _compute_headline(
         uninvestigated = (open_by_detector or {}).get("review_uninvestigated", 0)
         if uninvestigated > 0:
             review_suffix = (
-                f" ({review_count} review finding{s} \u2014 run `desloppify issues`)"
+                f" ({review_count} review finding{s} \u2014 run `desloppify show review --status open`)"
             )
         else:
             review_suffix = f" ({review_count} review finding{s} pending)"

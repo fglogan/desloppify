@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from desloppify.languages._framework.base.types import DetectorPhase
 from desloppify.state import make_finding
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 # ── Phase factories ────────────────────────────────────────
 
@@ -129,14 +129,12 @@ def all_treesitter_phases(spec_name: str) -> list[DetectorPhase]:
     query exists) unused imports.  Returns [] if tree-sitter-language-pack
     is not installed.
     """
-    from desloppify.languages._framework.treesitter import is_available
+    from desloppify.languages._framework.treesitter import get_spec, is_available
 
     if not is_available():
         return []
 
-    from desloppify.languages._framework.treesitter._specs import TREESITTER_SPECS
-
-    spec = TREESITTER_SPECS.get(spec_name)
+    spec = get_spec(spec_name)
     if spec is None or not spec.function_query:
         return []
 

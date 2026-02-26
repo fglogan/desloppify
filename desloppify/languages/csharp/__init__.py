@@ -60,11 +60,6 @@ _CSHARP_MOVE_HELPERS = (
 )
 
 
-def _build_dep_graph(path: Path) -> dict:
-    """Build C# dependency graph."""
-    return build_csharp_dep_graph(path)
-
-
 def _extract_csharp_functions(path: Path) -> list[FunctionInfo]:
     """Extract all C# functions for duplicate detection."""
     functions = []
@@ -112,7 +107,7 @@ class CSharpConfig(LangConfig):
             extensions=[".cs"],
             exclusions=CSHARP_FILE_EXCLUSIONS,
             default_src=".",
-            build_dep_graph=_build_dep_graph,
+            build_dep_graph=build_csharp_dep_graph,
             entry_patterns=CSHARP_ENTRY_PATTERNS,
             barrel_names={"Program.cs"},
             phases=[

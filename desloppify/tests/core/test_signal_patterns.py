@@ -89,7 +89,7 @@ def test_deprecation_marker_no_match():
 
 def test_deprecation_marker_word_boundary():
     """@deprecated must be at a word boundary (not part of larger word)."""
-    # @deprecatedMethod should still match because \b follows @deprecated
+    # @deprecatedMethod should not match because it is a larger token.
     assert DEPRECATION_MARKER_RE.search("@deprecatedMethod") is None
 
 

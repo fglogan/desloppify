@@ -28,7 +28,7 @@ from typing import Literal
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.policy.zones import FileZoneMap, Zone
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.languages._framework.base.types import DetectorCoverageStatus
 
 logger = logging.getLogger(__name__)

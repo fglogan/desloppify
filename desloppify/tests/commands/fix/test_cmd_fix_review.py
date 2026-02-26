@@ -62,7 +62,8 @@ def _make_prepare_result(total_candidates=3, dims=None):
 
 # Patch targets: lazy imports inside _cmd_fix_review resolve at source modules
 _P_LANG = "desloppify.app.commands.fix.review_flow.resolve_lang"
-_P_LOAD_STATE = "desloppify.app.commands.fix.review_flow._load_state"
+_P_STATE_PATH = "desloppify.app.commands.fix.review_flow.state_path"
+_P_LOAD_STATE = "desloppify.app.commands.fix.review_flow.state_mod.load_state"
 
 _P_PREP = "desloppify.intelligence.review.prepare_review"
 _P_SETUP = "desloppify.app.commands.fix.review_flow.review_runtime_mod.setup_lang_concrete"
@@ -79,7 +80,8 @@ def _patch_all(prep_result, found_files=None):
     mock_lang_run.name = "python"
     return (
         patch(_P_LANG, return_value=mock_lang_cfg),
-        patch(_P_LOAD_STATE, return_value=("/tmp/state.json", {})),
+        patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+        patch(_P_LOAD_STATE, return_value={}),
         patch(_P_SETUP, return_value=(mock_lang_run, found_files)),
         patch(_P_PREP, return_value=prep_result),
         patch(_P_WQ),
@@ -90,7 +92,7 @@ class TestFixReviewZeroCandidates:
     def test_prints_all_reviewed(self, capsys):
         args = _FakeArgs()
         patches = _patch_all(_make_prepare_result(total_candidates=0))
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             _cmd_fix_review(args)
         out = capsys.readouterr().out
         assert "All production files have been reviewed" in out
@@ -120,7 +122,8 @@ class TestFixReviewZeroCandidates:
         }
         with (
             patch(_P_LANG, return_value=MagicMock(name="python")),
-            patch(_P_LOAD_STATE, return_value=("/tmp/state.json", loaded_state)),
+            patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+            patch(_P_LOAD_STATE, return_value=loaded_state),
             patch(_P_SETUP, return_value=(MagicMock(name="python"), [])),
             patch(_P_PREP, return_value=_make_prepare_result(total_candidates=0)),
             patch(_P_WQ),
@@ -135,7 +138,7 @@ class TestFixReviewDimensionPrompts:
     def test_prints_dimensions(self, capsys):
         args = _FakeArgs()
         patches = _patch_all(_make_prepare_result(total_candidates=3))
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             _cmd_fix_review(args)
         out = capsys.readouterr().out
         assert "3 files need design review" in out
@@ -147,7 +150,7 @@ class TestFixReviewDimensionPrompts:
     def test_prints_lang_guidance(self, capsys):
         args = _FakeArgs()
         patches = _patch_all(_make_prepare_result())
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             _cmd_fix_review(args)
         out = capsys.readouterr().out
         assert "snake_case" in out
@@ -156,7 +159,7 @@ class TestFixReviewDimensionPrompts:
     def test_prints_skip_items(self, capsys):
         args = _FakeArgs()
         patches = _patch_all(_make_prepare_result())
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             _cmd_fix_review(args)
         out = capsys.readouterr().out
         assert "Framework names" in out
@@ -165,7 +168,7 @@ class TestFixReviewDimensionPrompts:
     def test_prints_next_steps(self, capsys):
         args = _FakeArgs()
         patches = _patch_all(_make_prepare_result())
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             _cmd_fix_review(args)
         out = capsys.readouterr().out
         assert "desloppify review --import findings.json" in out
@@ -177,7 +180,8 @@ class TestFixReviewQueryData:
         data = _make_prepare_result(total_candidates=5)
         with (
             patch(_P_LANG, return_value=MagicMock(name="python")),
-            patch(_P_LOAD_STATE, return_value=("/tmp/state.json", {})),
+            patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+            patch(_P_LOAD_STATE, return_value={}),
             patch(_P_SETUP, return_value=(MagicMock(name="python"), [])),
             patch(_P_PREP, return_value=data),
             patch(_P_WQ) as mock_wq,
@@ -190,7 +194,8 @@ class TestFixReviewQueryData:
         found = ["/tmp/a.py", "/tmp/b.py"]
         with (
             patch(_P_LANG, return_value=MagicMock(name="python")),
-            patch(_P_LOAD_STATE, return_value=("/tmp/state.json", {})),
+            patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+            patch(_P_LOAD_STATE, return_value={}),
             patch(_P_SETUP, return_value=(MagicMock(name="python"), found)),
             patch(_P_PREP, return_value=_make_prepare_result()) as mock_prep,
             patch(_P_WQ),
@@ -206,7 +211,8 @@ class TestFixReviewQueryData:
         loaded_state = {"zone_overrides": {"wrong": "value"}}
         with (
             patch(_P_LANG, return_value=mock_lang),
-            patch(_P_LOAD_STATE, return_value=("/tmp/state.json", loaded_state)),
+            patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+            patch(_P_LOAD_STATE, return_value=loaded_state),
             patch(_P_SETUP, return_value=(MagicMock(name="python"), [])) as mock_setup,
             patch(_P_PREP, return_value=_make_prepare_result()),
             patch(_P_WQ),
@@ -223,7 +229,8 @@ class TestFixReviewQueryData:
         mock_lang_run.name = "python"
         with (
             patch(_P_LANG, return_value=mock_lang_cfg),
-            patch(_P_LOAD_STATE, return_value=("/tmp/state.json", {})),
+            patch(_P_STATE_PATH, return_value="/tmp/state.json"),
+            patch(_P_LOAD_STATE, return_value={}),
             patch(_P_SETUP, return_value=(mock_lang_run, [])),
             patch(_P_PREP, return_value=_make_prepare_result()) as mock_prep,
             patch(_P_WQ),

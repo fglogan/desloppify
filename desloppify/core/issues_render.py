@@ -1,10 +1,11 @@
-"""Rendering and scoring helpers for review issue work orders."""
+"""Rendering and scoring helpers for finding work orders."""
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 
+from desloppify.core.registry import DETECTORS
 from desloppify.scoring import CONFIDENCE_WEIGHTS, HOLISTIC_MULTIPLIER
 
 logger = logging.getLogger(__name__)
@@ -121,22 +122,21 @@ def _append_footer(
         lines.append("## Ready to Fix\n")
         lines.append("When done:\n")
         lines.append("```bash")
-        lines.append(f'desloppify --lang {lang_name} resolve fixed "{finding_id}"')
+        lines.append(f'desloppify resolve fixed "{finding_id}"')
         lines.append("```\n")
         return
 
-    number_text = str(number) if number is not None else "<number>"
     lines.append("## Status: Needs Investigation\n")
     lines.append("Investigate the files above, then resolve with a note:\n")
     lines.append("```bash")
     lines.append(
-        f'desloppify --lang {lang_name} resolve fixed "{finding_id}" --note "description of fix"'
+        f'desloppify resolve fixed "{finding_id}" --note "description of fix"'
     )
     lines.append("```\n")
     lines.append("Or save detailed analysis first:\n")
     lines.append("```bash")
     lines.append(
-        f"desloppify --lang {lang_name} issues update {number_text} --file analysis.md"
+        f'desloppify show "{finding_id}" --notes analysis.md'
     )
     lines.append("```\n")
 
@@ -150,8 +150,18 @@ def render_issue_detail(
     """Render one finding as a markdown work order from state."""
     finding_id = finding["id"]
     detail = finding.get("detail", {})
+    detector = finding.get("detector", "")
     is_holistic = detail.get("holistic", False)
-    dimension = detail.get("dimension", "unknown").replace("_", " ")
+    is_review = detector in ("review", "concerns")
+
+    # Derive dimension: from detail for review, from registry for mechanical.
+    raw_dimension = detail.get("dimension", "")
+    if raw_dimension:
+        dimension = raw_dimension.replace("_", " ")
+    else:
+        meta = DETECTORS.get(detector)
+        dimension = meta.dimension.replace("_", " ") if meta else "unknown"
+
     confidence = finding.get("confidence", "low")
 
     parts = finding_id.split("::")
@@ -162,7 +172,12 @@ def render_issue_detail(
     lines: list[str] = []
     lines.append(f"# {dimension}: {identifier}\n")
     lines.append(f"**Finding**: `{finding_id}`  ")
-    lines.append(f"**Dimension**: {dimension} | **Confidence**: {confidence}  ")
+    if not is_review:
+        meta = DETECTORS.get(detector)
+        detector_display = meta.display if meta else detector
+        lines.append(f"**Detector**: {detector_display} | **Confidence**: {confidence}  ")
+    else:
+        lines.append(f"**Dimension**: {dimension} | **Confidence**: {confidence}  ")
     lines.append(f"**Score impact**: {label} (~{impact_pts:.1f} pts)\n")
 
     _append_assessment_context(lines, finding, subjective_assessments)

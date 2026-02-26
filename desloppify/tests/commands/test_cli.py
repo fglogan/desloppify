@@ -13,7 +13,10 @@ import desloppify.app.commands.helpers.lang as lang_helpers_mod
 import desloppify.cli as cli_mod
 from desloppify.app.commands.helpers.lang import resolve_lang, resolve_lang_settings
 from desloppify.app.commands.helpers.query import write_query
-from desloppify.app.commands.helpers.runtime_options import resolve_lang_runtime_options
+from desloppify.app.commands.helpers.runtime_options import (
+    LangRuntimeOptionsError,
+    resolve_lang_runtime_options,
+)
 from desloppify.app.commands.helpers.score import (
     coerce_target_score,
     target_strict_score_from_config,
@@ -287,14 +290,12 @@ class TestCreateParser:
         options = resolve_lang_runtime_options(args, CSharpConfig())
         assert options["roslyn_cmd"] == "fake-roslyn --json"
 
-    def test_lang_opt_rejects_invalid_key_value_pair(self, capsys):
+    def test_lang_opt_rejects_invalid_key_value_pair(self):
         args = SimpleNamespace(lang_opt=["not_a_pair"])
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(LangRuntimeOptionsError) as exc:
             resolve_lang_runtime_options(args, CSharpConfig())
-        assert exc.value.code == 2
-        err = capsys.readouterr().err
-        assert "Invalid --lang-opt" in err
-        assert "Expected KEY=VALUE" in err
+        assert "Invalid --lang-opt" in str(exc.value)
+        assert "Expected KEY=VALUE" in str(exc.value)
 
     def test_language_settings_loaded_from_config_namespace(self):
         lang = CSharpConfig()
@@ -410,56 +411,6 @@ class TestCreateParser:
         )
         assert args.attested_external is True
         assert isinstance(args.attest, str)
-
-    def test_issues_command_defaults(self, parser):
-        args = parser.parse_args(["issues"])
-        assert args.command == "issues"
-        assert args.issues_action is None
-
-    def test_issues_accepts_state_file_flag(self, parser):
-        args = parser.parse_args(["issues", "--state-file", ".desloppify/state.json"])
-        assert args.command == "issues"
-        assert args.state == ".desloppify/state.json"
-
-    def test_issues_deprecated_state_flag_still_works(self, parser, capsys):
-        args = parser.parse_args(["issues", "--state", ".desloppify/state.json"])
-        assert args.command == "issues"
-        assert args.state == ".desloppify/state.json"
-        err = capsys.readouterr().err
-        assert "deprecated" in err
-        assert "--state" in err
-
-    def test_issues_rejects_status_like_state_path(self, parser, capsys):
-        with pytest.raises(SystemExit):
-            parser.parse_args(["issues", "--state-file", "resolved"])
-        err = capsys.readouterr().err
-        assert "looks like a status value" in err
-        assert "--state-file" in err
-
-    def test_issues_show_subcommand(self, parser):
-        args = parser.parse_args(["issues", "show", "3"])
-        assert args.command == "issues"
-        assert args.issues_action == "show"
-        assert args.number == 3
-
-    def test_issues_list_subcommand(self, parser):
-        args = parser.parse_args(["issues", "list"])
-        assert args.command == "issues"
-        assert args.issues_action == "list"
-
-    def test_issues_update_subcommand(self, parser):
-        args = parser.parse_args(["issues", "update", "2", "--file", "analysis.md"])
-        assert args.command == "issues"
-        assert args.issues_action == "update"
-        assert args.number == 2
-        assert args.file == "analysis.md"
-
-    def test_issues_merge_subcommand(self, parser):
-        args = parser.parse_args(["issues", "merge", "--dry-run", "--similarity", "0.9"])
-        assert args.command == "issues"
-        assert args.issues_action == "merge"
-        assert args.dry_run is True
-        assert args.similarity == 0.9
 
     def test_config_command_defaults(self, parser):
         args = parser.parse_args(["config"])
@@ -880,7 +831,10 @@ class TestTargetScoreHelpers:
 class TestWriteQuery:
     def test_writes_valid_json(self, tmp_path, monkeypatch):
         query_file = tmp_path / ".desloppify" / "query.json"
-        monkeypatch.setattr("desloppify.app.commands.helpers.query.QUERY_FILE", query_file)
+        monkeypatch.setattr(
+            "desloppify.app.commands.helpers.query.query_file_path",
+            lambda: query_file,
+        )
 
         data = {"results": [1, 2, 3], "count": 3}
         write_query(data)
@@ -892,7 +846,10 @@ class TestWriteQuery:
 
     def test_creates_parent_directory(self, tmp_path, monkeypatch):
         query_file = tmp_path / "deep" / "nested" / "query.json"
-        monkeypatch.setattr("desloppify.app.commands.helpers.query.QUERY_FILE", query_file)
+        monkeypatch.setattr(
+            "desloppify.app.commands.helpers.query.query_file_path",
+            lambda: query_file,
+        )
 
         write_query({"ok": True})
         assert query_file.exists()
@@ -900,7 +857,10 @@ class TestWriteQuery:
     def test_handles_write_error_gracefully(self, tmp_path, monkeypatch):
         """If the file cannot be written, no exception should escape."""
         query_file = Path("/nonexistent/readonly/path/query.json")
-        monkeypatch.setattr("desloppify.app.commands.helpers.query.QUERY_FILE", query_file)
+        monkeypatch.setattr(
+            "desloppify.app.commands.helpers.query.query_file_path",
+            lambda: query_file,
+        )
 
         # Should not raise
         write_query({"data": 1})
@@ -915,7 +875,7 @@ class TestApplyPersistedExclusions:
     def test_cli_exclusions_applied(self, monkeypatch):
         captured = []
         monkeypatch.setattr(
-            "desloppify.file_discovery.set_exclusions", lambda pats: captured.extend(pats)
+            "desloppify.cli.set_exclusions", lambda pats: captured.extend(pats)
         )
         args = SimpleNamespace(exclude=["node_modules", "dist"])
         config = {"exclude": []}
@@ -926,7 +886,7 @@ class TestApplyPersistedExclusions:
     def test_persisted_exclusions_merged(self, monkeypatch):
         captured = []
         monkeypatch.setattr(
-            "desloppify.file_discovery.set_exclusions", lambda pats: captured.extend(pats)
+            "desloppify.cli.set_exclusions", lambda pats: captured.extend(pats)
         )
         args = SimpleNamespace(exclude=["cli_only"])
         config = {"exclude": ["persisted_one"]}
@@ -937,7 +897,7 @@ class TestApplyPersistedExclusions:
     def test_no_duplicates_in_combined(self, monkeypatch):
         captured = []
         monkeypatch.setattr(
-            "desloppify.file_discovery.set_exclusions", lambda pats: captured.extend(pats)
+            "desloppify.cli.set_exclusions", lambda pats: captured.extend(pats)
         )
         args = SimpleNamespace(exclude=["shared"])
         config = {"exclude": ["shared"]}
@@ -947,7 +907,7 @@ class TestApplyPersistedExclusions:
     def test_no_exclusions_does_nothing(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "desloppify.file_discovery.set_exclusions", lambda pats: called.append(pats)
+            "desloppify.cli.set_exclusions", lambda pats: called.append(pats)
         )
         args = SimpleNamespace(exclude=None)
         config = {"exclude": []}
@@ -959,7 +919,7 @@ class TestApplyPersistedExclusions:
         """Config with no 'exclude' key should not crash."""
         captured = []
         monkeypatch.setattr(
-            "desloppify.file_discovery.set_exclusions", lambda pats: captured.extend(pats)
+            "desloppify.cli.set_exclusions", lambda pats: captured.extend(pats)
         )
         args = SimpleNamespace(exclude=["foo"])
         config = {}

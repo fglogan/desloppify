@@ -6,15 +6,15 @@ import re
 from pathlib import Path
 
 from desloppify.engine.detectors.base import ComplexitySignal, GodRule
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.languages._framework.base.shared_phases import (
     run_coupling_phase,
     run_structural_phase,
 )
-from desloppify.languages._framework.runtime import LangRun
+from desloppify.languages._framework.runtime import LangRuntimeContract
 from desloppify.languages.csharp.detectors.deps import build_dep_graph
 from desloppify.languages.csharp.extractors import extract_csharp_classes
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 
 def _compute_max_nesting(content: str, _lines: list[str]):
@@ -106,30 +106,23 @@ CSHARP_GOD_RULES = [
 ]
 
 
-def _runtime_setting(lang: LangRun, key: str, default: int) -> int:
+def _runtime_setting(lang: LangRuntimeContract, key: str, default: int) -> int:
     """Read language setting from runtime context."""
-    getter = getattr(lang, "runtime_setting", None)
-    if callable(getter):
-        try:
-            return int(getter(key, default))
-        except (TypeError, ValueError):
-            return default
-    return default
+    try:
+        return int(lang.runtime_setting(key, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _corroboration_signals_for_csharp(
-    entry: dict, lang: LangRun
+    entry: dict, lang: LangRuntimeContract
 ) -> tuple[list[str], int, int]:
     """Return corroboration signals plus complexity/import counts for confidence gating."""
     filepath = entry.get("file", "")
     loc = entry.get("loc", 0)
     import_count = entry.get("import_count", 0)
     fanout_threshold = max(1, _runtime_setting(lang, "high_fanout_threshold", 5))
-    complexity_map = getattr(lang, "complexity_map", None)
-    if not isinstance(complexity_map, dict):
-        complexity_map = getattr(lang, "_complexity_map", {})
-    if not isinstance(complexity_map, dict):
-        complexity_map = {}
+    complexity_map = lang.complexity_map
     complexity_score = complexity_map.get(filepath, 0)
     if complexity_score == 0 and filepath:
         complexity_score = complexity_map.get(rel(filepath), 0)
@@ -145,7 +138,7 @@ def _corroboration_signals_for_csharp(
 
 
 def _apply_csharp_actionability_gates(
-    findings: list[dict], entries: list[dict], lang: LangRun
+    findings: list[dict], entries: list[dict], lang: LangRuntimeContract
 ) -> None:
     """Downgrade actionability unless multiple independent signals corroborate."""
     min_signals = max(1, _runtime_setting(lang, "corroboration_min_signals", 2))
@@ -170,7 +163,7 @@ def _apply_csharp_actionability_gates(
 
 
 def _phase_structural(
-    path: Path, lang: LangRun
+    path: Path, lang: LangRuntimeContract
 ) -> tuple[list[dict], dict[str, int]]:
     """Merge large + complexity + god classes into structural findings."""
     return run_structural_phase(
@@ -183,10 +176,11 @@ def _phase_structural(
     )
 
 
-def _phase_coupling(path: Path, lang: LangRun) -> tuple[list[dict], dict[str, int]]:
+def _phase_coupling(
+    path: Path, lang: LangRuntimeContract
+) -> tuple[list[dict], dict[str, int]]:
     """Run coupling-oriented detectors on the C# dependency graph."""
-    runtime_option = getattr(lang, "runtime_option", None)
-    roslyn_cmd = runtime_option("roslyn_cmd", "") if callable(runtime_option) else ""
+    roslyn_cmd = str(lang.runtime_option("roslyn_cmd", "") or "")
 
     def _build(p):
         return build_dep_graph(p, roslyn_cmd=(roslyn_cmd or None))

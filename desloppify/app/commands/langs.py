@@ -10,7 +10,7 @@ from desloppify.languages._framework.base.types import LangConfig
 from desloppify.languages._framework.discovery import load_all
 from desloppify.languages._framework.generic import SHARED_PHASE_LABELS
 from desloppify.languages._framework.resolution import make_lang_config
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 logger = logging.getLogger(__name__)
 

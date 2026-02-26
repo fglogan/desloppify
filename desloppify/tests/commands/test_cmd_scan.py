@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import desloppify.app.commands.scan.scan as scan_cmd_mod
+import desloppify.app.commands.scan.scan_artifacts as scan_artifacts_mod
 import desloppify.intelligence.narrative as narrative_mod
 import desloppify.languages as lang_mod
 from desloppify.app.commands.scan.scan import (
@@ -102,9 +103,6 @@ class TestCmdScanExecution:
             scan_cmd_mod, "target_strict_score_from_config", lambda _config, fallback=95.0: fallback
         )
         monkeypatch.setattr(
-            scan_cmd_mod, "show_score_integrity", lambda _state, _diff: None
-        )
-        monkeypatch.setattr(
             scan_cmd_mod,
             "show_post_scan_analysis",
             lambda *_args, **_kwargs: ([], {"headline": None, "actions": []}),
@@ -191,7 +189,6 @@ class TestCmdScanExecution:
         monkeypatch.setattr(
             scan_cmd_mod, "target_strict_score_from_config", lambda _config, fallback=95.0: fallback
         )
-        monkeypatch.setattr(scan_cmd_mod, "show_score_integrity", lambda _state, _diff: None)
         monkeypatch.setattr(
             scan_cmd_mod,
             "show_post_scan_analysis",
@@ -213,6 +210,47 @@ class TestCmdScanExecution:
         assert "Coverage preflight:" in out
         assert "Repercussion:" in out
         assert "Install Bandit" in out
+
+    def test_cmd_scan_exits_on_state_contract_error(self, monkeypatch, capsys):
+        args = SimpleNamespace(path=".")
+        monkeypatch.setattr(
+            scan_cmd_mod,
+            "prepare_scan_runtime",
+            lambda _args: (_ for _ in ()).throw(
+                scan_cmd_mod.ScanStateContractError("state.findings must be an object")
+            ),
+        )
+        monkeypatch.setattr(scan_cmd_mod, "colorize", lambda text, _style: text)
+
+        with pytest.raises(SystemExit) as exc:
+            cmd_scan(args)
+        assert exc.value.code == 2
+        out = capsys.readouterr().out
+        assert "state.findings must be an object" in out
+
+
+class TestScorecardBadgeContract:
+    def test_missing_scorecard_support_is_soft_skip_when_not_requested(self, monkeypatch):
+        monkeypatch.setattr(
+            scan_artifacts_mod,
+            "_load_scorecard_helpers",
+            lambda: (None, None),
+        )
+        args = SimpleNamespace(badge_path=None)
+        _path, result = scan_artifacts_mod.emit_scorecard_badge(args, {}, {})
+        assert result.ok is True
+        assert result.status == "skipped"
+
+    def test_missing_scorecard_support_is_error_when_explicitly_requested(self, monkeypatch):
+        monkeypatch.setattr(
+            scan_artifacts_mod,
+            "_load_scorecard_helpers",
+            lambda: (None, None),
+        )
+        args = SimpleNamespace(badge_path="badge.png")
+        _path, result = scan_artifacts_mod.emit_scorecard_badge(args, {}, {})
+        assert result.ok is False
+        assert result.error_kind == "scorecard_dependency_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -625,12 +663,12 @@ class TestShowPostScanAnalysis:
         warnings, narrative = show_post_scan_analysis(diff, state, FakeLang())
         assert warnings == []
 
-    def test_shows_top_action(self, monkeypatch, capsys):
+    def test_shows_headline_and_pointers(self, monkeypatch, capsys):
         monkeypatch.setattr(
             narrative_mod,
             "compute_narrative",
             lambda state, **kw: {
-                "headline": "Test",
+                "headline": "Test headline",
                 "actions": [
                     {
                         "command": "desloppify fix unused-imports",
@@ -652,9 +690,14 @@ class TestShowPostScanAnalysis:
         }
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
-        assert "desloppify fix unused-imports" in out
+        # Slimmed scan: headline + two pointers, no Agent Plan
+        assert "Test headline" in out
+        assert "desloppify next" in out
+        assert "desloppify status" in out
+        assert "AGENT PLAN" not in out
 
-    def test_subjective_run_nudge_when_score_below_90_without_prior_review(self, monkeypatch, capsys):
+    def test_subjective_score_nudge_removed_from_post_scan(self, monkeypatch, capsys):
+        """Subjective score nudges were removed — verify they no longer appear."""
         import desloppify.intelligence.narrative as narrative_mod
         monkeypatch.setattr(narrative_mod, "compute_narrative",
                             lambda state, **kw: {"headline": None, "actions": []})
@@ -678,77 +721,10 @@ class TestShowPostScanAnalysis:
         }
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
-        assert "Subjective scores below 90" in out
-        assert (
-            "You can run the subjective scoring with "
-            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
-            in out
-        )
-        assert "`desloppify status`" in out
-        assert "`desloppify issues`" in out
+        assert "Subjective scores below 90" not in out
 
-    def test_subjective_rerun_nudge_when_score_below_90_with_prior_review(self, monkeypatch, capsys):
-        import desloppify.intelligence.narrative as narrative_mod
-        monkeypatch.setattr(narrative_mod, "compute_narrative",
-                            lambda state, **kw: {"headline": None, "actions": []})
-
-        class FakeLang:
-            name = "python"
-
-        diff = {"new": 0, "auto_resolved": 0, "reopened": 0, "chronic_reopeners": []}
-        state = {
-            "findings": {},
-            "overall_score": 50,
-            "objective_score": 50,
-            "strict_score": 50,
-            "review_cache": {"files": {"src/a.py": {"reviewed_at": "2026-01-01T00:00:00+00:00"}}},
-            "dimension_scores": {
-                "Naming quality": {
-                    "score": 88.0,
-                    "strict": 88.0,
-                    "detectors": {"subjective_assessment": {"issues": 2}},
-                },
-            },
-        }
-        show_post_scan_analysis(diff, state, FakeLang())
-        out = capsys.readouterr().out
-        assert (
-            "You can rerun the subjective scoring with "
-            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
-            in out
-        )
-
-    def test_no_subjective_rerun_nudge_when_scores_high(self, monkeypatch, capsys):
-        import desloppify.intelligence.narrative as narrative_mod
-        monkeypatch.setattr(narrative_mod, "compute_narrative",
-                            lambda state, **kw: {"headline": None, "actions": []})
-
-        class FakeLang:
-            name = "python"
-
-        diff = {"new": 0, "auto_resolved": 0, "reopened": 0, "chronic_reopeners": []}
-        state = {
-            "findings": {},
-            "overall_score": 95,
-            "objective_score": 95,
-            "strict_score": 95,
-            "dimension_scores": {
-                "Naming quality": {
-                    "score": 95.0,
-                    "strict": 95.0,
-                    "detectors": {"subjective_assessment": {"issues": 0}},
-                },
-            },
-        }
-        show_post_scan_analysis(diff, state, FakeLang())
-        out = capsys.readouterr().out
-        assert (
-            "You can rerun the subjective scoring with "
-            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`"
-            not in out
-        )
-
-    def test_shows_filtered_narrative_reminders(self, monkeypatch, capsys):
+    def test_reminders_and_plan_fields_removed_from_scan(self, monkeypatch, capsys):
+        """Reminders and narrative plan fields are no longer shown in scan output."""
         import desloppify.intelligence.narrative as narrative_mod
         monkeypatch.setattr(
             narrative_mod,
@@ -757,38 +733,11 @@ class TestShowPostScanAnalysis:
                 "headline": None,
                 "actions": [],
                 "reminders": [
-                    {"type": "report_scores", "message": "skip this"},
-                    {"type": "review_stale", "message": "Design review is stale — run review prepare"},
-                    {"type": "ignore_suppression_high", "message": "Ignore suppression is high"},
+                    {"type": "review_stale", "message": "Design review is stale"},
                 ],
-            },
-        )
-
-        class FakeLang:
-            name = "python"
-
-        diff = {"new": 0, "auto_resolved": 0, "reopened": 0, "chronic_reopeners": []}
-        state = {"findings": {}, "overall_score": 90, "objective_score": 90, "strict_score": 90}
-        show_post_scan_analysis(diff, state, FakeLang())
-        out = capsys.readouterr().out
-        assert "Reminders:" in out
-        assert "Design review is stale" in out
-        assert "Ignore suppression is high" in out
-        assert "skip this" not in out
-
-    def test_shows_narrative_plan_fields_when_available(self, monkeypatch, capsys):
-        import desloppify.intelligence.narrative as narrative_mod
-        monkeypatch.setattr(
-            narrative_mod,
-            "compute_narrative",
-            lambda state, **kw: {
-                "headline": None,
-                "actions": [],
                 "why_now": "Security work should come first.",
-                "primary_action": {"command": "desloppify show security --status open", "description": "review open security findings"},
-                "verification_step": {"command": "desloppify scan", "reason": "revalidate after changes"},
-                "risk_flags": [{"severity": "high", "message": "40% findings hidden by ignore patterns"}],
-                "reminders": [],
+                "primary_action": {"command": "desloppify show security", "description": "review security"},
+                "risk_flags": [{"severity": "high", "message": "40% findings hidden"}],
             },
         )
 
@@ -799,9 +748,12 @@ class TestShowPostScanAnalysis:
         state = {"findings": {}, "overall_score": 90, "objective_score": 90, "strict_score": 90}
         show_post_scan_analysis(diff, state, FakeLang())
         out = capsys.readouterr().out
-        assert "Narrative Plan:" in out
-        assert "Why now: Security work should come first." in out
-        assert "Verify: `desloppify scan`" in out
+        # These sections moved to status — scan only shows headline + pointers
+        assert "Reminders:" not in out
+        assert "Narrative Plan:" not in out
+        assert "Risk:" not in out
+        assert "desloppify next" in out
+        assert "desloppify status" in out
 
 
 # ---------------------------------------------------------------------------

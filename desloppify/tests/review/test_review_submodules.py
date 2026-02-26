@@ -369,6 +369,14 @@ class TestExtractFindingsAndAssessments:
         with pytest.raises(ValueError):
             parse_per_file_import_payload("bad")  # type: ignore[arg-type]
 
+    def test_non_object_finding_item_rejected(self):
+        with pytest.raises(ValueError, match="findings\\[0\\]"):
+            parse_per_file_import_payload(
+                {
+                    "findings": ["bad-item"],  # type: ignore[list-item]
+                }
+            )
+
 
 class TestExtractReviewedFiles:
     def test_non_dict_payload(self):
@@ -544,6 +552,7 @@ class TestImportHolisticFindings:
                 "summary": "Too many responsibilities",
                 "confidence": "high",
                 "related_files": ["src/big.ts"],
+                "evidence": ["src/big.ts mixes persistence, orchestration, and UI concerns"],
                 "suggestion": "Split by domain",
             }
         ]

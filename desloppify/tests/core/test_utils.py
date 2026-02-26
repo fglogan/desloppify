@@ -8,7 +8,7 @@ import pytest
 import desloppify.core._internal.text_utils as utils_text_mod
 import desloppify.file_discovery as file_discovery_mod
 import desloppify.utils as utils_mod
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     find_source_files,
     get_exclusions,
     matches_exclusion,
@@ -35,7 +35,7 @@ def patch_project_root(monkeypatch):
         monkeypatch.setattr(ctx, "project_root", tmp_path)
         monkeypatch.setattr(utils_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(utils_text_mod, "PROJECT_ROOT", tmp_path)
-        file_discovery_mod._clear_source_file_cache()
+        file_discovery_mod.clear_source_file_cache_for_tests()
     return _patch
 
 
@@ -205,7 +205,7 @@ def test_set_exclusions(monkeypatch):
     finally:
         # Restore
         set_exclusions(list(original))
-        file_discovery_mod._clear_source_file_cache()
+        file_discovery_mod.clear_source_file_cache_for_tests()
 
 
 # ── grep_files() ─────────────────────────────────────────────
@@ -354,6 +354,30 @@ def test_check_tool_staleness_no_stored_hash():
     """Returns None when no tool_hash in state (first run)."""
     assert check_tool_staleness({}) is None
     assert check_tool_staleness({"other_key": "val"}) is None
+
+
+def test_check_tool_staleness_reports_unreadable_files(tmp_path, monkeypatch):
+    """Staleness warning includes unreadable-file diagnostics."""
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    readable = tool_dir / "ok.py"
+    readable.write_text("x = 1\n")
+    unreadable = tool_dir / "broken.py"
+    unreadable.write_text("x = 2\n")
+
+    original_read_bytes = Path.read_bytes
+
+    def _patched_read_bytes(path_obj: Path):
+        if path_obj == unreadable:
+            raise OSError("permission denied")
+        return original_read_bytes(path_obj)
+
+    monkeypatch.setattr(Path, "read_bytes", _patched_read_bytes, raising=False)
+    monkeypatch.setattr(utils_mod, "TOOL_DIR", tool_dir)
+
+    result = check_tool_staleness({"tool_hash": "aaaaaaaaaaaa"})
+    assert result is not None
+    assert "unreadable file" in result
 
 
 # ── read_code_snippet() ────────────────────────────────────

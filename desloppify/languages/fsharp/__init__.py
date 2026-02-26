@@ -1,7 +1,7 @@
 """F# language plugin — dotnet build."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import FSHARP_SPEC
+from desloppify.languages._framework.treesitter import FSHARP_SPEC
 
 generic_lang(
     name="fsharp",
@@ -9,7 +9,7 @@ generic_lang(
     tools=[
         {
             "label": "dotnet build",
-            "cmd": "dotnet build --no-restore 2>&1 || true",
+            "cmd": "dotnet build --no-restore 2>&1",
             "fmt": "gnu",
             "id": "fsharp_error",
             "tier": 3,

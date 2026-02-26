@@ -7,7 +7,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from desloppify.file_discovery import rel, resolve_path
+from desloppify.core.discovery_api import rel, resolve_path
+from desloppify.engine.policy.zones import EXCLUDED_ZONE_VALUES
 from desloppify.intelligence.review._context.patterns import (
     ERROR_PATTERNS as _ERROR_PATTERNS,
 )
@@ -23,9 +24,25 @@ logger = logging.getLogger(__name__)
 
 
 def select_holistic_files(path: Path, lang: object, files: list[str] | None) -> list[str]:
-    if files is not None:
-        return files
-    return lang.file_finder(path) if lang.file_finder else []
+    selected = files if files is not None else (lang.file_finder(path) if lang.file_finder else [])
+    if not selected:
+        return []
+
+    zone_map = getattr(lang, "zone_map", None)
+    if zone_map is None:
+        return selected
+
+    filtered: list[str] = []
+    for filepath in selected:
+        try:
+            zone = zone_map.get(filepath)
+            zone_value = getattr(zone, "value", str(zone))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            zone_value = "production"
+        if zone_value in EXCLUDED_ZONE_VALUES:
+            continue
+        filtered.append(filepath)
+    return filtered
 
 
 def _architecture_context(lang, file_contents: dict[str, str]) -> dict:

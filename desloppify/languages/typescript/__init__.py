@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import get_area
+from desloppify.core.source_discovery import find_ts_files
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
-from desloppify.file_discovery import find_ts_files
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
 from desloppify.languages._framework.base.phase_builders import (
@@ -74,14 +74,12 @@ def _ts_treesitter_phases() -> list[DetectorPhase]:
     which TS lacks.  (Signature analysis is added separately since it's
     backend-agnostic and doesn't require tree-sitter.)
     """
-    from desloppify.languages._framework.treesitter import is_available
+    from desloppify.languages._framework.treesitter import get_spec, is_available
 
     if not is_available():
         return []
 
-    from desloppify.languages._framework.treesitter._specs import TREESITTER_SPECS
-
-    spec = TREESITTER_SPECS.get("typescript")
+    spec = get_spec("typescript")
     if spec is None:
         return []
 
@@ -126,57 +124,58 @@ TS_ZONE_RULES = [
 ] + COMMON_ZONE_RULES
 
 
+def _det_unused(cat):
+    """Create a detector function for a specific unused category."""
+    def f(path):
+        return unused_detector_mod.detect_unused(path, category=cat)[0]
+    return f
+
+
+def _det_logs(path):
+    """Detect tagged debug logs."""
+    return logs_detector_mod.detect_logs(path)[0]
+
+
+def _det_smell(smell_id):
+    """Create a detector function for a specific smell ID."""
+    def f(path):
+        return next(
+            (
+                e.get("matches", [])
+                for e in smells_detector_mod.detect_smells(path)[0]
+                if e["id"] == smell_id
+            ),
+            [],
+        )
+    return f
+
+
+def _fix_vars(entries, *, dry_run=False):
+    """Fix unused vars, returning FixResult."""
+    results, skip_reasons = ts_fixers_mod.fix_unused_vars(entries, dry_run=dry_run)
+    return FixResult(entries=results, skip_reasons=skip_reasons)
+
+
+def _fix_logs(entries, *, dry_run=False):
+    """Fix debug logs, normalizing result keys."""
+    results = ts_fixers_mod.fix_debug_logs(entries, dry_run=dry_run)
+    for r in results:
+        r["removed"] = r.get("tags", r.get("removed", []))
+    return results
+
+
 def _get_ts_fixers() -> dict[str, FixerConfig]:
     """Build the TypeScript fixer registry (lazy-loaded).
 
     Detection and fix functions use lazy imports so detector modules
     aren't loaded until the fix command actually runs.
     """
-
-    def _det_unused(cat):
-        def f(path):
-            return unused_detector_mod.detect_unused(path, category=cat)[0]
-
-        return f
-
-    def _det_logs(path):
-        return logs_detector_mod.detect_logs(path)[0]
-
-    def _det_smell(smell_id):
-        def f(path):
-            return next(
-                (
-                    e.get("matches", [])
-                    for e in smells_detector_mod.detect_smells(path)[0]
-                    if e["id"] == smell_id
-                ),
-                [],
-            )
-
-        return f
-
-    def _fix_vars(entries, *, dry_run=False):
-        results, skip_reasons = ts_fixers_mod.fix_unused_vars(entries, dry_run=dry_run)
-        return FixResult(entries=results, skip_reasons=skip_reasons)
-
-    def _fix_logs(entries, *, dry_run=False):
-        results = ts_fixers_mod.fix_debug_logs(entries, dry_run=dry_run)
-        for r in results:
-            r["removed"] = r.get("tags", r.get("removed", []))
-        return results
-
-    def _lazy_fix(name):
-        def f(entries, **kw):
-            return getattr(ts_fixers_mod, name)(entries, **kw)
-
-        return f
-
     R, DV = "Removed", "Would remove"
     return {
         "unused-imports": FixerConfig(
             "unused imports",
             _det_unused("imports"),
-            _lazy_fix("fix_unused_imports"),
+            ts_fixers_mod.fix_unused_imports,
             "unused",
             R,
             DV,
@@ -190,7 +189,7 @@ def _get_ts_fixers() -> dict[str, FixerConfig]:
         "unused-params": FixerConfig(
             "unused params",
             _det_unused("vars"),
-            _lazy_fix("fix_unused_params"),
+            ts_fixers_mod.fix_unused_params,
             "unused",
             "Prefixed",
             "Would prefix",
@@ -198,7 +197,7 @@ def _get_ts_fixers() -> dict[str, FixerConfig]:
         "dead-useeffect": FixerConfig(
             "dead useEffect calls",
             _det_smell("dead_useeffect"),
-            _lazy_fix("fix_dead_useeffect"),
+            ts_fixers_mod.fix_dead_useeffect,
             "smells",
             R,
             DV,
@@ -206,7 +205,7 @@ def _get_ts_fixers() -> dict[str, FixerConfig]:
         "empty-if-chain": FixerConfig(
             "empty if/else chains",
             _det_smell("empty_if_chain"),
-            _lazy_fix("fix_empty_if_chain"),
+            ts_fixers_mod.fix_empty_if_chain,
             "smells",
             R,
             DV,

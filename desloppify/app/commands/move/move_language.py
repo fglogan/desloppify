@@ -9,7 +9,7 @@ from types import ModuleType
 
 from desloppify import languages as lang_mod
 from desloppify.app.commands.helpers.lang import resolve_lang
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def _build_ext_to_lang_map() -> dict[str, str]:

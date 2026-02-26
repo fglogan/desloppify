@@ -326,9 +326,12 @@ def _file_concerns(state: dict[str, Any], dismissals: dict[str, Any]) -> list[Co
         judgment_dets = {f.get("detector", "") for f in judgment}
         elevated = _has_elevated_signals(judgment)
 
-        # Flag if 2+ judgment detectors OR 1 with elevated signals.
+        # Flag if 2+ judgment detectors OR 1 with elevated signals
+        # OR 1 judgment detector + 2 mechanical findings from any detector.
+        mechanical_count = len(all_findings)
         if len(judgment_dets) < 2 and not elevated:
-            continue
+            if not (len(judgment_dets) >= 1 and mechanical_count >= 3):
+                continue
 
         signals = _extract_signals(judgment)
         concern_type = _classify(judgment_dets, signals)
@@ -427,7 +430,65 @@ def _cross_file_patterns(state: dict[str, Any], dismissals: dict[str, Any]) -> l
     return concerns
 
 
-_GENERATORS = [_file_concerns, _cross_file_patterns]
+def _systemic_smell_patterns(
+    state: dict[str, Any], dismissals: dict[str, Any]
+) -> list[Concern]:
+    """Systemic concerns: single smell_id appearing across 5+ files.
+
+    Complements _cross_file_patterns which looks at detector-combo profiles.
+    This catches pervasive single-smell issues (e.g. broad_except in 12 files).
+    """
+    smell_files: dict[str, list[str]] = defaultdict(list)
+    smell_ids_map: dict[str, list[str]] = defaultdict(list)  # smell_id -> finding IDs
+
+    for f in _open_findings(state):
+        if f.get("detector") != "smells":
+            continue
+        detail = f.get("detail", {})
+        smell_id = detail.get("smell_id", "") if isinstance(detail, dict) else ""
+        filepath = f.get("file", "")
+        if smell_id and filepath and filepath != ".":
+            smell_files[smell_id].append(filepath)
+            smell_ids_map[smell_id].append(f.get("id", ""))
+
+    concerns: list[Concern] = []
+    for smell_id, files in smell_files.items():
+        unique_files = sorted(set(files))
+        if len(unique_files) < 5:
+            continue
+
+        all_ids = tuple(sorted(smell_ids_map[smell_id]))
+        fp = _fingerprint("systemic_smell", smell_id, (smell_id,))
+        if _is_dismissed(dismissals, fp, all_ids):
+            continue
+
+        concerns.append(
+            Concern(
+                type="systemic_smell",
+                file=unique_files[0],
+                summary=(
+                    f"'{smell_id}' appears in {len(unique_files)} files — "
+                    "likely a systemic pattern"
+                ),
+                evidence=(
+                    f"Smell: {smell_id}",
+                    f"Affected files ({len(unique_files)}): {', '.join(unique_files[:10])}",
+                ),
+                question=(
+                    f"The smell '{smell_id}' appears across {len(unique_files)} files. "
+                    "Is this a codebase-wide convention that should be addressed "
+                    "systemically (lint rule, shared utility, architecture change), "
+                    "or are these independent occurrences?"
+                ),
+                fingerprint=fp,
+                source_findings=all_ids,
+            )
+        )
+
+    return concerns
+
+
+_GENERATORS = [_file_concerns, _cross_file_patterns, _systemic_smell_patterns]
 
 
 def generate_concerns(

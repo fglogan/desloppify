@@ -1,9 +1,11 @@
 """Large file detection (LOC threshold)."""
 
 import logging
+
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core.file_paths import resolve_scan_file
+from desloppify.core.fallbacks import log_best_effort_failure
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +18,14 @@ def detect_large_files(
     entries = []
     for filepath in files:
         try:
-            p = (
-                Path(filepath)
-                if Path(filepath).is_absolute()
-                else PROJECT_ROOT / filepath
-            )
+            p = resolve_scan_file(filepath, scan_root=path)
             loc = len(p.read_text().splitlines())
             if loc > threshold:
                 entries.append({"file": filepath, "loc": loc})
         except (OSError, UnicodeDecodeError) as exc:
-            logger.debug(
-                "Skipping unreadable file in large-file detector: %s (%s)",
-                filepath,
+            log_best_effort_failure(
+                logger,
+                f"read large-file detector candidate {filepath}",
                 exc,
             )
             continue

@@ -59,7 +59,8 @@
         "Parameters typed as X but called with Y (e.g., str param receiving None)",
         "Union types that could be narrowed (Optional used where None is never valid)",
         "Missing annotations on public API functions",
-        "Type: ignore comments without explanation"
+        "Type: ignore comments without explanation",
+        "TypedDict fields marked Required but accessed via .get() with defaults — the type promises a shape the code doesn't trust"
       ],
       "skip": [
         "Untyped private helpers in well-typed modules",
@@ -105,7 +106,9 @@
         "Systemic util/helper dumping grounds that create low cohesion across modules",
         "Leaky abstractions: callers consistently bypass intended interfaces",
         "Wide options/context bag APIs that hide true domain boundaries",
-        "Generic/type-parameter machinery used in only one concrete way"
+        "Generic/type-parameter machinery used in only one concrete way",
+        "Delegation-heavy classes where most methods forward to an inner object (high delegation ratio)",
+        "Facade/re-export modules that define no logic of their own"
       ],
       "skip": [
         "Dependency-injection or framework abstractions required for wiring/testability",

@@ -1,7 +1,7 @@
 """Nim language plugin — nim check."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import NIM_SPEC
+from desloppify.languages._framework.treesitter import NIM_SPEC
 
 generic_lang(
     name="nim",
@@ -17,6 +17,6 @@ generic_lang(
         },
     ],
     depth="minimal",
-    detect_markers=["nimble"],
+    detect_markers=["*.nimble"],
     treesitter_spec=NIM_SPEC,
 )

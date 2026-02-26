@@ -3,23 +3,14 @@
 from __future__ import annotations
 
 from desloppify.languages._framework.commands_base import (
-    scaffold_find_replacements,
-    scaffold_find_self_replacements,
-    scaffold_verify_hint,
+    scaffold_find_replacements as find_replacements,
+)
+from desloppify.languages._framework.commands_base import (
+    scaffold_find_self_replacements as find_self_replacements,
+)
+from desloppify.languages._framework.commands_base import (
+    scaffold_verify_hint as get_verify_hint,
 )
 
 
-def find_replacements(
-    source_abs: str, dest_abs: str, graph: dict
-) -> dict[str, list[tuple[str, str]]]:
-    return scaffold_find_replacements(source_abs, dest_abs, graph)
-
-
-def find_self_replacements(
-    source_abs: str, dest_abs: str, graph: dict
-) -> list[tuple[str, str]]:
-    return scaffold_find_self_replacements(source_abs, dest_abs, graph)
-
-
-def get_verify_hint() -> str:
-    return scaffold_verify_hint()
+__all__ = ["find_replacements", "find_self_replacements", "get_verify_hint"]

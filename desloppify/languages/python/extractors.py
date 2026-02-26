@@ -9,7 +9,7 @@ from desloppify.engine.detectors.passthrough import (
     classify_params,
     classify_passthrough_tier,
 )
-from desloppify.file_discovery import find_py_files
+from desloppify.core.discovery_api import find_py_files
 from desloppify.languages.python.extractors_classes import extract_py_classes
 from desloppify.languages.python.extractors_shared import (
     extract_py_params,
@@ -62,6 +62,9 @@ def extract_py_functions(filepath: str) -> list[FunctionInfo]:
 
         # Extract params from multi-line signature
         sig_text = "\n".join(lines[start_line : j + 1])
+        if "(" not in sig_text or ")" not in sig_text:
+            i += 1
+            continue
         open_paren = sig_text.index("(")
         close_paren = sig_text.rindex(")")
         param_str = sig_text[open_paren + 1 : close_paren]

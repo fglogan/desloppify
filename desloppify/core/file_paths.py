@@ -55,6 +55,35 @@ def resolve_path(filepath: str) -> str:
     return str((get_project_root() / filepath).resolve())
 
 
+def resolve_scan_file(
+    filepath: str | Path,
+    *,
+    scan_root: str | Path | None = None,
+) -> Path:
+    """Resolve a scan file path with explicit scan-root-first semantics.
+
+    Relative file paths are resolved against ``scan_root`` first (when provided)
+    and then against the process project root as a fallback.
+    """
+    p = Path(filepath)
+    if p.is_absolute():
+        return p.resolve()
+
+    root = get_project_root()
+    if scan_root is not None:
+        scan_root_path = Path(scan_root)
+        scan_root_abs = (
+            scan_root_path.resolve()
+            if scan_root_path.is_absolute()
+            else (root / scan_root_path).resolve()
+        )
+        scan_candidate = (scan_root_abs / p).resolve()
+        if scan_candidate.exists():
+            return scan_candidate
+
+    return (root / p).resolve()
+
+
 def safe_write_text(filepath: str | Path, content: str) -> None:
     """Atomically write text to a file using temp+rename."""
     p = Path(filepath)
@@ -75,6 +104,7 @@ __all__ = [
     "normalize_path_separators",
     "rel",
     "resolve_path",
+    "resolve_scan_file",
     "safe_relpath",
     "safe_write_text",
 ]

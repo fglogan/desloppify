@@ -18,12 +18,12 @@ from desloppify.engine.detectors.graph import (
     finalize_graph,
     get_coupling_score,
 )
-from desloppify.file_discovery import rel, resolve_path
+from desloppify.core.discovery_api import rel, resolve_path
 from desloppify.languages.csharp.extractors import (
     CSHARP_FILE_EXCLUSIONS,
     find_csharp_files,
 )
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 logger = logging.getLogger(__name__)
 

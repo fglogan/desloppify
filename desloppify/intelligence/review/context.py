@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     disable_file_cache,
     enable_file_cache,
     is_file_cache_enabled,
@@ -230,31 +230,39 @@ def _build_review_context_inner(
             strategies[rel(filepath)] = strategy
     ctx.error_strategies = strategies
 
+    ctx.normalize_sections(strict=True)
     return ctx
 
 
 def serialize_context(ctx: ReviewContext) -> dict:
     """Convert ReviewContext to a JSON-serializable dict."""
+    def _section_dict(value: object) -> dict:
+        if hasattr(value, "to_dict") and callable(value.to_dict):
+            data = value.to_dict()
+            return data if isinstance(data, dict) else {}
+        return dict(value) if isinstance(value, dict) else {}
+
     metrics = ("total_files", "total_loc", "avg_file_loc")
+    codebase_stats = _section_dict(ctx.codebase_stats)
     out = {
-        "naming_vocabulary": ctx.naming_vocabulary,
-        "error_conventions": ctx.error_conventions,
-        "module_patterns": ctx.module_patterns,
-        "import_graph_summary": ctx.import_graph_summary,
-        "zone_distribution": ctx.zone_distribution,
-        "existing_findings": ctx.existing_findings,
+        "naming_vocabulary": _section_dict(ctx.naming_vocabulary),
+        "error_conventions": _section_dict(ctx.error_conventions),
+        "module_patterns": _section_dict(ctx.module_patterns),
+        "import_graph_summary": _section_dict(ctx.import_graph_summary),
+        "zone_distribution": _section_dict(ctx.zone_distribution),
+        "existing_findings": _section_dict(ctx.existing_findings),
         "codebase_stats": {
-            key: int(ctx.codebase_stats.get(key, 0))
+            key: int(codebase_stats.get(key, 0))
             for key in metrics
         },
-        "sibling_conventions": ctx.sibling_conventions,
+        "sibling_conventions": _section_dict(ctx.sibling_conventions),
     }
     if ctx.ai_debt_signals:
-        out["ai_debt_signals"] = ctx.ai_debt_signals
+        out["ai_debt_signals"] = _section_dict(ctx.ai_debt_signals)
     if ctx.auth_patterns:
-        out["auth_patterns"] = ctx.auth_patterns
+        out["auth_patterns"] = _section_dict(ctx.auth_patterns)
     if ctx.error_strategies:
-        out["error_strategies"] = ctx.error_strategies
+        out["error_strategies"] = _section_dict(ctx.error_strategies)
     return out
 
 

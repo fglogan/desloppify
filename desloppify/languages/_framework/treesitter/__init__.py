@@ -46,6 +46,23 @@ def is_parse_cache_enabled() -> bool:
     return _is_enabled()
 
 
+def get_spec(language: str) -> TreeSitterLangSpec | None:
+    """Return tree-sitter spec for a language key, if configured."""
+    key = str(language or "").strip().lower()
+    if not key:
+        return None
+    from ._specs import TREESITTER_SPECS
+
+    return TREESITTER_SPECS.get(key)
+
+
+def list_specs() -> dict[str, TreeSitterLangSpec]:
+    """Return a shallow copy of the public tree-sitter spec registry."""
+    from ._specs import TREESITTER_SPECS
+
+    return dict(TREESITTER_SPECS)
+
+
 @dataclass(frozen=True)
 class TreeSitterLangSpec:
     """Per-language tree-sitter configuration.
@@ -92,8 +109,10 @@ __all__ = [
     "TreeSitterLangSpec",
     "disable_parse_cache",
     "enable_parse_cache",
+    "get_spec",
     "is_available",
     "is_parse_cache_enabled",
+    "list_specs",
 ]
 
 # Re-export phase factories for convenience.
@@ -109,4 +128,9 @@ def __getattr__(name: str):  # noqa: N807
         from desloppify.languages._framework.treesitter import phases as phases_mod
 
         return getattr(phases_mod, name)
+    if name == "TREESITTER_SPECS" or name.endswith("_SPEC"):
+        from desloppify.languages._framework.treesitter import _specs as specs_mod
+
+        if hasattr(specs_mod, name):
+            return getattr(specs_mod, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

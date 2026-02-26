@@ -9,13 +9,12 @@ from desloppify import state as state_mod
 from desloppify.app.commands.helpers.lang import resolve_lang
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
+from desloppify.app.commands.helpers.state import state_path
 from desloppify.app.commands.review import runtime as review_runtime_mod
 from desloppify.core.fallbacks import print_error
 from desloppify.intelligence import integrity as subjective_integrity_mod
 from desloppify.intelligence import review as review_mod
-from desloppify.utils import colorize
-
-from .io import _load_state
+from desloppify.core.output_api import colorize
 
 
 def _cmd_fix_review(args):
@@ -26,7 +25,7 @@ def _cmd_fix_review(args):
         print_error("could not detect language. Use --lang.")
         sys.exit(1)
 
-    _sp, state = _load_state(args)
+    state = state_mod.load_state(state_path(args))
     path = Path(args.path)
 
     lang_run, found_files = review_runtime_mod.setup_lang_concrete(

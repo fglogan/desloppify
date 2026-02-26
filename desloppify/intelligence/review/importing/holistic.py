@@ -3,67 +3,59 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.intelligence.review.dimensions import normalize_dimension_name
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
+from desloppify.intelligence.review.importing.contracts import (
+    ReviewFindingPayload,
+    ReviewImportPayload,
+    ReviewScopePayload,
+    validate_review_finding_payload,
+)
 from desloppify.intelligence.review.importing.shared import (
     _lang_potentials,
-    _review_file_cache,
-    extract_reviewed_files,
+    auto_resolve_review_findings,
+    normalize_review_confidence,
+    parse_review_import_payload,
+    refresh_review_file_cache,
+    review_tier,
+    ReviewImportEnvelope,
     store_assessments,
 )
 from desloppify.intelligence.review.selection import hash_file
 from desloppify.scoring import HOLISTIC_POTENTIAL
 from desloppify.state import MergeScanOptions, make_finding, merge_scan, utc_now
 
+# Backward-compatible test patch hook (runtime root now resolves lazily).
+PROJECT_ROOT: Path | None = None
+
 
 def parse_holistic_import_payload(
-    data: dict,
-) -> tuple[list[dict], dict | None, list[str]]:
+    data: ReviewImportPayload | dict[str, Any],
+) -> tuple[list[ReviewFindingPayload], dict[str, Any] | None, list[str]]:
     """Parse strict holistic import payload object."""
-    if not isinstance(data, dict):
-        raise ValueError("Holistic review import payload must be a JSON object")
-
-    findings = data.get("findings", [])
-    if not isinstance(findings, list):
-        raise ValueError("Holistic review import payload 'findings' must be a list")
-
-    assessments = data.get("assessments")
-    if assessments is not None and not isinstance(assessments, dict):
-        raise ValueError(
-            "Holistic review import payload 'assessments' must be an object"
-        )
-    reviewed_files = extract_reviewed_files(data)
-    return findings, assessments, reviewed_files
+    payload = parse_review_import_payload(data, mode_name="Holistic")
+    return payload.findings, payload.assessments, payload.reviewed_files
 
 
 def update_reviewed_file_cache(
     state: dict[str, Any],
     reviewed_files: list[str],
     *,
-    project_root=None,
+    project_root: Path | str | None = None,
     utc_now_fn=utc_now,
 ) -> None:
     """Refresh per-file review cache entries from holistic payload metadata."""
-    if not reviewed_files:
-        return
-    file_cache = _review_file_cache(state)
-    now = utc_now_fn()
-    resolved_project_root = project_root if project_root is not None else PROJECT_ROOT
-    for file_path in reviewed_files:
-        absolute = resolved_project_root / file_path
-        content_hash = hash_file(str(absolute)) if absolute.exists() else ""
-        previous = file_cache.get(file_path, {})
-        existing_count = (
-            previous.get("finding_count", 0) if isinstance(previous, dict) else 0
-        )
-        file_cache[file_path] = {
-            "content_hash": content_hash,
-            "reviewed_at": now,
-            "finding_count": existing_count if isinstance(existing_count, int) else 0,
-        }
+    refresh_review_file_cache(
+        state,
+        reviewed_files=reviewed_files,
+        findings_by_file=None,
+        project_root=project_root,
+        hash_file_fn=hash_file,
+        utc_now_fn=utc_now_fn,
+    )
 
 
 _POSITIVE_PREFIXES = (
@@ -78,20 +70,43 @@ _POSITIVE_PREFIXES = (
 
 
 def _validate_and_build_findings(
-    findings_list: list[dict],
-    holistic_prompts: dict,
+    findings_list: list[ReviewFindingPayload],
+    holistic_prompts: dict[str, Any],
     lang_name: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Validate raw holistic findings and build state-ready finding dicts.
 
     Returns (review_findings, skipped, dismissed_concerns).
     """
-    required = ("dimension", "identifier", "summary", "confidence", "suggestion")
     review_findings: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     dismissed_concerns: list[dict[str, Any]] = []
+    allowed_dimensions = {
+        dim for dim in holistic_prompts if isinstance(dim, str) and dim.strip()
+    }
 
-    for idx, finding in enumerate(findings_list):
+    for idx, raw_finding in enumerate(findings_list):
+        finding, finding_errors = validate_review_finding_payload(
+            raw_finding,
+            label=f"findings[{idx}]",
+            allowed_dimensions=allowed_dimensions,
+            allow_dismissed=True,
+        )
+        if finding_errors:
+            skipped.append(
+                {
+                    "index": idx,
+                    "missing": finding_errors,
+                    "identifier": (
+                        raw_finding.get("identifier", "<none>")
+                        if isinstance(raw_finding, dict)
+                        else "<none>"
+                    ),
+                }
+            )
+            continue
+        assert finding is not None
+
         # Handle dismissed concern verdicts (no dimension/summary required).
         if finding.get("concern_verdict") == "dismissed":
             fp = finding.get("concern_fingerprint", "")
@@ -106,19 +121,9 @@ def _validate_and_build_findings(
                 )
             continue
 
-        missing = [key for key in required if key not in finding]
-        if missing:
-            skipped.append(
-                {
-                    "index": idx,
-                    "missing": missing,
-                    "identifier": finding.get("identifier", "<none>"),
-                }
-            )
-            continue
-
         # Safety net: skip positive observations that slipped past the prompt.
-        if finding["summary"].lower().startswith(_POSITIVE_PREFIXES):
+        summary_text = str(finding.get("summary", ""))
+        if summary_text.lower().startswith(_POSITIVE_PREFIXES):
             skipped.append(
                 {
                     "index": idx,
@@ -128,31 +133,18 @@ def _validate_and_build_findings(
             )
             continue
 
-        confidence = finding.get("confidence", "low")
-        if confidence not in ("high", "medium", "low"):
-            confidence = "low"
-
         dimension = finding["dimension"]
-        if dimension not in holistic_prompts:
-            skipped.append(
-                {
-                    "index": idx,
-                    "missing": [f"invalid dimension: {dimension}"],
-                    "identifier": finding.get("identifier", "<none>"),
-                }
-            )
-            continue
 
         # Confirmed concern verdicts become "concerns" detector findings.
         is_confirmed_concern = finding.get("concern_verdict") == "confirmed"
         detector = "concerns" if is_confirmed_concern else "review"
 
-        content_hash = hashlib.sha256(finding["summary"].encode()).hexdigest()[:8]
+        content_hash = hashlib.sha256(summary_text.encode()).hexdigest()[:8]
         detail: dict[str, Any] = {
             "holistic": True,
             "dimension": dimension,
-            "related_files": finding.get("related_files", []),
-            "evidence": finding.get("evidence", []),
+            "related_files": finding["related_files"],
+            "evidence": finding["evidence"],
             "suggestion": finding.get("suggestion", ""),
             "reasoning": finding.get("reasoning", ""),
         }
@@ -162,13 +154,14 @@ def _validate_and_build_findings(
 
         prefix = "concern" if is_confirmed_concern else "holistic"
         file = finding.get("concern_file", "") if is_confirmed_concern else ""
+        confidence = normalize_review_confidence(finding.get("confidence", "low"))
         imported = make_finding(
             detector=detector,
             file=file,
             name=f"{prefix}::{dimension}::{finding['identifier']}::{content_hash}",
-            tier=3,
+            tier=review_tier(confidence, holistic=True),
             confidence=confidence,
-            summary=finding["summary"],
+            summary=summary_text,
             detail=detail,
         )
         imported["lang"] = lang_name
@@ -179,10 +172,10 @@ def _validate_and_build_findings(
 
 def _collect_imported_dimensions(
     *,
-    findings_list: list[dict],
+    findings_list: list[ReviewFindingPayload],
     review_findings: list[dict[str, Any]],
     assessments: dict[str, Any] | None,
-    review_scope: dict[str, Any] | None,
+    review_scope: ReviewScopePayload | dict[str, Any] | None,
     valid_dimensions: set[str],
 ) -> set[str]:
     """Return normalized dimensions this import explicitly covered."""
@@ -229,7 +222,6 @@ def _auto_resolve_stale_holistic(
     full_sweep_included: bool | None = None,
 ) -> None:
     """Auto-resolve open holistic findings not present in the latest import."""
-    diff.setdefault("auto_resolved", 0)
     scope_dimensions = {
         normalize_dimension_name(dim)
         for dim in (imported_dimensions or set())
@@ -240,43 +232,44 @@ def _auto_resolve_stale_holistic(
     if scoped_reimport and not scope_dimensions:
         return
 
-    for finding_id, finding in state.get("findings", {}).items():
-        if (
-            finding["status"] == "open"
-            and finding.get("detector") in ("review", "concerns")
-            and finding.get("detail", {}).get("holistic")
-            and finding_id not in new_ids
-        ):
-            if scoped_reimport:
-                detail = finding.get("detail")
-                if not isinstance(detail, dict):
-                    continue
-                dimension = normalize_dimension_name(str(detail.get("dimension", "")))
-                if dimension not in scope_dimensions:
-                    continue
-            finding["status"] = "auto_resolved"
-            finding["resolved_at"] = utc_now_fn()
-            finding["note"] = "not reported in latest holistic re-import"
-            diff["auto_resolved"] += 1
+    def _should_resolve(finding: dict[str, Any]) -> bool:
+        if finding.get("detector") not in ("review", "concerns"):
+            return False
+        detail = finding.get("detail")
+        if not isinstance(detail, dict) or not detail.get("holistic"):
+            return False
+        if not scoped_reimport:
+            return True
+        dimension = normalize_dimension_name(str(detail.get("dimension", "")))
+        return dimension in scope_dimensions
+
+    auto_resolve_review_findings(
+        state,
+        new_ids=new_ids,
+        diff=diff,
+        note="not reported in latest holistic re-import",
+        should_resolve=_should_resolve,
+        utc_now_fn=utc_now_fn,
+    )
 
 
 def import_holistic_findings(
-    findings_data: dict,
+    findings_data: ReviewImportPayload,
     state: dict[str, Any],
     lang_name: str,
     *,
-    project_root=None,
+    project_root: Path | str | None = None,
     utc_now_fn=utc_now,
 ) -> dict[str, Any]:
     """Import holistic (codebase-wide) findings into state."""
-    findings_list, assessments, reviewed_files = parse_holistic_import_payload(
-        findings_data
+    payload: ReviewImportEnvelope = parse_review_import_payload(
+        findings_data,
+        mode_name="Holistic",
     )
-    review_scope = (
-        findings_data.get("review_scope", {})
-        if isinstance(findings_data, dict)
-        else {}
-    )
+    findings_list = payload.findings
+    assessments = payload.assessments
+    reviewed_files = payload.reviewed_files
+    review_scope = findings_data.get("review_scope", {})
     if not isinstance(review_scope, dict):
         review_scope = {}
     scope_full_sweep = review_scope.get("full_sweep_included")

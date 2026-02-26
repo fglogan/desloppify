@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from desloppify.languages._framework import registry_state
-from desloppify.languages._framework.base.types import LangConfig
-from desloppify.languages._framework.contract_validation import validate_lang_contract
-from desloppify.languages._framework.discovery import load_all
+from . import registry_state
+from .base.types import LangConfig
+from .contract_validation import validate_lang_contract
+from .discovery import load_all
+
+_MARKER_GLOB_CHARS = ("*", "?", "[")
 
 
 def make_lang_config(name: str, cfg_cls: type) -> LangConfig:
@@ -54,7 +56,7 @@ def auto_detect_lang(project_root: Path) -> str | None:
         cfg = obj if isinstance(obj, LangConfig) else make_lang_config(lang_name, obj)
         configs[lang_name] = cfg
         markers = getattr(cfg, "detect_markers", []) or []
-        if markers and any((project_root / marker).exists() for marker in markers):
+        if markers and any(_detect_marker_exists(project_root, marker) for marker in markers):
             candidates.append(lang_name)
 
     if not candidates:
@@ -76,6 +78,21 @@ def auto_detect_lang(project_root: Path) -> str | None:
         if count > best_count:
             best, best_count = lang_name, count
     return best
+
+
+def _detect_marker_exists(project_root: Path, marker: str) -> bool:
+    marker_text = str(marker).strip()
+    if not marker_text:
+        return False
+
+    # Fast path for literal markers.
+    if (project_root / marker_text).exists():
+        return True
+
+    # Wildcard markers (for example "*.fsproj") are matched at project root.
+    if any(ch in marker_text for ch in _MARKER_GLOB_CHARS):
+        return any(project_root.glob(marker_text))
+    return False
 
 
 def available_langs() -> list[str]:

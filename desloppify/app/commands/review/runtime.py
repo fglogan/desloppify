@@ -51,9 +51,9 @@ def setup_lang(
 def setup_lang_concrete(lang: LangConfig, path: Path, config: dict) -> tuple[LangRun, list[str]]:
     """Build LangRun with zone map + dep graph using concrete dependencies."""
     from desloppify.engine.policy.zones import FileZoneMap
-    from desloppify.file_discovery import rel
+    from desloppify.core.discovery_api import rel
     from desloppify.languages import runtime as lang_runtime_mod
-    from desloppify.utils import log
+    from desloppify.core.output_api import log
 
     return setup_lang(
         lang,

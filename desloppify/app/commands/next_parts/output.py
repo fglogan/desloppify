@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from desloppify.core.fallbacks import print_write_error
+
 
 def serialize_item(item: Mapping[str, Any]) -> dict[str, Any]:
     """Build a serializable output dict from a queue item."""
@@ -85,7 +87,7 @@ def write_output_file(
         print(colorize_fn(f"Wrote {item_count} items to {output_file}", "green"))
     except OSError as exc:
         payload["output_error"] = str(exc)
-        print(colorize_fn(f"Could not write to {output_file}: {exc}", "red"))
+        print_write_error(output_file, exc, label="next output")
         return False
     return True
 

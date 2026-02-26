@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from desloppify.engine.detectors.base import ClassInfo, FunctionInfo
-from desloppify.file_discovery import find_source_files, resolve_path
+from desloppify.core.discovery_api import find_source_files, resolve_path
 from desloppify.languages.csharp._parse_helpers import (
     extract_csharp_params as _extract_csharp_params,
 )

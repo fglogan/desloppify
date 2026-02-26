@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -693,6 +694,17 @@ class TestCmdReviewPrepare:
                     "dimensions": ["high_level_elegance"],
                     "files_to_read": ["src/foo.ts"],
                     "why": "test",
+                    "concern_signals": [
+                        {
+                            "type": "mixed_responsibilities",
+                            "file": "src/foo.ts",
+                            "summary": "foo.ts mixes orchestration and transformation",
+                            "question": "Should orchestration move to a dedicated coordinator?",
+                            "evidence": [
+                                "Flagged by: structural, responsibility_cohesion"
+                            ],
+                        }
+                    ],
                     "historical_issue_focus": {
                         "dimensions": ["high_level_elegance"],
                         "max_items": 20,
@@ -770,6 +782,10 @@ class TestCmdReviewPrepare:
         assert str(blind_packet) in prompt_text
         assert "Previously flagged issues" in prompt_text
         assert "Legacy surface remains primary" in prompt_text
+        assert "Mechanical concern signals" in prompt_text
+        assert "foo.ts mixes orchestration and transformation" in prompt_text
+        assert "Should orchestration move to a dedicated coordinator?" in prompt_text
+        assert "Workflow integrity checks" in prompt_text
         run_logs = sorted(runs_dir.glob("*/run.log"))
         assert len(run_logs) == 1
         run_log_text = run_logs[0].read_text()
@@ -1095,6 +1111,121 @@ class TestCmdReviewPrepare:
             _do_run_batches(args, empty_state, lang, "fake_sp", config={})
 
         assert captured["kwargs"]["allow_partial"] is True
+
+    def test_do_run_batches_uses_task_map_for_execute_batches(
+        self, empty_state, tmp_path
+    ):
+        packet = {
+            "command": "review",
+            "mode": "holistic",
+            "language": "typescript",
+            "dimensions": ["mid_level_elegance"],
+            "investigation_batches": [
+                {
+                    "name": "Batch A",
+                    "dimensions": ["mid_level_elegance"],
+                    "files_to_read": ["src/a.ts"],
+                    "why": "A",
+                }
+            ],
+        }
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_text(json.dumps(packet))
+
+        args = MagicMock()
+        args.path = str(tmp_path)
+        args.dimensions = None
+        args.runner = "codex"
+        args.parallel = False
+        args.dry_run = False
+        args.packet = str(packet_path)
+        args.only_batches = None
+        args.scan_after_import = False
+        args.allow_partial = False
+
+        review_packet_dir = tmp_path / ".desloppify" / "review_packets"
+        runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
+        captured_execute_kwargs: dict[str, object] = {}
+
+        def fake_subprocess_run(
+            cmd,
+            capture_output=False,
+            text=False,
+            timeout=None,
+            cwd=None,
+        ):
+            _ = capture_output, text, timeout, cwd
+            out_path = Path(cmd[cmd.index("-o") + 1])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "assessments": {"mid_level_elegance": 78.0},
+                "dimension_notes": {
+                    "mid_level_elegance": {
+                        "evidence": ["seam conventions are mostly aligned"],
+                        "impact_scope": "module",
+                        "fix_scope": "single_edit",
+                        "confidence": "high",
+                    }
+                },
+                "findings": [],
+            }
+            out_path.write_text(json.dumps(payload))
+            return MagicMock(returncode=0, stdout="ok", stderr="")
+
+        def fake_execute_batches(**kwargs):
+            captured_execute_kwargs.update(kwargs)
+            tasks = kwargs.get("tasks")
+            assert isinstance(tasks, dict)
+            assert sorted(tasks) == [0]
+            assert callable(tasks[0])
+            return []
+
+        lang = MagicMock()
+        lang.name = "typescript"
+
+        with (
+            patch(
+                "desloppify.app.commands.review.batch.subprocess.run",
+                side_effect=fake_subprocess_run,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.PROJECT_ROOT",
+                tmp_path,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.REVIEW_PACKET_DIR",
+                review_packet_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.SUBAGENT_RUNS_DIR",
+                runs_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch._do_import",
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.runner_helpers_mod.execute_batches",
+                side_effect=fake_execute_batches,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.runner_helpers_mod.collect_batch_results",
+                return_value=(
+                    [
+                        {
+                            "assessments": {"mid_level_elegance": 78.0},
+                            "dimension_notes": {},
+                            "findings": [],
+                        }
+                    ],
+                    [],
+                ),
+            ),
+        ):
+            _do_run_batches(args, empty_state, lang, "fake_sp", config={})
+
+        assert "tasks" in captured_execute_kwargs
+        assert "selected_indexes" not in captured_execute_kwargs
+        assert captured_execute_kwargs.get("run_parallel") is False
 
     def test_do_run_batches_recovers_missing_raw_output_from_log(
         self, empty_state, tmp_path
@@ -1571,26 +1702,31 @@ class TestCmdReviewPrepare:
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
 
         log_file = tmp_path / "batch.log"
-        attempts = [
-            MagicMock(
-                returncode=1,
-                stdout="",
-                stderr=(
-                    "ERROR: stream disconnected before completion: "
-                    "error sending request for url (https://chatgpt.com/backend-api/codex/responses)"
-                ),
-            ),
-            MagicMock(returncode=0, stdout="ok", stderr=""),
-        ]
-        mock_run = MagicMock(side_effect=attempts)
+        output_file = tmp_path / "out.txt"
+        call_count = [0]
+
+        def mock_run_fn(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "ERROR: stream disconnected before completion: "
+                        "error sending request for url (https://chatgpt.com/backend-api/codex/responses)"
+                    ),
+                )
+            output_file.write_text('{"assessments": {}, "findings": []}')
+            return MagicMock(returncode=0, stdout="ok", stderr="")
+
         code = runner_helpers_mod.run_codex_batch(
             prompt="test prompt",
             repo_root=tmp_path,
-            output_file=tmp_path / "out.txt",
+            output_file=output_file,
             log_file=log_file,
             deps=runner_helpers_mod.CodexBatchRunnerDeps(
                 timeout_seconds=60,
-                subprocess_run=mock_run,
+                subprocess_run=mock_run_fn,
                 timeout_error=TimeoutError,
                 safe_write_text_fn=lambda p, t: p.write_text(t),
                 max_retries=1,
@@ -1599,7 +1735,7 @@ class TestCmdReviewPrepare:
             ),
         )
         assert code == 0
-        assert mock_run.call_count == 2
+        assert call_count[0] == 2
         raw_log = log_file.read_text()
         assert "ATTEMPT 1/2" in raw_log
         assert "ATTEMPT 2/2" in raw_log
@@ -1609,17 +1745,19 @@ class TestCmdReviewPrepare:
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
 
         log_file = tmp_path / "batch.log"
+        output_file = tmp_path / "out.txt"
         live_snapshot = {"text": ""}
 
         def fake_run(_cmd, *, capture_output, text, timeout):  # noqa: ARG001
             if log_file.exists():
                 live_snapshot["text"] = log_file.read_text()
+            output_file.write_text('{"assessments": {}, "findings": []}')
             return MagicMock(returncode=0, stdout="ok", stderr="")
 
         code = runner_helpers_mod.run_codex_batch(
             prompt="test prompt",
             repo_root=tmp_path,
-            output_file=tmp_path / "out.txt",
+            output_file=output_file,
             log_file=log_file,
             deps=runner_helpers_mod.CodexBatchRunnerDeps(
                 timeout_seconds=60,
@@ -1677,6 +1815,44 @@ class TestCmdReviewPrepare:
         log_text = log_file.read_text()
         assert "STALL RECOVERY" in log_text
         assert "Recovered stalled batch from JSON output file" in log_text
+
+    def test_run_codex_batch_stall_without_output_file_times_out(self, tmp_path):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        log_file = tmp_path / "batch.log"
+        output_file = tmp_path / "out.json"
+
+        command = [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(10)",
+        ]
+
+        with patch(
+            "desloppify.app.commands.review.runner_helpers.codex_batch_command",
+            return_value=command,
+        ):
+            code = runner_helpers_mod.run_codex_batch(
+                prompt="test prompt",
+                repo_root=tmp_path,
+                output_file=output_file,
+                log_file=log_file,
+                deps=runner_helpers_mod.CodexBatchRunnerDeps(
+                    timeout_seconds=30,
+                    subprocess_run=subprocess.run,
+                    timeout_error=TimeoutError,
+                    safe_write_text_fn=lambda p, t: p.write_text(t),
+                    use_popen_runner=True,
+                    subprocess_popen=subprocess.Popen,
+                    live_log_interval_seconds=0.2,
+                    stall_after_output_seconds=1,
+                ),
+            )
+
+        assert code == 124
+        log_text = log_file.read_text()
+        assert "STALL RECOVERY" in log_text
+        assert "Recovered stalled batch from JSON output file" not in log_text
 
     def test_collect_batch_results_recovers_execution_failure_with_valid_output(
         self, tmp_path
@@ -1773,28 +1949,63 @@ class TestCmdReviewPrepare:
         assert len(seen_inputs) == 1
         assert "Output schema:" not in seen_inputs[0]
 
-    def test_execute_batches_ignores_progress_callback_exceptions(self, tmp_path):
+    def test_execute_batches_marks_progress_callback_exceptions_as_failures(self, tmp_path):
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
-
-        prompt_file = tmp_path / "batch-1.md"
-        prompt_file.write_text("review prompt")
-        output_file = tmp_path / "batch-1.raw.txt"
-        log_file = tmp_path / "batch-1.log"
 
         def _broken_progress(*_args, **_kwargs):
             raise RuntimeError("progress callback failed")
 
+        captured: list[tuple[int, str]] = []
+
         failures = runner_helpers_mod.execute_batches(
-            selected_indexes=[0],
-            prompt_files={0: prompt_file},
-            output_files={0: output_file},
-            log_files={0: log_file},
+            tasks={0: lambda: 0},
             run_parallel=True,
-            run_batch_fn=lambda *, prompt, output_file, log_file: 0,  # noqa: ARG005
-            safe_write_text_fn=lambda path, text: path.write_text(text),
             progress_fn=_broken_progress,
+            error_log_fn=lambda idx, exc: captured.append((idx, str(exc))),
             max_parallel_workers=1,
             heartbeat_seconds=0.05,
+        )
+
+        assert failures == [0]
+        assert any("progress callback failed" in msg for _idx, msg in captured)
+
+    def test_execute_batches_does_not_mask_internal_progress_typeerror(self):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        def _broken_typeerror_progress(batch_index, event, code, **details):
+            _ = batch_index, event, code, details
+            raise TypeError("internal progress bug")
+
+        captured: list[tuple[int, str]] = []
+        failures = runner_helpers_mod.execute_batches(
+            tasks={0: lambda: 0},
+            run_parallel=False,
+            progress_fn=_broken_typeerror_progress,
+            error_log_fn=lambda idx, exc: captured.append((idx, str(exc))),
+        )
+
+        assert failures == [0]
+        assert any("internal progress bug" in msg for _idx, msg in captured)
+
+    def test_execute_batches_heartbeat_error_log_failure_is_nonfatal(self):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        def _heartbeat_only_failure(event):
+            if getattr(event, "event", "") == "heartbeat":
+                raise RuntimeError("heartbeat callback failed")
+
+        def _slow_success():
+            time.sleep(0.12)
+            return 0
+
+        failures = runner_helpers_mod.execute_batches(
+            tasks={0: _slow_success},
+            run_parallel=True,
+            progress_fn=_heartbeat_only_failure,
+            # Intentionally fragile callback: idx=-1 used by heartbeat is unsupported.
+            error_log_fn=lambda idx, exc: {0: []}[idx].append(str(exc)),
+            max_parallel_workers=1,
+            heartbeat_seconds=0.02,
         )
 
         assert failures == []
@@ -1910,6 +2121,36 @@ class TestCmdReviewPrepare:
         assert "cannot reach chatgpt.com backend" in err
         assert "--external-start --external-runner claude" in err
 
+
+    def test_print_failures_reports_sandbox_hint_for_backend_disconnect(
+        self, tmp_path, capsys
+    ):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / "batch-1.log").write_text(
+            "\n".join(
+                [
+                    "$ codex ...",
+                    "WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)",
+                    "STDERR:",
+                    "ERROR: stream disconnected before completion:",
+                    "error sending request for url (https://chatgpt.com/backend-api/codex/responses)",
+                ]
+            )
+        )
+
+        runner_helpers_mod.print_failures(
+            failures=[0],
+            packet_path=tmp_path / "packet.json",
+            logs_dir=logs_dir,
+            colorize_fn=lambda text, _style: text,
+        )
+        err = capsys.readouterr().err
+        assert "Sandbox hint:" in err
+        assert "restricted sandbox execution" in err
+
     def test_run_followup_scan_returns_nonzero_code(self, tmp_path):
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
 
@@ -2002,6 +2243,80 @@ class TestCmdReviewPrepare:
 
         assert exc_info.value.code == 7
 
+    def test_do_run_batches_keyboard_interrupt_writes_partial_summary(
+        self, empty_state, tmp_path
+    ):
+        packet = {
+            "command": "review",
+            "mode": "holistic",
+            "language": "typescript",
+            "dimensions": ["high_level_elegance"],
+            "investigation_batches": [
+                {
+                    "name": "Batch A",
+                    "dimensions": ["high_level_elegance"],
+                    "files_to_read": ["src/a.ts"],
+                    "why": "A",
+                }
+            ],
+        }
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_text(json.dumps(packet))
+
+        args = MagicMock()
+        args.path = str(tmp_path)
+        args.dimensions = None
+        args.runner = "codex"
+        args.parallel = False
+        args.dry_run = False
+        args.packet = str(packet_path)
+        args.only_batches = None
+        args.scan_after_import = False
+        args.allow_partial = False
+        args.save_run_log = True
+        args.run_log_file = None
+
+        review_packet_dir = tmp_path / ".desloppify" / "review_packets"
+        runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
+
+        lang = MagicMock()
+        lang.name = "typescript"
+
+        with (
+            patch(
+                "desloppify.app.commands.review.batch.PROJECT_ROOT",
+                tmp_path,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.REVIEW_PACKET_DIR",
+                review_packet_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.SUBAGENT_RUNS_DIR",
+                runs_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.runner_helpers_mod.execute_batches",
+                side_effect=KeyboardInterrupt,
+            ),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                _do_run_batches(args, empty_state, lang, "fake_sp", config={})
+
+        assert exc_info.value.code == 130
+        summary_files = sorted(runs_dir.glob("*/run_summary.json"))
+        assert len(summary_files) == 1
+        summary_payload = json.loads(summary_files[0].read_text())
+        assert summary_payload["interrupted"] is True
+        assert summary_payload["interruption_reason"] == "keyboard_interrupt"
+        assert summary_payload["successful_batches"] == []
+        assert summary_payload["failed_batches"] == []
+        assert summary_payload["batches"]["1"]["status"] == "interrupted"
+
+        run_log_path = Path(summary_payload["run_log"])
+        run_log_text = run_log_path.read_text()
+        assert "run-interrupted reason=keyboard_interrupt" in run_log_text
+
 
 class TestSetupLang:
     def test_setup_builds_zone_map(self, tmp_path):
@@ -2065,22 +2380,28 @@ class TestUpdateReviewCache:
     def test_cache_created_from_scratch(
         self, empty_state, sample_findings_data, tmp_path
     ):
-        with patch("desloppify.intelligence.review.importing.per_file.PROJECT_ROOT", tmp_path):
-            (tmp_path / "src").mkdir(exist_ok=True)
-            (tmp_path / "src" / "foo.ts").write_text("content")
-            (tmp_path / "src" / "bar.ts").write_text("content")
-            update_review_cache(empty_state, sample_findings_data)
+        (tmp_path / "src").mkdir(exist_ok=True)
+        (tmp_path / "src" / "foo.ts").write_text("content")
+        (tmp_path / "src" / "bar.ts").write_text("content")
+        update_review_cache(
+            empty_state,
+            sample_findings_data,
+            project_root=tmp_path,
+        )
         assert "review_cache" in empty_state
         assert "files" in empty_state["review_cache"]
 
     def test_cache_survives_partial_review_cache(self, sample_findings_data, tmp_path):
         """If review_cache exists without files key, shouldn't crash."""
         state = {"review_cache": {}}  # No "files" key
-        with patch("desloppify.intelligence.review.importing.per_file.PROJECT_ROOT", tmp_path):
-            (tmp_path / "src").mkdir(exist_ok=True)
-            (tmp_path / "src" / "foo.ts").write_text("content")
-            (tmp_path / "src" / "bar.ts").write_text("content")
-            update_review_cache(state, sample_findings_data)
+        (tmp_path / "src").mkdir(exist_ok=True)
+        (tmp_path / "src" / "foo.ts").write_text("content")
+        (tmp_path / "src" / "bar.ts").write_text("content")
+        update_review_cache(
+            state,
+            sample_findings_data,
+            project_root=tmp_path,
+        )
         assert "files" in state["review_cache"]
 
     def test_file_finder_called_once_in_prepare(self, mock_lang, empty_state, tmp_path):
@@ -2163,6 +2484,8 @@ class TestSkippedFindings:
                     "identifier": "god_mod",
                     "summary": "too central",
                     "confidence": "high",
+                    "related_files": ["src/a.ts"],
+                    "evidence": ["Module imports are overly centralized."],
                     "suggestion": "split it",
                 },
                 # Missing 'summary' and 'suggestion'
@@ -2176,8 +2499,9 @@ class TestSkippedFindings:
         diff = import_holistic_findings(_as_review_payload(data), state, "typescript")
         assert diff["new"] == 1
         assert diff["skipped"] == 1
+        missing_text = " ".join(diff["skipped_details"][0]["missing"])
         assert any(
-            f in diff["skipped_details"][0]["missing"]
+            f in missing_text
             for f in ("summary", "suggestion")
         )
 
@@ -2215,6 +2539,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "god_mod",
                     "summary": "too central",
                     "confidence": "high",
+                    "related_files": ["src/a.ts"],
+                    "evidence": ["Core module acts as fan-in hub."],
                     "suggestion": "split it",
                 },
             ],
@@ -2237,6 +2563,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "god_mod",
                     "summary": "too central",
                     "confidence": "high",
+                    "related_files": ["src/a.ts"],
+                    "evidence": ["Single module owns many boundaries."],
                     "suggestion": "split it",
                 },
                 {
@@ -2244,6 +2572,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "util_dump",
                     "summary": "dumping ground",
                     "confidence": "medium",
+                    "related_files": ["src/utils.ts"],
+                    "evidence": ["Utility file mixes unrelated domains."],
                     "suggestion": "extract domains",
                 },
             ],
@@ -2263,6 +2593,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "mixed_errors",
                     "summary": "mixed strategies",
                     "confidence": "high",
+                    "related_files": ["src/service.ts", "src/handler.ts"],
+                    "evidence": ["One path throws, another returns Result."],
                     "suggestion": "consolidate error handling",
                 },
             ],
@@ -2286,6 +2618,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "god_mod",
                     "summary": "too central",
                     "confidence": "high",
+                    "related_files": ["src/a.ts"],
+                    "evidence": ["Single module coordinates multiple subsystems."],
                     "suggestion": "split it",
                 },
                 {
@@ -2293,6 +2627,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "util_dump",
                     "summary": "dumping ground",
                     "confidence": "medium",
+                    "related_files": ["src/utils.ts"],
+                    "evidence": ["Utility module contains mixed concerns."],
                     "suggestion": "extract domains",
                 },
             ],
@@ -2311,6 +2647,8 @@ class TestAutoResolveOnReImport:
                     "identifier": "layout_bag",
                     "summary": "controller bag still broad",
                     "confidence": "high",
+                    "related_files": ["src/controller.ts"],
+                    "evidence": ["Controller orchestrates too many responsibilities."],
                     "suggestion": "split into focused hooks",
                 },
             ],

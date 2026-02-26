@@ -1,7 +1,7 @@
 """Ruby language plugin — rubocop."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import RUBY_SPEC
+from desloppify.languages._framework.treesitter import RUBY_SPEC
 
 generic_lang(
     name="ruby",

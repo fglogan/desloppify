@@ -8,9 +8,9 @@ from desloppify.app.commands.helpers.rendering import print_agent_plan
 from desloppify.app.commands.helpers.runtime import command_runtime
 from desloppify.app.commands.helpers.state import require_completed_scan
 from desloppify.core.fallbacks import warn_best_effort
-from desloppify.engine.planning import core as plan_mod
-from desloppify.file_discovery import safe_write_text
-from desloppify.utils import colorize
+from desloppify.engine import planning as planning_mod
+from desloppify.core.discovery_api import safe_write_text
+from desloppify.core.output_api import colorize
 
 
 def cmd_plan_output(args: argparse.Namespace) -> None:
@@ -20,7 +20,7 @@ def cmd_plan_output(args: argparse.Namespace) -> None:
     if not require_completed_scan(state):
         return
 
-    plan_md = plan_mod.generate_plan_md(state)
+    plan_md = planning_mod.generate_plan_md(state)
     next_command = "desloppify next --count 20"
 
     output = getattr(args, "output", None)

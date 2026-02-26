@@ -1140,9 +1140,13 @@ class TestEslintParser:
     def test_parse_invalid_json(self):
         from pathlib import Path
 
-        from desloppify.languages._framework.generic import parse_eslint
+        import pytest
 
-        assert parse_eslint("not json", Path("/src")) == []
+        from desloppify.languages._framework.generic import parse_eslint
+        from desloppify.languages._framework.generic_parts.parsers import ToolParserError
+
+        with pytest.raises(ToolParserError):
+            parse_eslint("not json", Path("/src"))
 
     def test_parse_empty_messages(self):
         from pathlib import Path

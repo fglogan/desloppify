@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from desloppify.file_discovery import DEFAULT_EXCLUSIONS, get_exclusions
+from desloppify.core.discovery_api import DEFAULT_EXCLUSIONS, get_exclusions
 
 logger = logging.getLogger(__name__)
 

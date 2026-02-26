@@ -14,20 +14,45 @@ from typing import Any
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
 from desloppify.app.commands.review.runtime import setup_lang_concrete
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import safe_write_text
+from desloppify.core._internal.coercions import coerce_positive_int
+from desloppify.core._internal.text_utils import get_project_root
+from desloppify.core.discovery_api import safe_write_text
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 from .import_cmd import do_import, do_validate_import
 
-REVIEW_PACKET_DIR = PROJECT_ROOT / ".desloppify" / "review_packets"
-EXTERNAL_SESSION_ROOT = PROJECT_ROOT / ".desloppify" / "external_review_sessions"
+# Backward-compatible override hooks for tests.
+PROJECT_ROOT: Path | None = None
+REVIEW_PACKET_DIR: Path | None = None
+EXTERNAL_SESSION_ROOT: Path | None = None
 EXTERNAL_ATTEST_TEXT = (
     "I validated this review was completed without awareness of overall score and is unbiased."
 )
 _EXTERNAL_SUPPORTED_RUNNERS = {"claude"}
+
+
+def _runtime_project_root() -> Path:
+    if isinstance(PROJECT_ROOT, Path):
+        return PROJECT_ROOT
+    return get_project_root()
+
+
+def _review_packet_dir() -> Path:
+    if isinstance(REVIEW_PACKET_DIR, Path):
+        return REVIEW_PACKET_DIR
+    return _runtime_project_root() / ".desloppify" / "review_packets"
+
+
+def _external_session_root() -> Path:
+    if isinstance(EXTERNAL_SESSION_ROOT, Path):
+        return EXTERNAL_SESSION_ROOT
+    return _runtime_project_root() / ".desloppify" / "external_review_sessions"
+
+
+def _blind_packet_path() -> Path:
+    return _runtime_project_root() / ".desloppify" / "review_packet_blind.json"
 
 
 def _utc_now() -> datetime:
@@ -58,24 +83,12 @@ def _split_dimensions(raw: object) -> list[str] | None:
     return cleaned or None
 
 
-def _coerce_positive_int(value: object, *, default: int) -> int:
-    if value is None:
-        return default
-    if not isinstance(value, int | float | str):
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
-
-
 def _session_id() -> str:
     return f"ext_{runner_helpers_mod.run_stamp()}_{secrets.token_hex(4)}"
 
 
 def _session_dir(session_id: str) -> Path:
-    return EXTERNAL_SESSION_ROOT / session_id
+    return _external_session_root() / session_id
 
 
 def _session_file(session_id: str) -> Path:
@@ -138,11 +151,11 @@ def _prepare_packet_snapshot(
     path = Path(getattr(args, "path", ".") or ".")
     dimensions = _split_dimensions(getattr(args, "dimensions", None))
     retrospective = bool(getattr(args, "retrospective", False))
-    retrospective_max_issues = _coerce_positive_int(
+    retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),
         default=30,
     )
-    retrospective_max_batch_items = _coerce_positive_int(
+    retrospective_max_batch_items = coerce_positive_int(
         getattr(args, "retrospective_max_batch_items", None),
         default=20,
     )
@@ -175,11 +188,11 @@ def _prepare_packet_snapshot(
     write_query(packet)
 
     stamp = runner_helpers_mod.run_stamp()
-    blind_packet_path = PROJECT_ROOT / ".desloppify" / "review_packet_blind.json"
+    blind_packet_path = _blind_packet_path()
     packet_path, blind_path = runner_helpers_mod.write_packet_snapshot(
         packet,
         stamp=stamp,
-        review_packet_dir=REVIEW_PACKET_DIR,
+        review_packet_dir=_review_packet_dir(),
         blind_path=blind_packet_path,
         safe_write_text_fn=safe_write_text,
     )
@@ -533,7 +546,7 @@ def do_external_submit(
             lang_name=lang.name,
             scan_path=scan_path,
             deps=runner_helpers_mod.FollowupScanDeps(
-                project_root=PROJECT_ROOT,
+                project_root=_runtime_project_root(),
                 timeout_seconds=FOLLOWUP_SCAN_TIMEOUT_SECONDS,
                 python_executable=sys.executable,
                 subprocess_run=subprocess.run,

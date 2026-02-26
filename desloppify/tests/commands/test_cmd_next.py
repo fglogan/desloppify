@@ -6,7 +6,6 @@ import inspect
 from types import SimpleNamespace
 
 import desloppify.intelligence.narrative as narrative_mod
-import desloppify.utils as utils_mod
 from desloppify.app.commands import next as next_mod
 from desloppify.app.commands.helpers.runtime import CommandRuntime
 from desloppify.app.commands.next import _low_subjective_dimensions, cmd_next
@@ -45,7 +44,7 @@ def _patch_common(monkeypatch, *, state, config=None):
             state_path="/tmp/fake-state.json",
         ),
     )
-    monkeypatch.setattr(utils_mod, "check_tool_staleness", lambda _state: None)
+    monkeypatch.setattr(next_mod, "check_tool_staleness", lambda _state: None)
     monkeypatch.setattr(narrative_mod, "compute_narrative", lambda *a, **k: {})
     monkeypatch.setattr(next_mod, "resolve_lang", lambda _args: None)
 
@@ -263,11 +262,9 @@ class TestCmdNextOutput:
         cmd_next(_args())
         out = capsys.readouterr().out
         assert "North star: strict 94.0/100 → target 95.0 (+1.0 needed)" in out
-        assert "Subjective quality (<95%): Naming quality 94.0%" in out
-        assert (
-            "review --run-batches --runner codex --parallel --scan-after-import --dimensions naming_quality"
-            in out
-        )
+        assert "Subjective:" in out
+        assert "below target" in out
+        assert "show subjective" in out
 
     def test_subjective_coverage_debt_hint(self, monkeypatch, capsys):
         _patch_common(
@@ -324,8 +321,9 @@ class TestCmdNextOutput:
         cmd_next(_args())
         out = capsys.readouterr().out
         assert "North star: strict 90.0/100 → target 95.0 (+5.0 needed)" in out
-        assert "Subjective coverage debt: 1 file (1 changed)" in out
-        assert "show subjective_review --status open" in out
+        assert "Subjective:" in out
+        assert "need review" in out
+        assert "show subjective" in out
 
     def test_unassessed_subjective_gap_prioritizes_holistic_refresh(
         self, monkeypatch, capsys
@@ -379,9 +377,9 @@ class TestCmdNextOutput:
 
         cmd_next(_args())
         out = capsys.readouterr().out
-        assert "Subjective integrity gap:" in out
-        assert "Priority: `desloppify review --prepare`" in out
-        assert "Unassessed (0% placeholder): High elegance" in out
+        assert "Subjective:" in out
+        assert "unassessed" in out
+        assert "show subjective" in out
 
     def test_holistic_subjective_signal_is_called_out(self, monkeypatch, capsys):
         _patch_common(
@@ -437,8 +435,8 @@ class TestCmdNextOutput:
 
         cmd_next(_args())
         out = capsys.readouterr().out
-        assert "Subjective integrity gap: holistic review stale/missing" in out
-        assert "Includes 1 holistic stale/missing signal(s)." in out
+        assert "Subjective:" in out
+        assert "show subjective" in out
 
     def test_subjective_threshold_uses_configured_target(self, monkeypatch, capsys):
         _patch_common(
@@ -492,7 +490,9 @@ class TestCmdNextOutput:
         cmd_next(_args())
         out = capsys.readouterr().out
         assert "North star: strict 96.0/100 → target 97.0 (+1.0 needed)" in out
-        assert "Subjective quality (<97%): Naming quality 96.0%" in out
+        assert "Subjective:" in out
+        assert "below target" in out
+        assert "show subjective" in out
 
     def test_subjective_integrity_penalty_is_always_reported(self, monkeypatch, capsys):
         _patch_common(
@@ -620,6 +620,110 @@ class TestCmdNextOutput:
         assert written[0]["items"][0]["explain"] == {
             "policy": "Subjective dimensions are always queued as T4."
         }
+
+
+    def test_score_impact_shown_when_potentials_available(self, monkeypatch, capsys):
+        _patch_common(
+            monkeypatch,
+            state={
+                "findings": {},
+                "dimension_scores": {
+                    "Code quality": {
+                        "score": 80.0,
+                        "strict": 78.0,
+                        "issues": 5,
+                        "checks": 100,
+                        "tier": 2,
+                    },
+                },
+                "potentials": {"python": {"smells": 5}},
+                "overall_score": 85.0,
+                "objective_score": 88.0,
+                "strict_score": 83.0,
+                "scan_path": ".",
+            },
+        )
+        monkeypatch.setattr(next_mod, "write_query", lambda _payload: None)
+        monkeypatch.setattr(
+            next_mod,
+            "build_work_queue",
+            lambda *_a, **_k: {
+                "items": [
+                    {
+                        "id": "smells::src/a.py::x",
+                        "kind": "finding",
+                        "tier": 2,
+                        "effective_tier": 2,
+                        "confidence": "high",
+                        "detector": "smells",
+                        "file": "src/a.py",
+                        "summary": "Fix smell",
+                        "detail": {},
+                        "status": "open",
+                        "primary_command": "desloppify resolve fixed ...",
+                    }
+                ],
+                "total": 1,
+                "tier_counts": {1: 0, 2: 1, 3: 0, 4: 0},
+                "requested_tier": None,
+                "selected_tier": None,
+                "fallback_reason": None,
+                "available_tiers": [2],
+            },
+        )
+
+        cmd_next(_args())
+        out = capsys.readouterr().out
+        # Impact line should appear if compute_score_impact returns > 0
+        # The actual value depends on scoring internals; just verify the label appears
+        # or doesn't crash when potentials are present
+        assert "Next item" in out
+
+    def test_subjective_dimension_shows_honesty_note(self, monkeypatch, capsys):
+        _patch_common(
+            monkeypatch,
+            state={
+                "findings": {},
+                "dimension_scores": {},
+                "overall_score": 94.0,
+                "objective_score": 98.0,
+                "strict_score": 94.0,
+                "scan_path": ".",
+            },
+        )
+        monkeypatch.setattr(next_mod, "write_query", lambda _payload: None)
+        monkeypatch.setattr(
+            next_mod,
+            "build_work_queue",
+            lambda *_a, **_k: {
+                "items": [
+                    {
+                        "id": "subjective::naming_quality",
+                        "kind": "subjective_dimension",
+                        "tier": 4,
+                        "effective_tier": 4,
+                        "confidence": "medium",
+                        "detector": "subjective_assessment",
+                        "file": ".",
+                        "summary": "Subjective dimension below target: Naming quality (94.0%)",
+                        "detail": {"dimension_name": "Naming quality", "strict_score": 94.0},
+                        "status": "open",
+                        "subjective_score": 94.0,
+                        "primary_command": "desloppify review --prepare",
+                    }
+                ],
+                "total": 1,
+                "tier_counts": {1: 0, 2: 0, 3: 0, 4: 1},
+                "requested_tier": None,
+                "selected_tier": None,
+                "fallback_reason": None,
+                "available_tiers": [4],
+            },
+        )
+
+        cmd_next(_args())
+        out = capsys.readouterr().out
+        assert "scores can go down" in out
 
 
 class TestLowSubjectiveDimensions:

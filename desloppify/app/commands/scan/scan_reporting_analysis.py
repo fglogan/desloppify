@@ -3,143 +3,8 @@
 from __future__ import annotations
 
 from desloppify import state as state_mod
-from desloppify.app.commands.helpers.rendering import print_ranked_actions
-from desloppify.intelligence import integrity as subjective_integrity_mod
 from desloppify.intelligence import narrative as narrative_mod
-from desloppify.utils import colorize
-
-
-def _subjective_dimensions_below_threshold(
-    state: dict, *, threshold: float = 90.0
-) -> list[str]:
-    """Return subjective dimensions with score below threshold and evidence issues."""
-    low_dims: list[str] = []
-    dimension_scores = state.get("dimension_scores", {})
-    if not isinstance(dimension_scores, dict):
-        return low_dims
-
-    for dim_name, payload in dimension_scores.items():
-        if not isinstance(payload, dict):
-            continue
-        score = payload.get("score")
-        detectors = payload.get("detectors", {})
-        subjective_payload = (
-            detectors.get("subjective_assessment")
-            if isinstance(detectors, dict)
-            else None
-        )
-        if not isinstance(subjective_payload, dict):
-            continue
-        issues = subjective_payload.get("issues", 0)
-        if not isinstance(score, int | float) or not isinstance(
-            issues, int | float
-        ):
-            continue
-        if score < threshold and issues > 0:
-            low_dims.append(str(dim_name))
-    return low_dims
-
-
-def _print_narrative_plan_fields(narrative: dict) -> None:
-    """Print additional narrative plan fields when present."""
-    why_now = narrative.get("why_now")
-    primary_action = narrative.get("primary_action")
-    verification_step = narrative.get("verification_step")
-    risk_flags = narrative.get("risk_flags")
-
-    has_plan = bool(why_now) or bool(primary_action) or bool(verification_step) or bool(
-        risk_flags
-    )
-    if not has_plan:
-        return
-
-    print(colorize("  Narrative Plan:", "cyan"))
-    if isinstance(why_now, str) and why_now.strip():
-        print(colorize(f"    Why now: {why_now.strip()}", "dim"))
-
-    if isinstance(primary_action, dict):
-        command = primary_action.get("command")
-        description = primary_action.get("description")
-        if isinstance(command, str) and command.strip():
-            line = f"    Next: `{command.strip()}`"
-            if isinstance(description, str) and description.strip():
-                line += f" — {description.strip()}"
-            print(colorize(line, "dim"))
-
-    if isinstance(verification_step, dict):
-        command = verification_step.get("command")
-        reason = verification_step.get("reason")
-        if isinstance(command, str) and command.strip():
-            line = f"    Verify: `{command.strip()}`"
-            if isinstance(reason, str) and reason.strip():
-                line += f" — {reason.strip()}"
-            print(colorize(line, "dim"))
-
-    if isinstance(risk_flags, list):
-        for risk in risk_flags:
-            if not isinstance(risk, dict):
-                continue
-            message = risk.get("message")
-            if not isinstance(message, str) or not message.strip():
-                continue
-            severity = str(risk.get("severity", "")).lower()
-            style = "yellow" if severity in {"high", "critical"} else "dim"
-            print(colorize(f"    Risk: {message.strip()}", style))
-    print()
-
-
-def _print_filtered_reminders(narrative: dict) -> None:
-    """Print narrative reminders except low-value report score reminders."""
-    reminders = narrative.get("reminders")
-    if not isinstance(reminders, list):
-        return
-    messages: list[str] = []
-    for reminder in reminders:
-        if not isinstance(reminder, dict):
-            continue
-        if reminder.get("type") == "report_scores":
-            continue
-        message = reminder.get("message")
-        if isinstance(message, str) and message.strip():
-            messages.append(message.strip())
-    if not messages:
-        return
-
-    print(colorize("  Reminders:", "dim"))
-    for message in messages:
-        print(colorize(f"    - {message}", "dim"))
-    print()
-
-
-def _show_subjective_score_nudge(state: dict) -> None:
-    """Nudge rerun when subjective dimensions are low with evidence issues."""
-    low_dims = _subjective_dimensions_below_threshold(state, threshold=90.0)
-    if not low_dims:
-        return
-
-    review_cache = state.get("review_cache", {})
-    reviewed_files = review_cache.get("files", {}) if isinstance(review_cache, dict) else {}
-    verb = "rerun" if isinstance(reviewed_files, dict) and reviewed_files else "run"
-
-    dim_preview = ", ".join(low_dims[:3])
-    if len(low_dims) > 3:
-        dim_preview += f", +{len(low_dims) - 3} more"
-
-    print(colorize(f"  Subjective scores below 90: {dim_preview}", "yellow"))
-    print(
-        colorize(
-            f"  You can {verb} the subjective scoring with "
-            "`desloppify review --run-batches --runner codex --parallel --scan-after-import`.",
-            "cyan",
-        )
-    )
-    print(
-        colorize(
-            "  Then review progress in `desloppify status` and investigate blockers via `desloppify issues`.",
-            "dim",
-        )
-    )
-    print()
+from desloppify.core.output_api import colorize
 
 
 def _coerce_coverage_confidence(value: object, *, default: float = 1.0) -> float:
@@ -197,32 +62,32 @@ def show_post_scan_analysis(
     *,
     target_strict_score: float = 95.0,
 ) -> tuple[list[str], dict]:
-    """Print warnings, narrative headline, and top action. Returns (warnings, narrative)."""
-    warnings = []
+    """Print critical warnings + headline + pointers. Returns (warnings, narrative)."""
+    # Critical warnings only (reopened, cascading, chronic, coverage reduction)
+    warnings: list[str] = []
     if diff["reopened"] > 5:
         warnings.append(
-            f"{diff['reopened']} findings reopened — was a previous fix reverted? Check: git log --oneline -5"
+            f"{diff['reopened']} findings reopened — was a previous fix reverted?"
         )
     if diff["new"] > 10 and diff["auto_resolved"] < 3:
         warnings.append(
-            f"{diff['new']} new findings with few resolutions — likely cascading from recent fixes. Run fixers again."
+            f"{diff['new']} new findings with few resolutions — likely cascading."
         )
     chronic = diff.get("chronic_reopeners", [])
     chronic_count = len(chronic) if isinstance(chronic, list) else chronic
     if chronic_count > 0:
         warnings.append(
-            f"⟳ {chronic_count} chronic reopener{'s' if chronic_count != 1 else ''} "
-            "(reopened 2+ times). These keep bouncing — fix properly or wontfix. "
-            "Run: `desloppify show --chronic` to see them."
+            f"⟳ {chronic_count} chronic reopener{'s' if chronic_count != 1 else ''} — "
+            "run `desloppify show --chronic` to see them."
         )
     warnings.extend(_coverage_reduction_warnings(state, lang))
 
+    for warning in warnings:
+        print(colorize(f"  {warning}", "yellow"))
     if warnings:
-        for warning in warnings:
-            print(colorize(f"  {warning}", "yellow"))
         print()
 
-    # Computed narrative: headline + top action as terminal suggestion
+    # Single narrative headline
     lang_name = lang.name if lang else None
     narrative = narrative_mod.compute_narrative(
         state,
@@ -232,105 +97,13 @@ def show_post_scan_analysis(
             command="scan",
         ),
     )
-
-    # Show one actionable plan and optional strategy context.
-    print(
-        colorize(
-            "  AGENT PLAN (use `desloppify next --count 20` to inspect more items):",
-            "yellow",
-        )
-    )
-    strategy = narrative.get("strategy") or {}
-    hint = strategy.get("hint")
-    actions = narrative.get("actions", [])
-
-    if actions:
-        top = actions[0]
-        print(
-            colorize(
-                f"  Agent focus: `{top['command']}` — {top['description']}", "cyan"
-            )
-        )
-        if hint:
-            print(colorize(f"  Strategy: {hint}", "dim"))
-        print()
-    elif hint:
-        print(colorize(f"  Agent focus: {hint}", "cyan"))
-        print()
-
-    if print_ranked_actions(actions):
-        print()
-
     if narrative.get("headline"):
         print(colorize(f"  → {narrative['headline']}", "cyan"))
-        print()
 
-    _print_narrative_plan_fields(narrative)
-    _print_filtered_reminders(narrative)
-    _show_subjective_score_nudge(state)
-
-    # Review findings nudge
-    scoped_findings = state_mod.path_scoped_findings(
-        state.get("findings", {}), state.get("scan_path")
-    )
-    open_review = [
-        finding
-        for finding in scoped_findings.values()
-        if finding["status"] == "open" and finding.get("detector") == "review"
-    ]
-    open_subjective, _subjective_reasons, holistic_reasons = (
-        subjective_integrity_mod.subjective_review_open_breakdown(scoped_findings)
-    )
-    holistic_open = sum(holistic_reasons.values())
-    if open_review:
-        suffix = "s" if len(open_review) != 1 else ""
-        print(
-            colorize(
-                f"  Review: {len(open_review)} finding{suffix} pending — `desloppify issues`",
-                "cyan",
-            )
-        )
-        print()
-    if open_subjective > 0:
-        if holistic_open > 0:
-            print(
-                colorize(
-                    f"  Subjective integrity: {holistic_open} holistic stale/missing signal(s) — "
-                    "`desloppify review --run-batches --runner codex --parallel --scan-after-import`",
-                    "yellow",
-                )
-            )
-        else:
-            print(
-                colorize(
-                    f"  Subjective coverage: {open_subjective} file-level review signal(s) open — "
-                    "`desloppify show subjective_review --status open`",
-                    "cyan",
-                )
-            )
-        print()
-
-    # Auto-queue: nudge subjective review for high-complexity unreviewed files
-    review_cache = state.get("review_cache", {}).get("files", {})
-    scoped = scoped_findings
-    complex_unreviewed = set()
-    for finding in scoped.values():
-        if (
-            finding.get("detector") in ("structural", "smells")
-            and finding.get("status") == "wontfix"
-            and finding.get("file") not in review_cache
-        ):
-            complex_unreviewed.add(finding.get("file"))
-    if len(complex_unreviewed) >= 3:
-        print(
-            colorize(
-                f"  {len(complex_unreviewed)} complex files have never been reviewed — "
-                "`desloppify review --run-batches --runner codex --parallel --scan-after-import` "
-                "would provide actionable refactoring guidance",
-                "dim",
-            )
-        )
-        print()
+    # Two pointers
+    print(colorize("  Run `desloppify next` for the highest-priority item.", "dim"))
+    print(colorize("  Run `desloppify status` for the full dashboard.", "dim"))
+    print()
 
     return warnings, narrative
 
@@ -466,4 +239,4 @@ def show_score_integrity(state: dict, diff: dict):
     print()
 
 
-__all__ = ["show_post_scan_analysis", "show_score_integrity"]
+__all__ = ["show_post_scan_analysis", "show_score_integrity"]  # show_score_integrity used by status

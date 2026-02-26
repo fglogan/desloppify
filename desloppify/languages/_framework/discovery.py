@@ -7,7 +7,7 @@ import importlib.util
 import logging
 from pathlib import Path
 
-from desloppify.languages._framework import registry_state
+from . import registry_state
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,13 @@ def raise_load_errors() -> None:
     errors = registry_state.get_load_errors()
     if not errors:
         return
-    lines = ["Language plugin import failures:"]
     for module_name, ex in sorted(errors.items()):
-        lines.append(f"  - {module_name}: {type(ex).__name__}: {ex}")
-    raise ImportError("\n".join(lines))
+        logger.warning(
+            "Language plugin %s failed to load: %s: %s",
+            module_name,
+            type(ex).__name__,
+            ex,
+        )
 
 
 def load_all() -> None:
@@ -64,11 +67,11 @@ def load_all() -> None:
                 )
                 failures[module_name] = ex
 
-    # Discover user plugins from PROJECT_ROOT/.desloppify/plugins/*.py
+    # Discover user plugins from <active-project-root>/.desloppify/plugins/*.py
     try:
-        from desloppify.core._internal.text_utils import PROJECT_ROOT
+        from desloppify.core._internal.text_utils import get_project_root
 
-        user_plugin_dir = PROJECT_ROOT / ".desloppify" / "plugins"
+        user_plugin_dir = get_project_root() / ".desloppify" / "plugins"
         if user_plugin_dir.is_dir():
             for f in sorted(user_plugin_dir.glob("*.py")):
                 spec = importlib.util.spec_from_file_location(

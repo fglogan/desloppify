@@ -32,10 +32,10 @@ from collections import defaultdict
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     get_exclusions as _get_exclusions,
 )
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     matches_exclusion as _matches_exclusion,
 )
 

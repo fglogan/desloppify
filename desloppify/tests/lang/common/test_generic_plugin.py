@@ -5,21 +5,33 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from desloppify.languages._framework.generic import (
-    _make_generic_fixer,
     capability_report,
     generic_lang,
     make_file_finder,
     make_tool_phase,
     parse_cargo,
+    parse_eslint,
     parse_gnu,
     parse_golangci,
     parse_json,
     parse_rubocop,
+)
+from desloppify.languages._framework.generic_parts.tool_factories import (
+    make_generic_fixer,
+)
+from desloppify.languages._framework.generic_parts.parsers import ToolParserError
+from desloppify.languages._framework.generic_parts.tool_spec import (
+    normalize_tool_specs,
+)
+from desloppify.languages._framework.generic_parts.tool_runner import (
+    run_tool,
+    run_tool_result,
 )
 
 
@@ -85,7 +97,19 @@ class TestParseGolangci:
         assert entries == []
 
     def test_invalid_json(self):
-        assert parse_golangci("not json", Path(".")) == []
+        with pytest.raises(ToolParserError):
+            parse_golangci("not json", Path("."))
+
+    def test_skips_issue_with_non_numeric_line(self):
+        data = {
+            "Issues": [
+                {
+                    "Pos": {"Filename": "main.go", "Line": "NaN"},
+                    "Text": "bad line",
+                }
+            ]
+        }
+        assert parse_golangci(json.dumps(data), Path(".")) == []
 
 
 class TestParseJson:
@@ -107,10 +131,15 @@ class TestParseJson:
         assert entries == []
 
     def test_invalid_json(self):
-        assert parse_json("not json", Path(".")) == []
+        with pytest.raises(ToolParserError):
+            parse_json("not json", Path("."))
 
     def test_non_array(self):
         assert parse_json(json.dumps({"key": "value"}), Path(".")) == []
+
+    def test_skips_rows_with_non_numeric_line(self):
+        data = [{"file": "a.swift", "line": "NaN", "message": "warning"}]
+        assert parse_json(json.dumps(data), Path(".")) == []
 
 
 class TestParseRubocop:
@@ -154,7 +183,8 @@ class TestParseRubocop:
         assert parse_rubocop(json.dumps({"files": []}), Path(".")) == []
 
     def test_invalid_json(self):
-        assert parse_rubocop("not json", Path(".")) == []
+        with pytest.raises(ToolParserError):
+            parse_rubocop("not json", Path("."))
 
 
 class TestParseCargo:
@@ -185,6 +215,18 @@ class TestParseCargo:
         assert parse_cargo("", Path(".")) == []
 
 
+class TestParseEslint:
+    def test_skips_rows_with_non_numeric_line(self):
+        payload = [
+            {"filePath": "src/app.ts", "messages": [{"line": "oops", "message": "x"}]}
+        ]
+        assert parse_eslint(json.dumps(payload), Path(".")) == []
+
+    def test_invalid_json(self):
+        with pytest.raises(ToolParserError):
+            parse_eslint("not json", Path("."))
+
+
 # ── make_tool_phase tests ─────────────────────────────────
 
 
@@ -202,6 +244,16 @@ class TestMakeToolPhase:
             findings, signals = phase.run(Path("."), None)
         assert findings == []
         assert signals == {}
+
+    def test_missing_tool_records_coverage_degradation(self):
+        phase = make_tool_phase("test", "nonexistent_tool_xyz_123", "gnu", "test_id", 2)
+        lang = SimpleNamespace(detector_coverage={}, coverage_warnings=[])
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            findings, signals = phase.run(Path("."), lang)
+        assert findings == []
+        assert signals == {}
+        assert lang.detector_coverage["test_id"]["status"] == "reduced"
+        assert lang.detector_coverage["test_id"]["reason"] == "tool_not_found"
 
     def test_gnu_output_produces_findings(self):
         phase = make_tool_phase("test", "fake", "gnu", "test_lint", 2)
@@ -227,6 +279,87 @@ class TestMakeToolPhase:
             findings, signals = phase.run(Path("."), None)
         assert findings == []
         assert signals == {}
+
+    def test_run_tool_parser_exception_returns_empty(self, tmp_path):
+        mock_result = subprocess.CompletedProcess(
+            args="fake",
+            returncode=1,
+            stdout="bad payload\n",
+            stderr="",
+        )
+
+        def _raising_parser(_output: str, _scan_path: Path) -> list[dict]:
+            raise ValueError("bad parser row")
+
+        entries = run_tool(
+            "fake",
+            tmp_path,
+            _raising_parser,
+            run_subprocess=lambda *_a, **_k: mock_result,
+        )
+        assert entries == []
+
+    def test_run_tool_result_distinguishes_empty_vs_error(self, tmp_path):
+        clean = subprocess.CompletedProcess(args="fake", returncode=0, stdout="", stderr="")
+        empty_result = run_tool_result(
+            "fake",
+            tmp_path,
+            parse_gnu,
+            run_subprocess=lambda *_a, **_k: clean,
+        )
+        assert empty_result.status == "empty"
+        assert empty_result.error_kind is None
+
+        failed = subprocess.CompletedProcess(args="fake", returncode=2, stdout="", stderr="")
+        failed_result = run_tool_result(
+            "fake",
+            tmp_path,
+            parse_gnu,
+            run_subprocess=lambda *_a, **_k: failed,
+        )
+        assert failed_result.status == "error"
+        assert failed_result.error_kind == "tool_failed_no_output"
+
+    def test_run_tool_result_nonzero_unparsed_output_is_error(self, tmp_path):
+        failed = subprocess.CompletedProcess(
+            args="fake",
+            returncode=2,
+            stdout='{"unexpected":"shape"}',
+            stderr="",
+        )
+        failed_result = run_tool_result(
+            "fake",
+            tmp_path,
+            parse_json,
+            run_subprocess=lambda *_a, **_k: failed,
+        )
+        assert failed_result.status == "error"
+        assert failed_result.error_kind == "tool_failed_unparsed_output"
+
+    def test_run_tool_result_parser_decode_error_is_error(self, tmp_path):
+        failed = subprocess.CompletedProcess(
+            args="fake",
+            returncode=0,
+            stdout="{bad-json",
+            stderr="",
+        )
+        failed_result = run_tool_result(
+            "fake",
+            tmp_path,
+            parse_json,
+            run_subprocess=lambda *_a, **_k: failed,
+        )
+        assert failed_result.status == "error"
+        assert failed_result.error_kind == "parser_error"
+
+
+class TestToolSpecNormalization:
+    def test_missing_fix_cmd_normalizes_to_none(self):
+        normalized = normalize_tool_specs(
+            [{"label": "lint", "cmd": "echo ok", "fmt": "gnu", "id": "lint_id", "tier": 2}],
+            supported_formats={"gnu"},
+        )
+        assert normalized[0]["fix_cmd"] is None
 
 
 # ── generic_lang registration tests ──────────────────────
@@ -274,6 +407,53 @@ class TestGenericLang:
             depth="minimal",
         )
         assert cfg.integration_depth == "minimal"
+
+    def test_rejects_missing_tool_fields(self):
+        with pytest.raises(ValueError, match="tools\\[0\\]\\.cmd"):
+            generic_lang(
+                name="test_generic_lang_missing_cmd",
+                extensions=[".x"],
+                tools=[
+                    {
+                        "label": "xlint",
+                        "fmt": "gnu",
+                        "id": "xlint_missing_cmd",
+                        "tier": 2,
+                    }
+                ],
+            )
+
+    def test_rejects_unknown_tool_format(self):
+        with pytest.raises(ValueError, match="unsupported"):
+            generic_lang(
+                name="test_generic_lang_bad_fmt",
+                extensions=[".x"],
+                tools=[
+                    {
+                        "label": "xlint",
+                        "cmd": "echo ok",
+                        "fmt": "unknown_format",
+                        "id": "xlint_bad_fmt",
+                        "tier": 2,
+                    }
+                ],
+            )
+
+    def test_rejects_non_integer_tier(self):
+        with pytest.raises(ValueError, match="tier must be an integer"):
+            generic_lang(
+                name="test_generic_lang_bad_tier",
+                extensions=[".x"],
+                tools=[
+                    {
+                        "label": "xlint",
+                        "cmd": "echo ok",
+                        "fmt": "gnu",
+                        "id": "xlint_bad_tier",
+                        "tier": "2",
+                    }
+                ],
+            )
 
 
 # ── Stub tests ────────────────────────────────────────────
@@ -569,7 +749,7 @@ class TestFixers:
             "label": "t", "cmd": "echo", "fmt": "gnu",
             "id": "test_fixer_dry", "tier": 2, "fix_cmd": "echo --fix",
         }
-        fixer = _make_generic_fixer(tool)
+        fixer = make_generic_fixer(tool)
         entries = [{"file": "a.x", "line": 1}, {"file": "b.x", "line": 2}]
         result = fixer.fix(entries, dry_run=True, path=Path("."))
         assert len(result.entries) == 2
@@ -580,12 +760,12 @@ class TestFixers:
             "label": "t", "cmd": "echo 'a.x:1: error'", "fmt": "gnu",
             "id": "test_fixer_detect", "tier": 2, "fix_cmd": "echo --fix",
         }
-        fixer = _make_generic_fixer(tool)
+        fixer = make_generic_fixer(tool)
         mock_result = subprocess.CompletedProcess(
             args="fake", returncode=1, stdout="a.x:1: some error\n", stderr="",
         )
         with patch(
-            "desloppify.languages._framework.generic.subprocess.run",
+            "desloppify.languages._framework.generic_parts.tool_runner.subprocess.run",
             return_value=mock_result,
         ):
             entries = fixer.detect(Path("."))
@@ -597,10 +777,10 @@ class TestFixers:
             "label": "t", "cmd": "echo", "fmt": "gnu",
             "id": "test_fixer_unavail", "tier": 2, "fix_cmd": "nonexistent_tool_xyz",
         }
-        fixer = _make_generic_fixer(tool)
+        fixer = make_generic_fixer(tool)
         entries = [{"file": "a.x", "line": 1}]
         with patch(
-            "desloppify.languages._framework.generic.subprocess.run",
+            "desloppify.languages._framework.generic_parts.tool_factories.subprocess.run",
             side_effect=FileNotFoundError,
         ):
             result = fixer.fix(entries, dry_run=False, path=Path("."))

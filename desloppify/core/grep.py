@@ -6,7 +6,7 @@ import os
 import re
 
 from desloppify.core._internal import text_utils as _text_utils
-from desloppify.file_discovery import read_file_text as _read_file_text
+from desloppify.core.source_discovery import read_file_text as _read_file_text
 
 _get_project_root = _text_utils.get_project_root
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from desloppify.app.commands._show_terminal import show_fix_dry_run_samples
 from desloppify.languages._framework.base.types import FixResult
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 from .apply_flow import (
     _apply_and_report,

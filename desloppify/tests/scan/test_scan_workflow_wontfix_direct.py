@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import desloppify.app.commands.scan.scan_workflow as scan_workflow_mod
 from desloppify.app.commands.scan.scan_workflow import (
+    ScanStateContractError,
     ScanRuntime,
     _expire_provisional_manual_override_assessments,
     _augment_with_stale_wontfix_findings,
@@ -207,3 +208,13 @@ def test_expire_provisional_manual_override_assessments_noop_when_absent():
 
     assert expired == 0
     assert state["subjective_assessments"]["naming_quality"]["score"] == 88.0
+
+
+def test_scan_reset_raises_when_subjective_assessments_not_object():
+    state = {"subjective_assessments": []}
+    try:
+        _reset_subjective_assessments_for_scan_reset(state)
+    except ScanStateContractError as exc:
+        assert "subjective_assessments" in str(exc)
+    else:
+        raise AssertionError("expected ScanStateContractError")

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from desloppify.engine.detectors.base import ClassInfo, FunctionInfo
-from desloppify.file_discovery import find_py_files
+from desloppify.core.discovery_api import find_py_files
 from desloppify.languages.python.extractors_shared import find_block_end, read_file
 
 

@@ -291,7 +291,7 @@ class TestPlanTierSections:
         assert len(tier_header) == 1
         assert "3 open" in tier_header[0]
 
-    def test_review_findings_render_under_tier1_effective_priority(self):
+    def test_review_findings_render_under_natural_tier(self):
         findings = {
             "review::src/a.py::naming": _finding(
                 "review::src/a.py::naming",
@@ -305,8 +305,8 @@ class TestPlanTierSections:
             findings, state={"findings": findings, "dimension_scores": {}}
         )
         joined = "\n".join(lines)
-        assert "Tier 1:" in joined
-        assert "Tier 2:" not in joined
+        assert "Tier 2:" in joined
+        assert "review::src/a.py::naming" in joined
 
     def test_subjective_dimensions_show_up_in_tier4_section(self):
         findings: dict[str, dict] = {}
@@ -506,7 +506,7 @@ class TestGetNextItems:
         ids = {i["id"] for i in items}
         assert ids == {"holistic", "in_scope"}
 
-    def test_review_findings_are_forced_to_t1_and_ranked_first(self):
+    def test_review_findings_use_natural_tier(self):
         review = _finding(
             "review_item",
             detector="review",
@@ -520,10 +520,11 @@ class TestGetNextItems:
             subjective_assessments={"naming_quality": {"score": 92}},
         )
         items = get_next_items(st, count=2)
-        assert [item["id"] for item in items] == ["review_item", "mech_item"]
-        assert items[0]["effective_tier"] == 1
+        # Both are tier 3 — review findings use natural tier, not forced T1
+        assert items[0]["effective_tier"] == 3
+        assert items[1]["effective_tier"] == 3
 
-    def test_review_findings_reorder_by_review_weight(self):
+    def test_review_findings_reorder_by_confidence_then_review_weight(self):
         standard = _finding(
             "a_review_mild",
             detector="review",
@@ -546,10 +547,11 @@ class TestGetNextItems:
             },
         )
         items = get_next_items(st, count=2)
-        assert [item["id"] for item in items] == ["z_review_critical", "a_review_mild"]
-        assert all(item["effective_tier"] == 1 for item in items)
+        # Same tier, confidence takes precedence: high before low
+        assert [item["id"] for item in items] == ["a_review_mild", "z_review_critical"]
+        assert all(item["effective_tier"] == 3 for item in items)
 
-    def test_review_findings_outrank_tier1_mechanical(self):
+    def test_tier1_mechanical_outranks_tier3_review(self):
         urgent = _finding("t1_urgent", detector="security", tier=1, confidence="high")
         review_low = _finding(
             "review_low",
@@ -563,4 +565,5 @@ class TestGetNextItems:
             subjective_assessments={"naming_quality": {"score": 80}},
         )
         items = get_next_items(st, count=2)
-        assert [item["id"] for item in items] == ["review_low", "t1_urgent"]
+        # T1 mechanical sorts before T3 review (natural tier ordering)
+        assert [item["id"] for item in items] == ["t1_urgent", "review_low"]

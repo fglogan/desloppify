@@ -117,7 +117,7 @@ class TestComputeActions:
         )
         sr_actions = [a for a in result if a.get("detector") == "subjective_review"]
         if sr_actions:
-            assert "review" in sr_actions[0]["command"]
+            assert sr_actions[0]["command"] == "desloppify review --prepare"
 
     def test_review_findings_action(self, empty_state):
         result = _compute_actions(
@@ -131,7 +131,7 @@ class TestComputeActions:
         )
         review_actions = [a for a in result if a.get("detector") == "review"]
         if review_actions:
-            assert "issues" in review_actions[0]["command"]
+            assert "show review" in review_actions[0]["command"]
 
 
 class TestFixerHasApplicableFindings:

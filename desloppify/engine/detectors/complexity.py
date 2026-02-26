@@ -5,7 +5,8 @@ import logging
 import re
 from pathlib import Path
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core.fallbacks import log_best_effort_failure
+from desloppify.core.file_paths import resolve_scan_file
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,7 @@ def detect_complexity(
     entries = []
     for filepath in files:
         try:
-            fp = Path(filepath)
-            p = fp if fp.is_absolute() else PROJECT_ROOT / filepath
+            p = resolve_scan_file(filepath, scan_root=path)
             content = p.read_text()
             lines = content.splitlines()
             loc = len(lines)
@@ -41,27 +41,35 @@ def detect_complexity(
             score = 0
 
             for sig in signals:
-                if sig.compute:
-                    # Pass filepath to compute fns that accept it (tree-sitter signals).
-                    accepts_filepath = "_filepath" in inspect.signature(
-                        sig.compute
-                    ).parameters
-                    if accepts_filepath:
-                        result = sig.compute(content, lines, _filepath=filepath)
-                    else:
-                        result = sig.compute(content, lines)
-                    if result:
-                        count, label = result
-                        file_signals.append(label)
-                        excess = (
-                            max(0, count - sig.threshold) if sig.threshold else count
-                        )
-                        score += excess * sig.weight
-                elif sig.pattern:
-                    count = len(re.findall(sig.pattern, content, re.MULTILINE))
-                    if count > sig.threshold:
-                        file_signals.append(f"{count} {sig.name}")
-                        score += (count - sig.threshold) * sig.weight
+                try:
+                    if sig.compute:
+                        # Pass filepath to compute fns that accept it (tree-sitter signals).
+                        accepts_filepath = "_filepath" in inspect.signature(
+                            sig.compute
+                        ).parameters
+                        if accepts_filepath:
+                            result = sig.compute(content, lines, _filepath=filepath)
+                        else:
+                            result = sig.compute(content, lines)
+                        if result:
+                            count, label = result
+                            file_signals.append(label)
+                            excess = (
+                                max(0, count - sig.threshold) if sig.threshold else count
+                            )
+                            score += excess * sig.weight
+                    elif sig.pattern:
+                        count = len(re.findall(sig.pattern, content, re.MULTILINE))
+                        if count > sig.threshold:
+                            file_signals.append(f"{count} {sig.name}")
+                            score += (count - sig.threshold) * sig.weight
+                except (TypeError, ValueError, KeyError, AttributeError, re.error) as exc:
+                    log_best_effort_failure(
+                        logger,
+                        f"compute complexity signal '{sig.name}' for {filepath}",
+                        exc,
+                    )
+                    continue
 
             if file_signals and score >= threshold:
                 entries.append(
@@ -73,9 +81,9 @@ def detect_complexity(
                     }
                 )
         except (OSError, UnicodeDecodeError) as exc:
-            logger.debug(
-                "Skipping unreadable file in complexity detector: %s (%s)",
-                filepath,
+            log_best_effort_failure(
+                logger,
+                f"read complexity detector candidate {filepath}",
                 exc,
             )
             continue

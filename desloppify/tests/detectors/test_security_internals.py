@@ -157,6 +157,24 @@ def test_detect_security_issues_clean_file(tmp_path):
     assert scanned == 1
 
 
+def test_detect_security_issues_resolves_relative_paths_with_scan_root(tmp_path):
+    """Relative file paths are resolved from scan_root for consistent detector IO."""
+    scan_root = tmp_path / "workspace"
+    src = scan_root / "src"
+    src.mkdir(parents=True, exist_ok=True)
+    target = src / "creds.py"
+    target.write_text('aws_key = "AKIAIOSFODNN7EXAMPLE"\n')
+
+    entries, scanned = detect_security_issues(
+        ["src/creds.py"],
+        None,
+        "python",
+        scan_root=scan_root,
+    )
+    assert scanned == 1
+    assert entries
+
+
 def test_detect_security_issues_finds_aws_key(tmp_path):
     """A file with a hardcoded AWS key is detected."""
     f = tmp_path / "creds.py"

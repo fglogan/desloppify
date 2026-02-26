@@ -56,7 +56,13 @@ def _dupes_debug_settings() -> tuple[bool, int]:
 
 def _pair_key(fn_a, fn_b) -> tuple[str, str]:
     """Build a stable pair key for duplicate tracking."""
-    return (f"{fn_a.file}:{fn_a.name}", f"{fn_b.file}:{fn_b.name}")
+    def _identity(fn) -> str:
+        end_line = getattr(fn, "end_line", None)
+        if not isinstance(end_line, int):
+            end_line = int(getattr(fn, "line", 0)) + int(getattr(fn, "loc", 0))
+        return f"{fn.file}:{fn.name}:{fn.line}:{end_line}"
+
+    return (_identity(fn_a), _identity(fn_b))
 
 
 def _collect_exact_duplicate_pairs(

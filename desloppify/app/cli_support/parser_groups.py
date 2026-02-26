@@ -7,7 +7,6 @@ from desloppify.app.cli_support.parser_groups_admin import (  # noqa: F401 (re-e
     _add_detect_parser,
     _add_dev_parser,
     _add_fix_parser,
-    _add_issues_parser,
     _add_langs_parser,
     _add_move_parser,
     _add_plan_parser,
@@ -23,7 +22,6 @@ __all__ = [
     "_add_dev_parser",
     "_add_fix_parser",
     "_add_ignore_parser",
-    "_add_issues_parser",
     "_add_langs_parser",
     "_add_move_parser",
     "_add_next_parser",
@@ -144,6 +142,13 @@ def _add_show_parser(sub) -> None:
     )
     p_show.add_argument(
         "--code", action="store_true", help="Show inline code snippets for each finding"
+    )
+    p_show.add_argument(
+        "--notes",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Path to investigation notes file to attach to a finding",
     )
 
 

@@ -8,13 +8,14 @@ import sys
 from pathlib import Path
 
 from desloppify.core.config import config_for_query, load_config
-from desloppify.file_discovery import safe_write_text
+from desloppify.core.file_paths import safe_write_text
+from desloppify.core.output_contract import OutputResult
 from desloppify.state import json_default
 
 logger = logging.getLogger(__name__)
 
 
-def write_query(data: dict, *, query_file: Path) -> None:
+def write_query(data: dict, *, query_file: Path) -> OutputResult:
     """Write structured query payloads with config context and graceful fallback."""
     if "config" not in data:
         try:
@@ -27,9 +28,20 @@ def write_query(data: dict, *, query_file: Path) -> None:
             query_file, json.dumps(data, indent=2, default=json_default) + "\n"
         )
         print("  → query.json updated", file=sys.stderr)
+        return OutputResult(
+            ok=True,
+            status="written",
+            message=f"query payload written to {query_file}",
+        )
     except OSError as exc:
         data["query_write_error"] = str(exc)
         print(f"  ⚠ Could not write query.json: {exc}", file=sys.stderr)
+        return OutputResult(
+            ok=False,
+            status="error",
+            message=str(exc),
+            error_kind="query_write_error",
+        )
 
 
 __all__ = ["write_query"]

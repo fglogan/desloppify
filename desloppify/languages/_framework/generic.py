@@ -8,7 +8,6 @@ gracefully degrades when the tool is not installed or times out.
 from __future__ import annotations
 
 import logging
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from typing import Any
 from desloppify.core.registry import DetectorMeta, register_detector
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
-from desloppify.file_discovery import find_source_files
+from desloppify.core.source_discovery import find_source_files
 from desloppify.languages._framework.base.types import (
     DetectorPhase,
     FixerConfig,
@@ -34,19 +33,12 @@ from desloppify.languages._framework.generic_parts.parsers import (
     parse_rubocop,
 )
 from desloppify.languages._framework.generic_parts.tool_factories import (
-    make_detect_fn_with_runner as _make_detect_fn_with_runner,
-)
-from desloppify.languages._framework.generic_parts.tool_factories import (
-    make_generic_fixer_with_runner as _make_generic_fixer_with_runner,
-)
-from desloppify.languages._framework.generic_parts.tool_factories import (
+    make_detect_fn,
+    make_generic_fixer,
     make_tool_phase,
 )
-from desloppify.languages._framework.generic_parts.tool_runner import (
-    resolve_command_argv as _resolve_command_argv_impl,
-)
-from desloppify.languages._framework.generic_parts.tool_runner import (
-    run_tool as _run_tool_impl,
+from desloppify.languages._framework.generic_parts.tool_spec import (
+    normalize_tool_specs,
 )
 from desloppify.languages._framework.treesitter import (
     PARSE_INIT_ERRORS as _TS_INIT_ERRORS,
@@ -65,31 +57,6 @@ SHARED_PHASE_LABELS = frozenset({
 
 # Parser and tool execution helpers are composed from smaller modules to keep
 # this file focused on plugin assembly.
-
-
-def _subprocess_run(*args: Any, **kwargs: Any):
-    """Call subprocess.run via this module for stable monkeypatch targets."""
-    return subprocess.run(*args, **kwargs)
-
-
-def _resolve_command_argv(cmd: str) -> list[str]:
-    """Compatibility wrapper around command argument resolution."""
-    return _resolve_command_argv_impl(cmd)
-
-
-def _run_tool(cmd: str, path: Path, parser: Callable[[str, Path], list[dict]]) -> list[dict]:
-    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
-    return _run_tool_impl(cmd, path, parser, run_subprocess=_subprocess_run)
-
-
-def _make_detect_fn(cmd: str, parser: Callable[[str, Path], list[dict]]) -> Callable:
-    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
-    return _make_detect_fn_with_runner(cmd, parser, run_subprocess=_subprocess_run)
-
-
-def _make_generic_fixer(tool: dict[str, Any]) -> FixerConfig:
-    """Compatibility wrapper that keeps subprocess monkeypatch points in this module."""
-    return _make_generic_fixer_with_runner(tool, run_subprocess=_subprocess_run)
 
 
 # ── Stubs for generic configs ─────────────────────────────
@@ -157,7 +124,7 @@ def capability_report(cfg: LangConfig) -> tuple[list[str], list[str]] | None:
 def generic_lang(
     name: str,
     extensions: list[str],
-    tools: list[dict],
+    tools: list[dict[str, Any]],
     *,
     exclude: list[str] | None = None,
     depth: str = "shallow",
@@ -187,11 +154,12 @@ def generic_lang(
         detector_phase_test_coverage,
         shared_subjective_duplicates_tail,
     )
+    tool_specs = normalize_tool_specs(tools, supported_formats=set(_PARSERS))
 
     # ── Register each tool as a detector + scoring policy ──
     fixers: dict[str, FixerConfig] = {}
-    for tool in tools:
-        has_fixer = bool(tool.get("fix_cmd"))
+    for tool in tool_specs:
+        has_fixer = tool.get("fix_cmd") is not None
         fixer_name = tool["id"].replace("_", "-") if has_fixer else ""
         register_detector(DetectorMeta(
             name=tool["id"],
@@ -208,7 +176,7 @@ def generic_lang(
             file_based=True,
         ))
         if has_fixer:
-            fixers[fixer_name] = _make_generic_fixer(tool)
+            fixers[fixer_name] = make_generic_fixer(tool)
 
     # ── Determine extractors based on tree-sitter availability ──
     file_finder = make_file_finder(extensions, exclude)
@@ -235,7 +203,7 @@ def generic_lang(
     # ── Build phases: tool-specific + structural + coupling + shared ──
     phases = [
         make_tool_phase(t["label"], t["cmd"], t["fmt"], t["id"], t["tier"])
-        for t in tools
+        for t in tool_specs
     ]
 
     # Add structural phase (with AST complexity if tree-sitter available).
@@ -284,7 +252,10 @@ def generic_lang(
         phases=phases,
         fixers=fixers,
         get_area=None,
-        detect_commands={t["id"]: _make_detect_fn(t["cmd"], _PARSERS[t["fmt"]]) for t in tools},
+        detect_commands={
+            t["id"]: make_detect_fn(t["cmd"], _PARSERS[t["fmt"]])
+            for t in tool_specs
+        },
         extract_functions=extract_fn,
         boundaries=[],
         typecheck_cmd="",
@@ -320,7 +291,7 @@ def generic_lang(
 def _make_structural_phase(treesitter_spec=None) -> DetectorPhase:
     """Create a structural analysis phase for generic plugins."""
     from desloppify.engine.detectors.base import ComplexitySignal
-    from desloppify.utils import log
+    from desloppify.core.output import log
 
     signals = [
         ComplexitySignal(
@@ -383,10 +354,7 @@ def _make_structural_phase(treesitter_spec=None) -> DetectorPhase:
 
         god_extractor_fn = None
         if god_rules and has_class_query:
-            def god_extractor_fn(p):
-                return _extract_ts_classes(
-                    p, treesitter_spec, lang.file_finder,
-                )
+            god_extractor_fn = _make_god_extractor(treesitter_spec, lang.file_finder)
 
         return run_structural_phase(
             path, lang,
@@ -398,6 +366,13 @@ def _make_structural_phase(treesitter_spec=None) -> DetectorPhase:
         )
 
     return DetectorPhase("Structural analysis", run)
+
+
+def _make_god_extractor(treesitter_spec, file_finder):
+    """Create a god-class extractor function bound to the given spec."""
+    def extractor(p):
+        return _extract_ts_classes(p, treesitter_spec, file_finder)
+    return extractor
 
 
 def _extract_ts_classes(path, treesitter_spec, file_finder):
@@ -436,7 +411,7 @@ def _extract_ts_classes(path, treesitter_spec, file_finder):
 
 def _make_coupling_phase(dep_graph_fn) -> DetectorPhase:
     """Create a coupling phase for generic plugins with a dep graph."""
-    from desloppify.utils import log
+    from desloppify.core.output import log
 
     def run(path, lang):
         from desloppify.languages._framework.base.shared_phases import (
@@ -452,10 +427,6 @@ def _make_coupling_phase(dep_graph_fn) -> DetectorPhase:
 
 __all__ = [
     "SHARED_PHASE_LABELS",
-    "_make_detect_fn",
-    "_make_generic_fixer",
-    "_resolve_command_argv",
-    "_run_tool",
     "capability_report",
     "generic_lang",
     "generic_zone_rules",

@@ -12,12 +12,12 @@ from desloppify import state as state_mod
 from desloppify.app.commands.helpers.lang import resolve_lang
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
-from desloppify.file_discovery import rel
+from desloppify.app.commands.helpers.state import state_path
+from desloppify.core.discovery_api import rel
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.languages._framework.base.types import FixResult
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
-from .io import _load_state, _save_state
 from .options import _COMMAND_POST_FIX
 
 if TYPE_CHECKING:
@@ -74,10 +74,11 @@ def _apply_and_report(
     lang: LangRun | None,
     skip_reasons: dict[str, int] | None = None,
 ) -> None:
-    state_file, state = _load_state(args)
+    state_file = state_path(args)
+    state = state_mod.load_state(state_file)
     prev = state_mod.score_snapshot(state)
     resolved_ids = _resolve_fixer_results(state, results, fixer.detector, fixer_name)
-    _save_state(state, state_file)
+    state_mod.save_state(state, state_file)
 
     new = state_mod.score_snapshot(state)
     print(f"\n  Auto-resolved {len(resolved_ids)} findings in state")
@@ -98,7 +99,7 @@ def _apply_and_report(
 
     if fixer.post_fix:
         fixer.post_fix(path, state, prev.overall or 0, False, lang=lang)
-        _save_state(state, state_file)
+        state_mod.save_state(state, state_file)
 
     if skip_reasons is None:
         skip_reasons = {}

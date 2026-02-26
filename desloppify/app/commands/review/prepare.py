@@ -7,9 +7,10 @@ from pathlib import Path
 
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.review import runtime as review_runtime_mod
+from desloppify.core._internal.coercions import coerce_positive_int
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 DEFAULT_REVIEW_BATCH_MAX_FILES = 80
 
@@ -19,18 +20,6 @@ def _redacted_review_config(config: dict | None) -> dict:
     if not isinstance(config, dict):
         return {}
     return {key: value for key, value in config.items() if key != "target_strict_score"}
-
-
-def _coerce_positive_int(value: object, *, default: int) -> int:
-    if value is None:
-        return default
-    if not isinstance(value, int | float | str):
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _coerce_review_batch_file_limit(config: dict | None) -> int | None:
@@ -56,11 +45,11 @@ def do_prepare(
     dims_str = getattr(args, "dimensions", None)
     dimensions = dims_str.split(",") if dims_str else None
     retrospective = bool(getattr(args, "retrospective", False))
-    retrospective_max_issues = _coerce_positive_int(
+    retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),
         default=30,
     )
-    retrospective_max_batch_items = _coerce_positive_int(
+    retrospective_max_batch_items = coerce_positive_int(
         getattr(args, "retrospective_max_batch_items", None),
         default=20,
     )

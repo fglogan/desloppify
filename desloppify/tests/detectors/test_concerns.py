@@ -1032,13 +1032,17 @@ class TestFileConcernsGenerator:
         assert concerns[0].file == "a.py"
 
     def test_clearcut_findings_excluded_from_judgment_count(self):
-        """Clear-cut detectors don't count toward the 2-detector threshold."""
+        """Clear-cut detectors don't count toward the 2-detector threshold,
+        but 1 judgment + 2 mechanical findings does trigger the lowered threshold."""
         state = _state_with_findings(
             _make_finding("naming", "a.py", "n1"),
             _make_finding("unused", "a.py", "u1"),
             _make_finding("logs", "a.py", "l1"),
         )
-        assert _file_concerns(state, {}) == []
+        # 1 judgment (naming) + 2 mechanical (unused, logs) = 3 total → triggers
+        concerns = _file_concerns(state, {})
+        assert len(concerns) == 1
+        assert concerns[0].file == "a.py"
 
     def test_dismissal_suppresses_file_concern(self):
         state = _state_with_findings(

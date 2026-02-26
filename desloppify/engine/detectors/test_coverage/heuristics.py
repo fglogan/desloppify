@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from desloppify.hook_registry import get_lang_hook
+
+from .io import read_coverage_file
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,10 +18,10 @@ def _load_lang_test_coverage_module(lang_name: str):
 
 def _has_testable_logic(filepath: str, lang_name: str) -> bool:
     """Check whether a file contains runtime logic worth testing."""
-    try:
-        content = Path(filepath).read_text()
-    except (OSError, UnicodeDecodeError):
-        return True
+    read_result = read_coverage_file(filepath, context="testable_logic")
+    if not read_result.ok:
+        return False
+    content = read_result.content
 
     mod = _load_lang_test_coverage_module(lang_name)
     has_logic = getattr(mod, "has_testable_logic", None)
@@ -31,10 +32,10 @@ def _has_testable_logic(filepath: str, lang_name: str) -> bool:
 
 def _is_runtime_entrypoint(filepath: str, lang_name: str) -> bool:
     """Best-effort runtime entrypoint detection for no-tests classification."""
-    try:
-        content = Path(filepath).read_text()
-    except (OSError, UnicodeDecodeError):
+    read_result = read_coverage_file(filepath, context="runtime_entrypoint")
+    if not read_result.ok:
         return False
+    content = read_result.content
 
     mod = _load_lang_test_coverage_module(lang_name)
     hook = getattr(mod, "is_runtime_entrypoint", None)

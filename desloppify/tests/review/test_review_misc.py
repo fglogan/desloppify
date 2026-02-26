@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 from desloppify.cli import create_parser
 from desloppify.core.registry import DETECTORS, display_order
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     disable_file_cache,
     enable_file_cache,
     is_file_cache_enabled,

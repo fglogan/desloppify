@@ -472,6 +472,24 @@ def do_run_batches(
             log_file=log_file,
         )
 
+    def _make_task(batch_index: int):
+        prompt_path = prompt_files[batch_index]
+        output_path = output_files[batch_index]
+        log_path = log_files[batch_index]
+
+        def _task() -> int:
+            try:
+                prompt = prompt_path.read_text()
+            except OSError as exc:
+                raise RuntimeError(
+                    f"unable to read prompt for batch #{batch_index + 1}: {prompt_path}"
+                ) from exc
+            return _run_batch(prompt=prompt, output_file=output_path, log_file=log_path)
+
+        return _task
+
+    tasks = {idx: _make_task(idx) for idx in selected_indexes}
+
     batch_positions = {batch_idx: pos + 1 for pos, batch_idx in enumerate(selected_indexes)}
     summary_created_at = datetime.now(UTC).isoformat(timespec="seconds")
     stall_warned_batches: set[int] = set()
@@ -617,15 +635,17 @@ def do_run_batches(
                 f"code={code} elapsed={state.get('elapsed_seconds', 0)}"
             )
 
+    def _record_execution_issue(batch_index: int, exc: Exception) -> None:
+        if batch_index < 0:
+            _append_run_log(f"execution-error heartbeat error={exc}")
+            return
+        _append_run_log(f"execution-error batch={batch_index + 1} error={exc}")
+
     execution_failures = execute_batches_fn(
-        selected_indexes=selected_indexes,
-        prompt_files=prompt_files,
-        output_files=output_files,
-        log_files=log_files,
+        tasks=tasks,
         run_parallel=run_parallel,
-        run_batch_fn=_run_batch,
-        safe_write_text_fn=safe_write_text_fn,
         progress_fn=_report_progress,
+        error_log_fn=_record_execution_issue,
         max_parallel_workers=max_parallel_batches,
         heartbeat_seconds=heartbeat_seconds,
     )

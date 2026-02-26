@@ -6,13 +6,19 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from desloppify.app.commands.helpers.runtime import CommandRuntime
 from desloppify.app.output._viz_cmd_context import load_cmd_context
 from desloppify.app.output.tree_text import _aggregate, _print_tree
 from desloppify.app.output.visualize import (
     D3_CDN_URL,
+    _collect_file_data,
     _build_tree,
+    cmd_viz,
+    generate_visualization,
 )
+from desloppify.core.output_contract import OutputResult
 
 # ===========================================================================
 # esc() — XSS sanitizer (lives in the JS template, test the Python-side
@@ -35,6 +41,64 @@ class TestJsonEscaping:
         tree_json = json.dumps({"name": "MyComponent.tsx"})
         escaped = tree_json.replace("</", r"<\/")
         assert "MyComponent.tsx" in escaped
+
+
+# ===========================================================================
+# _collect_file_data
+# ===========================================================================
+
+
+class TestCollectFileData:
+    def test_resolves_relative_paths_against_scan_root(self, tmp_path):
+        scan_root = tmp_path / "workspace"
+        target = scan_root / "src" / "file.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("line1\nline2\n")
+
+        lang = SimpleNamespace(
+            file_finder=lambda _path: ["src/file.py"],
+        )
+        rows = _collect_file_data(scan_root, lang=lang)
+        assert len(rows) == 1
+        assert rows[0]["loc"] == 2
+        assert rows[0]["abs_path"] == str(target.resolve())
+
+    def test_lang_resolution_failures_use_best_effort_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        scan_root = tmp_path / "workspace"
+        scan_root.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            "desloppify.languages.auto_detect_lang",
+            lambda _root: "python",
+        )
+        monkeypatch.setattr(
+            "desloppify.languages.get_lang",
+            lambda _name: (_ for _ in ()).throw(RuntimeError("plugin load failed")),
+        )
+        monkeypatch.setattr("desloppify.languages.available_langs", lambda: ["python"])
+
+        rows = _collect_file_data(scan_root, lang=None)
+        assert rows == []
+
+    def test_unexpected_lang_resolution_error_is_not_swallowed(
+        self, tmp_path, monkeypatch
+    ):
+        scan_root = tmp_path / "workspace"
+        scan_root.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            "desloppify.languages.auto_detect_lang",
+            lambda _root: "python",
+        )
+        monkeypatch.setattr(
+            "desloppify.languages.get_lang",
+            lambda _name: (_ for _ in ()).throw(LookupError("unexpected resolution bug")),
+        )
+
+        with pytest.raises(LookupError):
+            _collect_file_data(scan_root, lang=None)
 
 
 # ===========================================================================
@@ -593,3 +657,109 @@ class TestLoadCmdContext:
 
         assert state == {"ok": True}
         assert calls == [sentinel_path]
+
+
+class TestVizWriteBehavior:
+    def test_dep_graph_failure_is_best_effort(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._collect_file_data",
+            lambda _path, _lang=None: [],
+        )
+
+        class _Lang:
+            file_finder = None
+
+            @staticmethod
+            def build_dep_graph(_path):
+                raise RuntimeError("dep graph parse failed")
+
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._resolve_visualization_lang",
+            lambda _path, _lang=None: _Lang(),
+        )
+
+        html, output_result = generate_visualization(
+            tmp_path, state={}, output=None, lang=None
+        )
+        assert isinstance(html, str)
+        assert output_result.ok is True
+        assert output_result.status == "not_requested"
+
+    def test_generate_visualization_reports_write_failure(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._collect_file_data",
+            lambda _path, _lang=None: [],
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._build_dep_graph_for_path",
+            lambda _path, _lang=None: {},
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize.safe_write_text",
+            lambda _path, _text: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        _html, output_result = generate_visualization(
+            tmp_path,
+            state={},
+            output=tmp_path / "treemap.html",
+            lang=None,
+        )
+        assert output_result.ok is False
+        assert output_result.status == "error"
+
+    def test_generate_visualization_reports_template_read_failure(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._collect_file_data",
+            lambda _path, _lang=None: [],
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._build_dep_graph_for_path",
+            lambda _path, _lang=None: {},
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize._get_html_template",
+            lambda: (_ for _ in ()).throw(OSError("missing template")),
+        )
+
+        html, output_result = generate_visualization(
+            tmp_path,
+            state={},
+            output=None,
+            lang=None,
+        )
+        assert html == ""
+        assert output_result.ok is False
+        assert output_result.status == "error"
+        assert output_result.error_kind == "visualization_generation_error"
+
+    def test_cmd_viz_exits_when_write_fails(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize.load_cmd_context",
+            lambda _args: (tmp_path, None, {}),
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize.generate_visualization",
+            lambda *_args, **_kwargs: (
+                "<html></html>",
+                OutputResult(
+                    ok=False,
+                    status="error",
+                    message="disk full",
+                    error_kind="visualization_write_error",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "desloppify.app.output.visualize.colorize",
+            lambda text, _style: text,
+        )
+
+        args = SimpleNamespace(path=".", output=str(tmp_path / "treemap.html"))
+        with pytest.raises(SystemExit) as exc:
+            cmd_viz(args)
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "Treemap written to" not in out

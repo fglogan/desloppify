@@ -10,11 +10,13 @@ from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.file_discovery import find_source_files, find_ts_files
+from desloppify.core.discovery_api import find_source_files, find_ts_files
 from desloppify.languages.typescript.detectors._smell_detectors import (
     _detect_catch_return_default,
     _detect_dead_functions,
+    _detect_high_cyclomatic_complexity,
     _detect_monster_functions,
+    _detect_nested_closures,
     _detect_switch_no_default,
     _detect_window_globals,
 )
@@ -182,6 +184,18 @@ TS_SMELL_CHECKS = [
         "label": "Switch without default case",
         "pattern": None,  # multi-line brace-tracked
         "severity": "low",
+    },
+    {
+        "id": "nested_closure",
+        "label": "Deeply nested closures — extract to module level",
+        "pattern": None,
+        "severity": "medium",
+    },
+    {
+        "id": "high_cyclomatic_complexity",
+        "label": "High cyclomatic complexity (>15 branches)",
+        "pattern": None,
+        "severity": "medium",
     },
     {
         "id": "css_monolith",
@@ -604,6 +618,8 @@ def detect_smells(path: Path) -> tuple[list[dict], int]:
         _detect_window_globals(filepath, lines, line_state, smell_counts)
         _detect_catch_return_default(filepath, content, smell_counts)
         _detect_switch_no_default(filepath, content, smell_counts)
+        _detect_nested_closures(filepath, lines, smell_counts)
+        _detect_high_cyclomatic_complexity(filepath, lines, smell_counts)
 
     non_ts_files = _detect_non_ts_asset_smells(path, smell_counts)
 

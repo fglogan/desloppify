@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from desloppify.engine.planning.scan import PlanScanOptions, generate_findings
 from desloppify.languages._framework.base.types import DetectorPhase
 from desloppify.languages._framework.runtime import (
@@ -83,3 +85,27 @@ def test_generate_findings_keeps_runtime_fields_off_lang_config(tmp_path: Path) 
         assert attr not in config.__dict__, (
             f"LangConfig unexpectedly mutated with {attr}"
         )
+
+
+def test_lang_run_does_not_auto_forward_unknown_config_attrs() -> None:
+    """New LangConfig attrs must be explicitly delegated in LangRun."""
+    config = PythonConfig()
+    config.future_runtime_attr = "hidden-by-default"
+    run = make_lang_run(config)
+
+    with pytest.raises(AttributeError):
+        _ = run.future_runtime_attr
+
+
+def test_lang_run_props_threshold_defaults_to_lang_config() -> None:
+    config = PythonConfig()
+    config.props_threshold = 23
+    run = make_lang_run(config)
+    assert run.props_threshold == 23
+
+
+def test_lang_run_does_not_forward_runtime_option_aliases() -> None:
+    config = PythonConfig()
+    run = make_lang_run(config)
+    with pytest.raises(AttributeError):
+        _ = run.runtime_option_aliases

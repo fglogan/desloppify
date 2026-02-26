@@ -9,12 +9,12 @@ from pathlib import Path
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.planning.common import is_subjective_phase
 from desloppify.engine.policy.zones import ZONE_POLICIES, FileZoneMap
-from desloppify.file_discovery import rel
+from desloppify.core.file_paths import rel
 from desloppify.languages import auto_detect_lang, available_langs, get_lang
 from desloppify.languages._framework.base.types import DetectorPhase, LangConfig
 from desloppify.languages._framework.runtime import LangRun, make_lang_run
 from desloppify.state import Finding
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 @dataclass

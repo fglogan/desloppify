@@ -49,6 +49,15 @@ _TRANSIENT_RUNNER_PHRASES = (
 )
 _CODEX_BACKEND_PATH_HINT = "/backend-api/codex/responses"
 _CODEX_BACKEND_HOST_HINT = "chatgpt.com"
+_SANDBOX_PATH_WARNING_PHRASES = (
+    "could not update path: operation not permitted",
+    "operation not permitted (os error 1)",
+)
+_USAGE_LIMIT_PHRASES = (
+    "you've hit your usage limit",
+    "you have hit your usage limit",
+    "codex/settings/usage",
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +105,28 @@ class BatchResult:
         }
 
 
+@dataclass(frozen=True)
+class BatchProgressEvent:
+    """Typed progress event emitted by batch runner execution."""
+
+    batch_index: int
+    event: str
+    code: int | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+def _looks_like_progress_signature_mismatch(exc: TypeError) -> bool:
+    """Best-effort check for callback call-shape mismatch TypeErrors."""
+    text = str(exc).lower()
+    markers = (
+        "positional argument",
+        "unexpected keyword argument",
+        "required positional argument",
+        "takes",
+    )
+    return any(marker in text for marker in markers)
+
+
 @dataclass
 class _RunnerState:
     """Mutable state shared between threads during a batch run."""
@@ -129,6 +160,7 @@ class _ExecutionResult:
     stdout_text: str
     stderr_text: str
     timed_out: bool = False
+    stalled: bool = False
     recovered_from_stall: bool = False
     early_return: int | None = None
 
@@ -197,12 +229,12 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
         process.terminate()
         process.wait(timeout=3)
         return
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     try:
         process.kill()
         process.wait(timeout=3)
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return
 
 
@@ -217,13 +249,13 @@ def _drain_stream(stream, sink: list[str], state: _RunnerState) -> None:
             with state.lock:
                 sink.append(chunk)
                 state.last_stream_activity = time.monotonic()
-    except Exception as exc:  # pragma: no cover - defensive boundary
+    except (OSError, ValueError) as exc:  # pragma: no cover - defensive boundary
         with state.lock:
             sink.append(f"\n[stream read error: {exc}]\n")
     finally:
         try:
             stream.close()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 
@@ -276,14 +308,23 @@ def _check_stall(
     last_activity: float,
     threshold: int,
 ) -> tuple[bool, tuple[int, int] | None, float | None]:
-    """Check for output file stall. Returns (stalled, new_sig, new_stable_since)."""
+    """Check for runner stall. Returns (stalled, new_sig, new_stable_since)."""
     try:
         stat = output_file.stat()
         current_signature: tuple[int, int] | None = (int(stat.st_size), int(stat.st_mtime))
     except OSError:
         current_signature = None
     if current_signature is None:
-        return False, None, None
+        # If no output file ever appears, still recover from a silent hang once
+        # both output state and process streams have been idle long enough.
+        baseline = (
+            prev_stable if isinstance(prev_stable, int | float) else now
+        )
+        output_age = now - baseline
+        stream_idle = now - last_activity
+        if output_age >= threshold and stream_idle >= threshold:
+            return True, None, baseline
+        return False, None, baseline
     if current_signature != prev_sig:
         return False, current_signature, now
     if prev_stable is None:
@@ -319,7 +360,12 @@ def _run_via_popen(
         ctx.log_sections.append(f"{ctx.header}\n\nRUNNER ERROR:\n{exc}\n")
         ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
         return _ExecutionResult(code=127, stdout_text="", stderr_text="", early_return=127)
-    except Exception as exc:  # pragma: no cover - defensive boundary
+    except (
+        RuntimeError,
+        ValueError,
+        TypeError,
+        subprocess.SubprocessError,
+    ) as exc:  # pragma: no cover - defensive boundary
         state.stop_event.set()
         writer_thread.join(timeout=2)
         ctx.log_sections.append(f"{ctx.header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
@@ -340,6 +386,7 @@ def _run_via_popen(
     stderr_thread.start()
 
     timed_out = False
+    stalled = False
     recovered_from_stall = False
     output_signature: tuple[int, int] | None = None
     output_stable_since: float | None = None
@@ -365,10 +412,11 @@ def _run_via_popen(
                 stall_seconds,
             )
             if stalled:
+                stalled = True
                 with state.lock:
                     state.runner_note = (
                         f"stall recovery triggered after {stall_seconds}s "
-                        "with stable output file"
+                        "with stable output state"
                     )
                 recovered_from_stall = _output_file_has_json_payload(ctx.output_file)
                 _terminate_process(process)
@@ -388,6 +436,7 @@ def _run_via_popen(
         stdout_text="".join(state.stdout_chunks),
         stderr_text="".join(state.stderr_chunks),
         timed_out=timed_out,
+        stalled=stalled,
         recovered_from_stall=recovered_from_stall,
     )
 
@@ -422,7 +471,7 @@ def _run_via_subprocess(
         ctx.log_sections.append(f"{ctx.header}\n\nRUNNER ERROR:\n{exc}\n")
         ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
         return _ExecutionResult(code=127, stdout_text="", stderr_text="", early_return=127)
-    except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive boundary
+    except (RuntimeError, ValueError, TypeError) as exc:  # pragma: no cover - defensive boundary
         state.stop_event.set()
         writer_thread.join(timeout=2)
         ctx.log_sections.append(f"{ctx.header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
@@ -513,7 +562,7 @@ def run_codex_batch(
             deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
             return 124
 
-        if result.recovered_from_stall:
+        if result.stalled:
             log_sections.append(
                 f"{header}\n\nSTALL RECOVERY after {stall_seconds}s "
                 "of stable output and no stream activity.\n\n"
@@ -534,6 +583,13 @@ def run_codex_batch(
         )
 
         if result.code == 0:
+            if not _output_file_has_json_payload(output_file):
+                log_sections.append(
+                    "Runner exited 0 but output file is missing or invalid; "
+                    "treating as execution failure."
+                )
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 1
             deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
             return 0
 
@@ -551,9 +607,12 @@ def run_codex_batch(
         try:
             if delay_seconds > 0:
                 deps.sleep_fn(delay_seconds)
-        except Exception:  # pragma: no cover - defensive boundary
-            # Retry should proceed even if delay hook fails.
-            pass
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            log_sections.append(
+                f"Retry delay hook failed: {exc} — aborting remaining retries."
+            )
+            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+            return 1
 
     deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
     return 1
@@ -753,174 +812,289 @@ def prepare_run_artifacts(
     return run_dir, logs_dir, prompt_files, output_files, log_files
 
 
+def _emit_progress(
+    progress_fn,
+    batch_index: int,
+    event: str,
+    code: int | None = None,
+    *,
+    details: dict[str, Any] | None = None,
+) -> Exception | None:
+    """Forward a progress event and return callback exceptions to caller."""
+    if not callable(progress_fn):
+        return None
+    payload = dict(details or {})
+    progress_event = BatchProgressEvent(
+        batch_index=batch_index,
+        event=event,
+        code=code,
+        details=payload,
+    )
+    try:
+        progress_fn(progress_event)
+        return None
+    except TypeError as exc:
+        if not _looks_like_progress_signature_mismatch(exc):
+            return RuntimeError(
+                f"progress callback failed for event={event} batch={batch_index}: {exc}"
+            )
+        try:
+            progress_fn(batch_index, event, code, **payload)
+            return None
+        except Exception as legacy_exc:
+            return RuntimeError(
+                f"progress callback failed for event={event} batch={batch_index}: {legacy_exc}"
+            )
+    except Exception as exc:
+        return RuntimeError(
+            f"progress callback failed for event={event} batch={batch_index}: {exc}"
+        )
+
+
+def _record_execution_error(
+    *,
+    error_log_fn,
+    failures: set[int],
+    idx: int,
+    exc: Exception,
+) -> None:
+    """Record an execution/progress error through shared failure plumbing."""
+    if callable(error_log_fn):
+        try:
+            error_log_fn(idx, exc)
+        except Exception:
+            pass
+    failures.add(idx)
+
+
 def execute_batches(
     *,
-    selected_indexes: list[int],
-    prompt_files: dict[int, Path],
-    output_files: dict[int, Path],
-    log_files: dict[int, Path],
+    tasks: dict[int, object],
     run_parallel: bool,
-    run_batch_fn,
-    safe_write_text_fn,
     progress_fn=None,
+    error_log_fn=None,
     max_parallel_workers: int | None = None,
     heartbeat_seconds: float | None = 15.0,
     clock_fn=time.monotonic,
 ) -> list[int]:
-    """Execute batch prompts and return failed index list."""
+    """Run indexed tasks and return failed index list.
 
-    def _emit_progress(
-        batch_index: int,
-        event: str,
-        code: int | None = None,
-        *,
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        if not callable(progress_fn):
-            return
-        payload = details or {}
-        try:
-            progress_fn(batch_index, event, code, **payload)
-        except TypeError:
-            try:
-                progress_fn(batch_index, event, code)
-            except Exception:
-                return
-        except Exception:
-            return
-
-    failures: list[int] = []
+    Each value in *tasks* is a zero-arg callable returning an int exit code.
+    All domain knowledge (files, prompts, etc.) is pre-bound by the caller.
+    """
+    indexes = sorted(tasks)
     if run_parallel:
-        requested_workers = (
-            int(max_parallel_workers)
-            if isinstance(max_parallel_workers, int) and max_parallel_workers > 0
-            else 8
+        return _execute_parallel(
+            tasks=tasks,
+            indexes=indexes,
+            progress_fn=progress_fn,
+            error_log_fn=error_log_fn,
+            max_parallel_workers=max_parallel_workers,
+            heartbeat_seconds=heartbeat_seconds,
+            clock_fn=clock_fn,
         )
-        max_workers = max(1, min(len(selected_indexes), requested_workers))
-        heartbeat = (
-            float(heartbeat_seconds)
-            if isinstance(heartbeat_seconds, int | float) and heartbeat_seconds > 0
-            else None
+    return _execute_serial(
+        tasks=tasks,
+        indexes=indexes,
+        progress_fn=progress_fn,
+        error_log_fn=error_log_fn,
+        clock_fn=clock_fn,
+    )
+
+
+def _execute_serial(*, tasks, indexes, progress_fn, error_log_fn, clock_fn) -> list[int]:
+    """Run tasks one at a time — no threads, no closures."""
+    failures: set[int] = set()
+    for idx in indexes:
+        t0 = float(clock_fn())
+        start_error = _emit_progress(
+            progress_fn, idx, "start", None, details={"max_workers": 1}
         )
-        started_at: dict[int, float] = {}
-        started_at_lock = threading.Lock()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {}
-            for idx in selected_indexes:
-                _emit_progress(
-                    idx,
-                    "queued",
-                    None,
-                    details={"max_workers": max_workers},
-                )
-
-                def _run_one(batch_index: int) -> int:
-                    with started_at_lock:
-                        started_at[batch_index] = float(clock_fn())
-                    _emit_progress(
-                        batch_index,
-                        "start",
-                        None,
-                        details={"max_workers": max_workers},
-                    )
-                    return run_batch_fn(
-                        prompt=prompt_files[batch_index].read_text(),
-                        output_file=output_files[batch_index],
-                        log_file=log_files[batch_index],
-                    )
-
-                future = executor.submit(_run_one, idx)
-                futures[future] = idx
-
-            pending = set(futures.keys())
-
-            def _handle_completed_future(future) -> None:
-                idx = futures[future]
-                with started_at_lock:
-                    started_at_value = started_at.get(idx, float(clock_fn()))
-                try:
-                    code = future.result()
-                except Exception as exc:  # future.result() can raise any exception from the batch runner
-                    safe_write_text_fn(log_files[idx], f"Runner exception:\n{exc}\n")
-                    failures.append(idx)
-                    _emit_progress(
-                        idx,
-                        "done",
-                        1,
-                        details={"elapsed_seconds": int(max(0.0, clock_fn() - started_at_value))},
-                    )
-                    return
-                if code != 0:
-                    failures.append(idx)
-                _emit_progress(
-                    idx,
-                    "done",
-                    code,
-                    details={"elapsed_seconds": int(max(0.0, clock_fn() - started_at_value))},
-                )
-
-            if heartbeat is None:
-                for future in as_completed(pending):
-                    pending.discard(future)
-                    _handle_completed_future(future)
-                return failures
-
-            while pending:
-                try:
-                    future = next(as_completed(pending, timeout=heartbeat))
-                except FuturesTimeoutError:
-                    with started_at_lock:
-                        active_indexes = sorted(
-                            futures[fut] for fut in pending if futures[fut] in started_at
-                        )
-                    active_index_set = set(active_indexes)
-                    queued_indexes = sorted(
-                        futures[fut] for fut in pending if futures[fut] not in active_index_set
-                    )
-                    elapsed_seconds = {
-                        idx: int(
-                            max(
-                                0.0,
-                                clock_fn() - started_at.get(idx, clock_fn()),
-                            )
-                        )
-                        for idx in active_indexes
-                    }
-                    _emit_progress(
-                        -1,
-                        "heartbeat",
-                        None,
-                        details={
-                            "active_batches": active_indexes,
-                            "queued_batches": queued_indexes,
-                            "elapsed_seconds": elapsed_seconds,
-                            "active_count": len(active_indexes),
-                            "queued_count": len(queued_indexes),
-                            "total_count": len(selected_indexes),
-                        },
-                    )
-                    continue
-                pending.discard(future)
-                _handle_completed_future(future)
-        return failures
-
-    for idx in selected_indexes:
-        started_at = float(clock_fn())
-        _emit_progress(idx, "start", None, details={"max_workers": 1})
-        code = run_batch_fn(
-            prompt=prompt_files[idx].read_text(),
-            output_file=output_files[idx],
-            log_file=log_files[idx],
-        )
+        if start_error is not None:
+            _record_execution_error(
+                error_log_fn=error_log_fn,
+                failures=failures,
+                idx=idx,
+                exc=start_error,
+            )
+        try:
+            code = tasks[idx]()
+        except Exception as exc:
+            _record_execution_error(
+                error_log_fn=error_log_fn,
+                failures=failures,
+                idx=idx,
+                exc=exc,
+            )
+            code = 1
         if code != 0:
-            failures.append(idx)
-        _emit_progress(
-            idx,
-            "done",
-            code,
-            details={"elapsed_seconds": int(max(0.0, clock_fn() - started_at))},
+            failures.add(idx)
+        done_error = _emit_progress(
+            progress_fn, idx, "done", code,
+            details={"elapsed_seconds": int(max(0.0, clock_fn() - t0))},
         )
-    return failures
+        if done_error is not None:
+            _record_execution_error(
+                error_log_fn=error_log_fn,
+                failures=failures,
+                idx=idx,
+                exc=done_error,
+            )
+    return sorted(failures)
+
+
+def _execute_parallel(
+    *, tasks, indexes, progress_fn, error_log_fn,
+    max_parallel_workers, heartbeat_seconds, clock_fn,
+) -> list[int]:
+    """Run tasks in a thread pool with optional heartbeat monitoring.
+
+    Two closures (_run_one, _on_complete) share mutable executor state
+    (started_at, failures) under a lock — the natural pattern for thread-pool
+    work.
+    """
+    requested = (
+        int(max_parallel_workers)
+        if isinstance(max_parallel_workers, int) and max_parallel_workers > 0
+        else 8
+    )
+    max_workers = max(1, min(len(indexes), requested))
+    heartbeat = (
+        float(heartbeat_seconds)
+        if isinstance(heartbeat_seconds, int | float) and heartbeat_seconds > 0
+        else None
+    )
+
+    failures: set[int] = set()
+    progress_failures: set[int] = set()
+    started_at: dict[int, float] = {}
+    lock = threading.Lock()
+
+    def _on_progress_error(idx: int, err: Exception) -> None:
+        with lock:
+            progress_failures.add(idx)
+        if callable(error_log_fn):
+            try:
+                error_log_fn(idx, err)
+            except Exception:
+                pass
+
+    def _run_one(idx: int) -> int:
+        with lock:
+            started_at[idx] = float(clock_fn())
+        progress_error = _emit_progress(
+            progress_fn, idx, "start", None,
+            details={"max_workers": max_workers},
+        )
+        if progress_error is not None:
+            _on_progress_error(idx, progress_error)
+        return tasks[idx]()
+
+    def _on_complete(future) -> None:
+        idx = futures[future]
+        with lock:
+            t0 = started_at.get(idx, float(clock_fn()))
+        elapsed = int(max(0.0, clock_fn() - t0))
+        try:
+            code = future.result()
+        except Exception as exc:
+            _record_execution_error(
+                error_log_fn=error_log_fn,
+                failures=failures,
+                idx=idx,
+                exc=exc,
+            )
+            done_error = _emit_progress(
+                progress_fn, idx, "done", 1, details={"elapsed_seconds": elapsed}
+            )
+            if done_error is not None:
+                _on_progress_error(idx, done_error)
+            return
+        done_error = _emit_progress(
+            progress_fn, idx, "done", code, details={"elapsed_seconds": elapsed}
+        )
+        if done_error is not None:
+            _on_progress_error(idx, done_error)
+        with lock:
+            had_progress_failure = idx in progress_failures
+        if code != 0 or had_progress_failure:
+            failures.add(idx)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures: dict = {}
+        for idx in indexes:
+            queue_error = _emit_progress(
+                progress_fn, idx, "queued", None,
+                details={"max_workers": max_workers},
+            )
+            if queue_error is not None:
+                _on_progress_error(idx, queue_error)
+                failures.add(idx)
+            futures[executor.submit(_run_one, idx)] = idx
+
+        pending = set(futures.keys())
+
+        if heartbeat is None:
+            for future in as_completed(pending):
+                _on_complete(future)
+            return failures
+
+        while pending:
+            try:
+                future = next(as_completed(pending, timeout=heartbeat))
+            except FuturesTimeoutError:
+                _heartbeat(
+                    pending,
+                    futures,
+                    started_at,
+                    lock,
+                    indexes,
+                    progress_fn,
+                    clock_fn,
+                    error_log_fn=error_log_fn,
+                )
+                continue
+            pending.discard(future)
+            _on_complete(future)
+    return sorted(failures)
+
+
+def _heartbeat(
+    pending,
+    futures,
+    started_at,
+    lock,
+    indexes,
+    progress_fn,
+    clock_fn,
+    *,
+    error_log_fn=None,
+):
+    """Build and emit a heartbeat with active/queued batch status."""
+    with lock:
+        active = sorted(futures[f] for f in pending if futures[f] in started_at)
+    active_set = set(active)
+    queued = sorted(futures[f] for f in pending if futures[f] not in active_set)
+    elapsed = {
+        idx: int(max(0.0, clock_fn() - started_at.get(idx, clock_fn())))
+        for idx in active
+    }
+    heartbeat_error = _emit_progress(
+        progress_fn, -1, "heartbeat", None,
+        details={
+            "active_batches": active,
+            "queued_batches": queued,
+            "elapsed_seconds": elapsed,
+            "active_count": len(active),
+            "queued_count": len(queued),
+            "total_count": len(indexes),
+        },
+    )
+    if heartbeat_error is not None and callable(error_log_fn):
+        try:
+            error_log_fn(-1, heartbeat_error)
+        except Exception:
+            pass
 
 
 def _extract_payload_from_log(
@@ -1024,6 +1198,8 @@ def _classify_runner_failure(log_text: str) -> str:
     text = log_text.lower()
     if "timeout after" in text:
         return "timeout"
+    if any(phrase in text for phrase in _USAGE_LIMIT_PHRASES):
+        return "usage_limit"
     if any(phrase in text for phrase in _TRANSIENT_RUNNER_PHRASES):
         return "stream_disconnect"
     if (
@@ -1062,6 +1238,12 @@ def _has_codex_backend_connectivity_issue(log_text: str) -> bool:
         or "name or service not known" in text
         or "temporary failure in name resolution" in text
     )
+
+
+def _looks_like_restricted_sandbox(log_text: str) -> bool:
+    """Return True when logs resemble a constrained agent sandbox execution."""
+    text = log_text.lower()
+    return any(phrase in text for phrase in _SANDBOX_PATH_WARNING_PHRASES)
 
 
 def _summarize_failure_categories(*, failures: list[int], logs_dir: Path) -> dict[str, int]:
@@ -1115,6 +1297,13 @@ def _runner_failure_hints(*, failures: list[int], logs_dir: Path) -> list[str]:
             hint = "codex runner appears unauthenticated. Run `codex login` and retry."
             if hint not in hints:
                 hints.append(hint)
+        if any(phrase in text for phrase in _USAGE_LIMIT_PHRASES):
+            hint = (
+                "Codex usage quota is exhausted for this account. "
+                "Wait for reset or add credits, then rerun failed batches."
+            )
+            if hint not in hints:
+                hints.append(hint)
         if any(phrase in text for phrase in _TRANSIENT_RUNNER_PHRASES):
             hint = (
                 "Transient Codex connectivity issue detected. Retry with "
@@ -1131,6 +1320,15 @@ def _runner_failure_hints(*, failures: list[int], logs_dir: Path) -> list[str]:
             )
             if hint not in hints:
                 hints.append(hint)
+            if _looks_like_restricted_sandbox(text):
+                hint = (
+                    "Logs suggest the run executed in a restricted sandbox "
+                    "(`could not update PATH: Operation not permitted`). "
+                    "Re-run `desloppify review --run-batches ...` from a host shell with "
+                    "outbound network access, or allow unsandboxed execution in your agent."
+                )
+                if hint not in hints:
+                    hints.append(hint)
         if "failed to load skill" in text and "missing yaml frontmatter" in text:
             hint = (
                 "Codex loaded an invalid local skill file. Fix/remove malformed "
@@ -1139,6 +1337,19 @@ def _runner_failure_hints(*, failures: list[int], logs_dir: Path) -> list[str]:
             if hint not in hints:
                 hints.append(hint)
     return hints
+
+
+def _any_restricted_sandbox_failures(*, failures: list[int], logs_dir: Path) -> bool:
+    """Return True when any failed batch log shows restricted sandbox indicators."""
+    for idx in sorted(set(failures)):
+        log_file = logs_dir / f"batch-{idx + 1}.log"
+        try:
+            text = log_file.read_text().lower()
+        except OSError:
+            continue
+        if _looks_like_restricted_sandbox(text):
+            return True
+    return False
 
 
 def _print_failures_report(
@@ -1157,6 +1368,7 @@ def _print_failures_report(
         labels = {
             "timeout": "timeout",
             "stream_disconnect": "stream disconnect",
+            "usage_limit": "usage limit",
             "runner_missing": "runner missing",
             "runner_auth": "runner auth",
             "runner_exception": "runner exception",
@@ -1193,6 +1405,16 @@ def _print_failures_report(
                 ),
                 file=sys.stderr,
             )
+            if _any_restricted_sandbox_failures(failures=failures, logs_dir=logs_dir):
+                print(
+                    colorize_fn(
+                        "  Sandbox hint: logs indicate restricted sandbox execution. "
+                        "Re-run from a host shell with outbound network access, or "
+                        "allow unsandboxed execution in your agent.",
+                        "yellow",
+                    ),
+                    file=sys.stderr,
+                )
     print(colorize_fn("  Retry command:", "yellow"), file=sys.stderr)
     print(
         colorize_fn(

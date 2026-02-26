@@ -1,7 +1,7 @@
 """C/C++ language plugin — cppcheck."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import CPP_SPEC
+from desloppify.languages._framework.treesitter import CPP_SPEC
 
 generic_lang(
     name="cxx",

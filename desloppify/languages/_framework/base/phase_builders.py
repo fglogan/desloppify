@@ -13,32 +13,33 @@ from .shared_phases import (
 from .types import DetectorPhase
 
 
-def detector_phase_test_coverage() -> DetectorPhase:
-    return DetectorPhase("Test coverage", phase_test_coverage)
+def _phase_factory(label: str, run_fn, *, slow: bool = False):
+    """Return a phase factory with explicit label/run/slow semantics."""
+    def factory() -> DetectorPhase:
+        return DetectorPhase(label, run_fn, slow=slow)
+    return factory
 
 
-def detector_phase_security() -> DetectorPhase:
-    return DetectorPhase("Security", phase_security)
-
-
-def detector_phase_signature() -> DetectorPhase:
-    return DetectorPhase("Signature analysis", phase_signature)
-
-
-def detector_phase_subjective_review() -> DetectorPhase:
-    return DetectorPhase("Subjective review", phase_subjective_review)
-
-
-def detector_phase_duplicates() -> DetectorPhase:
-    return DetectorPhase("Duplicates", phase_dupes, slow=True)
-
-
-def detector_phase_boilerplate_duplication() -> DetectorPhase:
-    return DetectorPhase(
+SHARED_PHASE_FACTORIES = {
+    "test_coverage": _phase_factory("Test coverage", phase_test_coverage),
+    "security": _phase_factory("Security", phase_security),
+    "signature": _phase_factory("Signature analysis", phase_signature),
+    "subjective_review": _phase_factory("Subjective review", phase_subjective_review),
+    "duplicates": _phase_factory("Duplicates", phase_dupes, slow=True),
+    "boilerplate_duplication": _phase_factory(
         "Boilerplate duplication",
         phase_boilerplate_duplication,
         slow=True,
-    )
+    ),
+}
+
+
+detector_phase_test_coverage = SHARED_PHASE_FACTORIES["test_coverage"]
+detector_phase_security = SHARED_PHASE_FACTORIES["security"]
+detector_phase_signature = SHARED_PHASE_FACTORIES["signature"]
+detector_phase_subjective_review = SHARED_PHASE_FACTORIES["subjective_review"]
+detector_phase_duplicates = SHARED_PHASE_FACTORIES["duplicates"]
+detector_phase_boilerplate_duplication = SHARED_PHASE_FACTORIES["boilerplate_duplication"]
 
 
 def shared_subjective_duplicates_tail(
@@ -61,5 +62,6 @@ __all__ = [
     "detector_phase_signature",
     "detector_phase_subjective_review",
     "detector_phase_test_coverage",
+    "SHARED_PHASE_FACTORIES",
     "shared_subjective_duplicates_tail",
 ]

@@ -179,8 +179,8 @@ class TestPrintScoreMovement:
 
 class TestPrintNextCommand:
     @patch("desloppify.app.commands.resolve.render.colorize", side_effect=lambda t, _c: t)
-    def test_no_review_remaining(self, _mock_colorize, capsys):
-        state = {"findings": {"f1": {"status": "open", "detector": "smells"}}}
+    def test_no_open_remaining(self, _mock_colorize, capsys):
+        state = {"findings": {"f1": {"status": "fixed", "detector": "smells"}}}
         result = _print_next_command(state)
         out = capsys.readouterr().out
         assert "desloppify scan" in out
@@ -196,8 +196,8 @@ class TestPrintNextCommand:
         }
         result = _print_next_command(state)
         out = capsys.readouterr().out
-        assert "2 review findings remaining" in out
-        assert result == "desloppify issues"
+        assert "2 findings remaining" in out
+        assert result == "desloppify next"
 
     @patch("desloppify.app.commands.resolve.render.colorize", side_effect=lambda t, _c: t)
     def test_single_review_remaining_no_plural(self, _mock_colorize, capsys):
@@ -206,7 +206,7 @@ class TestPrintNextCommand:
         }
         _print_next_command(state)
         out = capsys.readouterr().out
-        assert "1 review finding remaining" in out
+        assert "1 finding remaining" in out
 
 
 class TestPrintSubjectiveResetHint:
@@ -844,7 +844,10 @@ class TestUpdateInstalledSkill:
             "CLAUDE.md": "overlay",
         }[f]
 
-        with patch("desloppify.app.commands.update_skill.PROJECT_ROOT", tmp_path):
+        with patch(
+            "desloppify.app.commands.update_skill.get_project_root",
+            return_value=tmp_path,
+        ):
             result = update_installed_skill("claude")
 
         assert result is True
@@ -867,7 +870,10 @@ class TestUpdateInstalledSkill:
         agents_file = tmp_path / "AGENTS.md"
         agents_file.write_text("# My Project\nExisting content.\n")
 
-        with patch("desloppify.app.commands.update_skill.PROJECT_ROOT", tmp_path):
+        with patch(
+            "desloppify.app.commands.update_skill.get_project_root",
+            return_value=tmp_path,
+        ):
             result = update_installed_skill("codex")
 
         assert result is True

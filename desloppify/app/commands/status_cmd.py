@@ -28,12 +28,14 @@ from desloppify.app.commands.status_parts.render import (
     show_tier_progress_table,
     write_status_query,
 )
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     scorecard_dimensions_payload,
 )
+from desloppify.core.output_api import colorize
+from desloppify.core.skill_docs import check_skill_version
+from desloppify.core.tooling import check_tool_staleness
 from desloppify.intelligence.narrative import NarrativeContext, compute_narrative
 from desloppify.scoring import compute_health_breakdown
-from desloppify.utils import check_skill_version, check_tool_staleness, colorize
 
 
 def cmd_status(args: argparse.Namespace) -> None:

@@ -35,9 +35,9 @@
   Next command to improve subjective scores: `desloppify review --prepare --dimensions ai_generated_debt,abstraction_fitness,contract_coherence`
 
   AGENT PLAN (use `desloppify next --count 20` to inspect more items):
-  Agent focus: `desloppify fix review` — 1 files need design review — run design review with dimension templates
+  Agent focus: `desloppify review --prepare` — 1 files need design review — run holistic review to refresh subjective scores
   Biggest things impacting score:
-    - subjective_review: 1 open — `desloppify fix review`
+    - subjective_review: 1 open — `desloppify review --prepare`
 
   → First scan complete. 1 open findings across 3 dimensions.
 

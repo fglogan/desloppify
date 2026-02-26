@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from desloppify import scoring as scoring_mod
-from desloppify import state as state_mod
 from desloppify.app.commands.helpers.score import coerce_target_score
 from desloppify.intelligence import integrity as subjective_integrity_mod
 
@@ -76,27 +75,24 @@ def coerce_str_keys(value: object) -> list[str]:
     return [key for key in value if isinstance(key, str) and key]
 
 
-def subtract_reason_counts(
-    total_counts: dict[str, int],
-    scoped_counts: dict[str, int],
-) -> dict[str, int]:
-    """Subtract scoped reason counters from global counters."""
-    remainder: dict[str, int] = {}
-    for reason, total in total_counts.items():
-        delta = int(total) - int(scoped_counts.get(reason, 0))
-        if delta > 0:
-            remainder[reason] = delta
-    return remainder
-
-
 def subjective_rerun_command(
     items: list[dict],
     *,
     max_items: int = 5,
     refresh: bool = True,
+    has_prior_review: bool | None = None,
 ) -> str:
     _ = refresh
     dim_keys = flatten_cli_keys(items, max_items=max_items)
+
+    # If no evidence of prior runner usage, suggest --prepare first
+    if has_prior_review is False:
+        command_parts = ["desloppify", "review", "--prepare"]
+        if dim_keys:
+            command_parts.extend(["--dimensions", dim_keys])
+        cmd = f"`{' '.join(command_parts)}`"
+        return f"{cmd} (set up `--runner codex` for automated reviews)"
+
     command_parts = [
         "desloppify",
         "review",
@@ -279,13 +275,6 @@ def subjective_integrity_notice_lines(
 # ---------------------------------------------------------------------------
 
 
-def _subjective_reset_command(state: dict) -> str:
-    scan_path = state.get("scan_path")
-    if not isinstance(scan_path, str) or not scan_path.strip():
-        scan_path = "."
-    return f"`desloppify scan --path {scan_path} --reset-subjective`"
-
-
 def build_subjective_followup(
     state: dict,
     subjective_entries: list[dict],
@@ -338,7 +327,6 @@ def show_subjective_paths(
     colorize_fn,
     scorecard_subjective_entries_fn,
     threshold: float = 95.0,
-    target_strict_score: float | None = None,
 ) -> None:
     threshold_value = coerce_target_score(threshold, fallback=95.0)
     subjective_entries = scorecard_subjective_entries_fn(state, dim_scores=dim_scores)
@@ -361,171 +349,38 @@ def show_subjective_paths(
     all_findings = state.get("findings", {})
     if not isinstance(all_findings, dict):
         all_findings = {}
-    scoped = state_mod.path_scoped_findings(all_findings, state.get("scan_path"))
-    coverage_in_scope, reason_counts_in_scope, holistic_reason_counts_in_scope = (
-        subjective_integrity_mod.subjective_review_open_breakdown(scoped)
-    )
-    coverage_global, reason_counts_global, holistic_reason_counts_global = (
+    coverage_global, _reason_counts, _holistic_reasons = (
         subjective_integrity_mod.subjective_review_open_breakdown(all_findings)
     )
-    if not all_findings and coverage_global == 0 and coverage_in_scope > 0:
-        # Test/mocked states may supply only scoped findings.
-        coverage_global = coverage_in_scope
-        reason_counts_global = dict(reason_counts_in_scope)
-        holistic_reason_counts_global = dict(holistic_reason_counts_in_scope)
-    coverage_out_of_scope = max(coverage_global - coverage_in_scope, 0)
-    reason_counts_out_of_scope = subtract_reason_counts(
-        reason_counts_global,
-        reason_counts_in_scope,
-    )
-    holistic_in_scope = sum(holistic_reason_counts_in_scope.values())
-    holistic_global = sum(holistic_reason_counts_global.values())
-    holistic_out_of_scope = max(holistic_global - holistic_in_scope, 0)
+
+    stale_count = sum(1 for e in subjective_entries if e.get("stale"))
     if (
         not unassessed
         and not low_assessed
+        and stale_count == 0
         and coverage_global <= 0
         and not followup.integrity_notice
     ):
         return
 
-    print(colorize_fn("  Subjective path:", "cyan"))
-    print(
-        colorize_fn(
-            f"    Reset baseline from zero: {_subjective_reset_command(state)}",
-            "dim",
-        )
-    )
-    if target_strict_score is not None:
-        strict_score = state_mod.get_strict_score(state)
-        if strict_score is not None:
-            gap = round(float(target_strict_score) - float(strict_score), 1)
-            if gap > 0:
-                print(
-                    colorize_fn(
-                        f"    North star: strict {strict_score:.1f}/100 → target {target_strict_score:.1f} (+{gap:.1f} needed)",
-                        "yellow",
-                    )
-                )
-            else:
-                print(
-                    colorize_fn(
-                        f"    North star: strict {strict_score:.1f}/100 meets target {target_strict_score:.1f}",
-                        "green",
-                    )
-                )
-
-    if unassessed or holistic_global > 0:
-        integrity_bits: list[str] = []
-        if unassessed:
-            integrity_bits.append("unassessed subjective dimensions")
-        if holistic_global > 0:
-            integrity_bits.append("holistic review stale/missing")
-        integrity_label = " + ".join(integrity_bits)
-        print(colorize_fn(f"    High-priority integrity gap: {integrity_label}", "yellow"))
-        print(
-            colorize_fn(
-                "    Refresh baseline (Codex local): `desloppify review --run-batches --runner codex --parallel --scan-after-import`",
-                "dim",
-            )
-        )
-        print(
-            colorize_fn(
-                "    Claude cloud durable path: `desloppify review --external-start --external-runner claude`, then run the printed `--external-submit ... --scan-after-import` command",
-                "dim",
-            )
-        )
-        print(
-            colorize_fn(
-                "    Findings-only fallback: `desloppify review --prepare`, then `desloppify review --import findings.json && desloppify scan`",
-                "dim",
-            )
-        )
-
-    if low_assessed:
-        print(
-            colorize_fn(
-                f"    Quality below target (<{followup.threshold_label}%): {followup.rendered}",
-                "yellow",
-            )
-        )
-        print(
-            colorize_fn(
-                f"    Next command to improve subjective scores: {followup.command}",
-                "dim",
-            )
-        )
-
+    # Integrity lines are always preserved (anti-gaming safeguard).
     for style, message in followup.integrity_lines:
         print(colorize_fn(f"    {message}", style))
 
+    # Collapsed summary replacing verbose Subjective path section.
+    parts: list[str] = []
+    if low_assessed:
+        parts.append(f"{len(low_assessed)} below target ({followup.threshold_label}%)")
     if unassessed:
-        rendered = ", ".join(entry["name"] for entry in unassessed[:3])
-        if len(unassessed) > 3:
-            rendered = f"{rendered}, +{len(unassessed) - 3} more"
-        print(colorize_fn(f"    Unassessed (0% placeholder): {rendered}", "yellow"))
-        print(
-            colorize_fn(
-                "    Start with holistic refresh, then tune specific dimensions.", "dim"
-            )
-        )
-
+        parts.append(f"{len(unassessed)} unassessed")
+    if stale_count:
+        parts.append(f"{stale_count} stale")
     if coverage_global > 0:
-        detail = []
-        if reason_counts_in_scope.get("changed", 0) > 0:
-            detail.append(f"{reason_counts_in_scope['changed']} changed")
-        if reason_counts_in_scope.get("unreviewed", 0) > 0:
-            detail.append(f"{reason_counts_in_scope['unreviewed']} unreviewed")
-        reason_text = ", ".join(detail) if detail else "stale/unreviewed"
-        suffix = "file" if coverage_in_scope == 1 else "files"
-        print(
-            colorize_fn(
-                f"    Coverage debt: {coverage_in_scope} {suffix} need review ({reason_text})",
-                "yellow",
-            )
-        )
-        print(
-            colorize_fn(
-                "    Scope split: "
-                f"open (in-scope) {coverage_in_scope} · "
-                f"open (out-of-scope carried) {coverage_out_of_scope} · "
-                f"open (global) {coverage_global}",
-                "yellow",
-            )
-        )
-        if reason_counts_out_of_scope:
-            out_detail: list[str] = []
-            if reason_counts_out_of_scope.get("changed", 0) > 0:
-                out_detail.append(f"{reason_counts_out_of_scope['changed']} changed")
-            if reason_counts_out_of_scope.get("unreviewed", 0) > 0:
-                out_detail.append(
-                    f"{reason_counts_out_of_scope['unreviewed']} unreviewed"
-                )
-            if not out_detail:
-                out_detail = [
-                    f"{count} {reason}"
-                    for reason, count in sorted(reason_counts_out_of_scope.items())
-                ]
-            print(
-                colorize_fn(
-                    "    Out-of-scope carried reasons: "
-                    + ", ".join(out_detail),
-                    "yellow",
-                )
-            )
-        if holistic_global > 0:
-            print(
-                colorize_fn(
-                    f"    Includes {holistic_global} holistic stale/missing signal(s)"
-                    f" ({holistic_in_scope} in-scope, {holistic_out_of_scope} out-of-scope carried).",
-                    "yellow",
-                )
-            )
-        print(
-            colorize_fn(
-                "    Triage: `desloppify show subjective_review --status open`", "dim"
-            )
-        )
+        parts.append(f"{coverage_global} files need review")
+
+    if parts:
+        print(colorize_fn(f"  Subjective: {', '.join(parts)}.", "cyan"))
+        print(colorize_fn("  Run `desloppify show subjective` for details.", "dim"))
 
     print()
 

@@ -1,9 +1,11 @@
-"""Single-use abstraction detection (imported by exactly 1 file = inline candidate)."""
+"""Single-use file detection (file-level importer heuristic for inlining candidates)."""
 
 import logging
 from pathlib import Path
 
-from desloppify.file_discovery import rel
+from desloppify.core.fallbacks import log_best_effort_failure
+from desloppify.core.file_paths import rel
+from desloppify.core.file_paths import resolve_scan_file
 
 logger = logging.getLogger(__name__)
 _LANG_PLUGIN_ENTRYPOINTS = frozenset(
@@ -44,14 +46,14 @@ def detect_single_use_abstractions(
     graph: dict,
     barrel_names: set[str],
 ) -> tuple[list[dict], int]:
-    """Find exported symbols imported by exactly 1 file — candidates for inlining."""
+    """Find files imported by exactly one file as inlining candidates."""
     entries = []
     total_candidates = 0
     for filepath, entry in graph.items():
         if entry["importer_count"] != 1:
             continue
         try:
-            p = Path(filepath)
+            p = resolve_scan_file(filepath, scan_root=path)
             if not p.exists():
                 continue
             basename = p.name
@@ -76,9 +78,9 @@ def detect_single_use_abstractions(
                 }
             )
         except (OSError, UnicodeDecodeError) as exc:
-            logger.debug(
-                "Skipping unreadable file in single-use detector: %s (%s)",
-                filepath,
+            log_best_effort_failure(
+                logger,
+                f"read single-use detector candidate {filepath}",
                 exc,
             )
             continue

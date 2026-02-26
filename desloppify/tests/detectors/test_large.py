@@ -87,6 +87,21 @@ class TestDetectLargeFiles:
         assert entries == []
         assert total == 1
 
+    def test_relative_paths_resolve_against_scan_root(self, tmp_path):
+        scan_root = tmp_path / "workspace"
+        target = scan_root / "src" / "big.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(f"line_{i}" for i in range(600)))
+
+        entries, total = detect_large_files(
+            scan_root,
+            file_finder=lambda _p: ["src/big.py"],
+            threshold=500,
+        )
+        assert total == 1
+        assert len(entries) == 1
+        assert entries[0]["file"] == "src/big.py"
+
     def test_mixed_files(self, tmp_path):
         small = tmp_path / "small.py"
         small.write_text("\n".join(f"line_{i}" for i in range(100)))

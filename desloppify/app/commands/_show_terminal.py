@@ -5,8 +5,8 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from desloppify.file_discovery import rel
-from desloppify.utils import colorize
+from desloppify.core.discovery_api import rel
+from desloppify.core.output_api import colorize
 
 
 def show_fix_dry_run_samples(entries: list[dict], results: list[dict]) -> None:

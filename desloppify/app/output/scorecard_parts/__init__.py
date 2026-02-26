@@ -3,7 +3,7 @@
 from desloppify.app.output.scorecard_parts.dimensions import (
     prepare_scorecard_dimensions,
 )
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     scorecard_dimension_rows,
     scorecard_dimensions_payload,
     scorecard_subjective_entries,

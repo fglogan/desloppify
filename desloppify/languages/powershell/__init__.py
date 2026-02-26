@@ -1,7 +1,7 @@
 """PowerShell language plugin — PSScriptAnalyzer."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import POWERSHELL_SPEC
+from desloppify.languages._framework.treesitter import POWERSHELL_SPEC
 
 generic_lang(
     name="powershell",

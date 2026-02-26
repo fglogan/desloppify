@@ -13,8 +13,8 @@ from desloppify.app.commands.helpers.state import state_path
 from desloppify.core import config as config_mod
 from desloppify.core.fallbacks import print_error
 from desloppify.engine.policy.zones import FileZoneMap, Zone
-from desloppify.file_discovery import rel
-from desloppify.utils import colorize
+from desloppify.core.discovery_api import rel
+from desloppify.core.output_api import colorize
 
 
 def cmd_zone(args: argparse.Namespace) -> None:

@@ -39,9 +39,9 @@ def test_review_cmd_uses_split_modules():
     assert "from .batch import _do_run_batches" in entrypoint_src
     assert "from .import_cmd import do_import" in entrypoint_src
     assert "from .prepare import do_prepare" in entrypoint_src
-    # registry imports directly from entrypoint (no cmd.py indirection)
+    # registry imports uniformly from command package roots.
     registry_src = Path("desloppify/app/commands/registry.py").read_text()
-    assert "review.entrypoint import cmd_review" in registry_src
+    assert "from desloppify.app.commands.review import cmd_review" in registry_src
 
 
 def test_scan_reporting_aggregator_uses_split_modules():

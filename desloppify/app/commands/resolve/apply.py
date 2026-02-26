@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 
 from desloppify import state as state_mod
-from desloppify.app.commands.helpers.query import write_query
+from desloppify.app.commands.helpers.query import write_query_best_effort as _write_query_best_effort
+from desloppify.core.output_contract import OutputResult
 
 from .selection import ResolveQueryContext
 
@@ -27,6 +28,14 @@ def _resolve_all_patterns(
         )
         all_resolved.extend(resolved)
     return all_resolved
+
+
+def write_query(payload: dict) -> OutputResult:
+    """Backward-compatible resolve query writer seam."""
+    return _write_query_best_effort(
+        payload,
+        context="resolve query payload update",
+    )
 
 
 def _write_resolve_query_entry(context: ResolveQueryContext) -> None:

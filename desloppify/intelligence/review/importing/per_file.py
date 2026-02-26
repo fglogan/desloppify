@@ -3,48 +3,61 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
+from desloppify.intelligence.review.importing.contracts import (
+    ReviewFindingPayload,
+    ReviewImportPayload,
+)
 from desloppify.intelligence.review.importing.shared import (
     _lang_potentials,
-    _review_file_cache,
-    extract_reviewed_files,
+    auto_resolve_review_findings,
+    normalize_review_confidence,
+    parse_review_import_payload,
+    refresh_review_file_cache,
+    resolve_import_project_root,
+    review_tier,
+    ReviewImportEnvelope,
     store_assessments,
 )
 from desloppify.intelligence.review.selection import hash_file
 from desloppify.state import MergeScanOptions, make_finding, merge_scan, utc_now
 
 
-def parse_per_file_import_payload(data: dict) -> tuple[list[dict], dict | None]:
+def parse_per_file_import_payload(
+    data: ReviewImportPayload | dict[str, Any],
+) -> tuple[list[ReviewFindingPayload], dict[str, Any] | None]:
     """Parse strict per-file import payload object."""
-    if not isinstance(data, dict):
-        raise ValueError("Per-file review import payload must be a JSON object")
+    payload = parse_review_import_payload(data, mode_name="Per-file")
+    return payload.findings, payload.assessments
 
-    findings = data.get("findings", [])
-    if not isinstance(findings, list):
-        raise ValueError("Per-file review import payload 'findings' must be a list")
 
-    assessments = data.get("assessments")
-    if assessments is not None and not isinstance(assessments, dict):
-        raise ValueError(
-            "Per-file review import payload 'assessments' must be an object"
-        )
-    return findings, assessments
+def _absolutize_review_path(file_path: str, *, project_root: Path) -> str:
+    """Return a stable absolute file path for per-file review import matching."""
+    candidate = Path(file_path)
+    if candidate.is_absolute():
+        return str(candidate.resolve())
+    return str((project_root / candidate).resolve())
 
 
 def import_review_findings(
-    findings_data: dict,
+    findings_data: ReviewImportPayload,
     state: dict[str, Any],
     lang_name: str,
     *,
-    project_root=PROJECT_ROOT,
+    project_root: Path | str | None = None,
     utc_now_fn=utc_now,
 ) -> dict[str, Any]:
     """Import agent-produced per-file review findings into state."""
-    findings_list, assessments = parse_per_file_import_payload(findings_data)
-    reviewed_files = extract_reviewed_files(findings_data)
+    payload: ReviewImportEnvelope = parse_review_import_payload(
+        findings_data, mode_name="Per-file"
+    )
+    findings_list = payload.findings
+    assessments = payload.assessments
+    reviewed_files = payload.reviewed_files
+    resolved_project_root = resolve_import_project_root(project_root)
     if assessments:
         store_assessments(
             state,
@@ -71,9 +84,7 @@ def import_review_findings(
             )
             continue
 
-        confidence = finding.get("confidence", "low")
-        if confidence not in ("high", "medium", "low"):
-            confidence = "low"
+        confidence = normalize_review_confidence(finding.get("confidence", "low"))
 
         dimension = finding["dimension"]
         if dimension not in per_file_prompts:
@@ -87,11 +98,15 @@ def import_review_findings(
             continue
 
         content_hash = hashlib.sha256(finding["summary"].encode()).hexdigest()[:8]
+        imported_file = _absolutize_review_path(
+            str(finding["file"]),
+            project_root=resolved_project_root,
+        )
         imported = make_finding(
             detector="review",
-            file=str(project_root / finding["file"]),
+            file=imported_file,
             name=f"{dimension}::{finding['identifier']}::{content_hash}",
-            tier=3,
+            tier=review_tier(confidence, holistic=False),
             confidence=confidence,
             summary=finding["summary"],
             detail={
@@ -105,12 +120,30 @@ def import_review_findings(
         imported["lang"] = lang_name
         review_findings.append(imported)
 
-    valid_reviewed_files = {
-        finding["file"]
+    valid_reviewed_files_rel = {
+        str(finding["file"])
         for finding in findings_list
         if all(key in finding for key in required_fields)
     }
-    review_potential_files = valid_reviewed_files | set(reviewed_files)
+    valid_reviewed_files_abs = {
+        _absolutize_review_path(str(finding["file"]), project_root=resolved_project_root)
+        for finding in findings_list
+        if all(key in finding for key in required_fields)
+    }
+    valid_reviewed_files = valid_reviewed_files_rel | valid_reviewed_files_abs
+    reviewed_files_rel = {
+        str(file_path).strip()
+        for file_path in reviewed_files
+        if isinstance(file_path, str) and file_path.strip()
+    }
+    reviewed_files_abs = {
+        _absolutize_review_path(file_path, project_root=resolved_project_root)
+        for file_path in reviewed_files_rel
+    }
+    review_potential_files = valid_reviewed_files | {
+        *reviewed_files_rel,
+        *reviewed_files_abs,
+    }
 
     potentials = _lang_potentials(state, lang_name)
     potentials["review"] = len(review_potential_files)
@@ -127,18 +160,18 @@ def import_review_findings(
 
     new_ids = {finding["id"] for finding in review_findings}
     reimported_files = valid_reviewed_files
-    for finding_id, finding in state.get("findings", {}).items():
-        if (
-            finding["status"] == "open"
-            and finding.get("detector") == "review"
+    auto_resolve_review_findings(
+        state,
+        new_ids=new_ids,
+        diff=diff,
+        note="not reported in latest per-file re-import",
+        should_resolve=lambda finding: (
+            finding.get("detector") == "review"
             and not finding.get("detail", {}).get("holistic")
             and finding.get("file", "") in reimported_files
-            and finding_id not in new_ids
-        ):
-            finding["status"] = "auto_resolved"
-            finding["resolved_at"] = utc_now_fn()
-            finding["note"] = "not reported in latest per-file re-import"
-            diff["auto_resolved"] = diff.get("auto_resolved", 0) + 1
+        ),
+        utc_now_fn=utc_now_fn,
+    )
 
     if skipped:
         diff["skipped"] = len(skipped)
@@ -148,7 +181,7 @@ def import_review_findings(
         state,
         findings_list,
         reviewed_files=reviewed_files,
-        project_root=project_root,
+        project_root=resolved_project_root,
         utc_now_fn=utc_now_fn,
     )
     return diff
@@ -156,34 +189,25 @@ def import_review_findings(
 
 def update_review_cache(
     state: dict[str, Any],
-    findings_data: list[dict],
+    findings_data: list[ReviewFindingPayload],
     *,
     reviewed_files: list[str] | None = None,
-    project_root=PROJECT_ROOT,
+    project_root: Path | str | None = None,
     utc_now_fn=utc_now,
 ) -> None:
     """Update per-file review cache with timestamps and content hashes."""
-    file_cache = _review_file_cache(state)
-    now = utc_now_fn()
-
-    findings_by_file: dict[str, list[dict]] = {}
+    findings_by_file: dict[str, int] = {}
     for finding in findings_data:
         file_path = finding.get("file")
         if not isinstance(file_path, str):
             continue
-        findings_by_file.setdefault(file_path, []).append(finding)
+        findings_by_file[file_path] = findings_by_file.get(file_path, 0) + 1
 
-    reviewed_set = set(findings_by_file)
-    if reviewed_files:
-        reviewed_set.update(file_path for file_path in reviewed_files if file_path)
-
-    for file_path in reviewed_set:
-        absolute = project_root / file_path
-        content_hash = (
-            hash_file(str(absolute)) if absolute.exists() else ""
-        )
-        file_cache[file_path] = {
-            "content_hash": content_hash,
-            "reviewed_at": now,
-            "finding_count": len(findings_by_file.get(file_path, [])),
-        }
+    refresh_review_file_cache(
+        state,
+        reviewed_files=reviewed_files,
+        findings_by_file=findings_by_file,
+        project_root=project_root,
+        hash_file_fn=hash_file,
+        utc_now_fn=utc_now_fn,
+    )

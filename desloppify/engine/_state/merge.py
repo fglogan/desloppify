@@ -31,6 +31,63 @@ from desloppify.engine._state.schema import (
 )
 from desloppify.engine._state.scoring import _recompute_stats
 
+# Mechanical detectors → subjective dimensions they provide evidence for.
+# When findings from these detectors change during a scan, the corresponding
+# subjective assessments are marked stale so reviewers know to re-evaluate.
+_DETECTOR_SUBJECTIVE_DIMENSIONS: dict[str, tuple[str, ...]] = {
+    "structural": ("design_coherence", "abstraction_fitness"),
+    "smells": ("design_coherence", "error_consistency"),
+    "global_mutable_config": ("initialization_coupling",),
+    "coupling": ("cross_module_architecture",),
+    "layer_violation": ("cross_module_architecture",),
+    "private_imports": ("cross_module_architecture",),
+    "dupes": ("convention_outlier",),
+    "boilerplate_duplication": ("convention_outlier",),
+    "naming": ("convention_outlier",),
+    "flat_dirs": ("package_organization",),
+    "orphaned": ("design_coherence",),
+    "uncalled_functions": ("design_coherence",),
+    "responsibility_cohesion": ("design_coherence", "abstraction_fitness"),
+    "cycles": ("cross_module_architecture", "dependency_health"),
+}
+
+
+def _mark_stale_on_mechanical_change(
+    state: StateModel,
+    *,
+    changed_detectors: set[str],
+    now: str,
+) -> None:
+    """Mark subjective assessments stale when mechanical findings change.
+
+    Only marks dimensions that already have an assessment — doesn't create
+    new entries for dimensions that have never been reviewed.
+    """
+    assessments = state.get("subjective_assessments")
+    if not isinstance(assessments, dict) or not assessments:
+        return
+
+    affected_dims: set[str] = set()
+    for detector in changed_detectors:
+        dims = _DETECTOR_SUBJECTIVE_DIMENSIONS.get(detector, ())
+        affected_dims.update(dims)
+
+    if not affected_dims:
+        return
+
+    for dimension in sorted(affected_dims):
+        if dimension not in assessments:
+            continue
+        payload = assessments[dimension]
+        if not isinstance(payload, dict):
+            continue
+        # Don't overwrite if already stale
+        if payload.get("needs_review_refresh"):
+            continue
+        payload["needs_review_refresh"] = True
+        payload["refresh_reason"] = "mechanical_findings_changed"
+        payload["stale_since"] = now
+
 
 @dataclass
 class MergeScanOptions:
@@ -112,6 +169,13 @@ def merge_scan(
         scan_path=resolved_options.scan_path,
         exclude=resolved_options.exclude,
     )
+
+    # Mark subjective assessments stale when mechanical findings changed.
+    if new_count > 0 or auto_resolved > 0 or reopened_count > 0:
+        changed_detectors = set(current_by_detector.keys())
+        _mark_stale_on_mechanical_change(
+            state, changed_detectors=changed_detectors, now=now,
+        )
 
     _recompute_stats(
         state,

@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from desloppify.file_discovery import rel, resolve_path
+from desloppify.core.discovery_api import rel, resolve_path
 from desloppify.intelligence.review.context import importer_count
 
 

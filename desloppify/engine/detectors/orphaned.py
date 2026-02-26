@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 
 
 @dataclass

@@ -286,6 +286,117 @@ def _detect_catch_return_default(
             )
 
 
+def _extract_function_body(
+    lines: list[str], start_line: int,
+) -> str | None:
+    """Extract the inner body text of a function starting at start_line.
+
+    Returns the text between the opening and closing braces, or None.
+    """
+    brace_line = _find_opening_brace_line(lines, start_line, window=5)
+    if brace_line is None:
+        return None
+    end_line = _track_brace_body(lines, brace_line, max_scan=2000)
+    if end_line is None:
+        return None
+    body_text = "\n".join(lines[brace_line : end_line + 1])
+    first_brace = body_text.find("{")
+    last_brace = body_text.rfind("}")
+    if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
+        return None
+    return body_text[first_brace + 1 : last_brace]
+
+
+def _count_pattern_in_body(body: str, pattern: re.Pattern[str]) -> int:
+    """Count regex matches in body that aren't inside string literals."""
+    count = 0
+    for m in pattern.finditer(body):
+        pos = m.start()
+        line_start = body.rfind("\n", 0, pos) + 1
+        nl_pos = body.find("\n", pos)
+        line_text = body[line_start : nl_pos if nl_pos != -1 else len(body)]
+        if not _ts_match_is_in_string(line_text, pos - line_start):
+            count += 1
+    return count
+
+
+_FUNC_RE = re.compile(r"\bfunction\s*[\w(]")
+_ARROW_RE = re.compile(r"=>\s*\{")
+
+
+def _detect_nested_closures(
+    filepath: str, lines: list[str], smell_counts: dict[str, list[dict]]
+):
+    """Find functions with >= 3 nested closure definitions."""
+    for i, line in enumerate(lines):
+        name = _find_function_start(line, lines[i + 1 : i + 3])
+        if not name:
+            continue
+
+        body = _extract_function_body(lines, i)
+        if body is None:
+            continue
+
+        closure_count = (
+            _count_pattern_in_body(body, _FUNC_RE)
+            + _count_pattern_in_body(body, _ARROW_RE)
+        )
+        if closure_count >= 3:
+            smell_counts["nested_closure"].append(
+                {
+                    "file": filepath,
+                    "line": i + 1,
+                    "content": f"{name}() — {closure_count} nested closures",
+                }
+            )
+
+
+_TS_BRANCH_PATTERNS = (
+    r"\bif\s*\(",
+    r"\belse\s+if\s*\(",
+    r"\bcase\s+",
+    r"\bcatch\s*\(",
+    r"\bfor\s*\(",
+    r"\bwhile\s*\(",
+)
+
+
+def _compute_ts_cyclomatic_complexity(body: str) -> int:
+    """Compute cyclomatic complexity for a TypeScript function body string."""
+    stripped = _strip_ts_comments(body)
+    complexity = 1
+    for pattern in _TS_BRANCH_PATTERNS:
+        complexity += len(re.findall(pattern, stripped))
+    complexity += len(re.findall(r"&&", stripped))
+    complexity += len(re.findall(r"\|\|", stripped))
+    complexity += len(re.findall(r"\?(?!=)", stripped))
+    return complexity
+
+
+def _detect_high_cyclomatic_complexity(
+    filepath: str, lines: list[str], smell_counts: dict[str, list[dict]]
+):
+    """Flag functions with cyclomatic complexity > 15."""
+    for i, line in enumerate(lines):
+        name = _find_function_start(line, lines[i + 1 : i + 3])
+        if not name:
+            continue
+
+        body = _extract_function_body(lines, i)
+        if body is None:
+            continue
+
+        complexity = _compute_ts_cyclomatic_complexity(body)
+        if complexity > 15:
+            smell_counts["high_cyclomatic_complexity"].append(
+                {
+                    "file": filepath,
+                    "line": i + 1,
+                    "content": f"{name}() — cyclomatic complexity {complexity}",
+                }
+            )
+
+
 def _detect_switch_no_default(
     filepath: str, content: str, smell_counts: dict[str, list[dict]]
 ):

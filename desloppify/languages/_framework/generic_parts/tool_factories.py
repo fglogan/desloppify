@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from desloppify.languages._framework.base.types import (
     DetectorPhase,
@@ -15,10 +14,47 @@ from desloppify.languages._framework.base.types import (
 from desloppify.languages._framework.generic_parts.parsers import PARSERS
 from desloppify.languages._framework.generic_parts.tool_runner import (
     SubprocessRun,
+    ToolRunResult,
     resolve_command_argv,
     run_tool,
+    run_tool_result,
 )
+from desloppify.languages._framework.generic_parts.tool_spec import ToolSpec
 from desloppify.state import make_finding
+
+
+def _record_tool_failure_coverage(
+    lang: object,
+    *,
+    detector: str,
+    label: str,
+    result: ToolRunResult,
+) -> None:
+    """Attach reduced-coverage metadata when generic detector tooling fails."""
+    if result.status != "error":
+        return
+
+    record = {
+        "detector": detector,
+        "status": "reduced",
+        "confidence": 0.0,
+        "summary": f"{label} tooling unavailable ({result.error_kind or 'error'})",
+        "impact": "Detector results may be under-reported for this scan.",
+        "remediation": "Install/fix the tool command and rerun scan.",
+        "tool": label,
+        "reason": result.error_kind or "tool_error",
+    }
+    detector_coverage = getattr(lang, "detector_coverage", None)
+    if isinstance(detector_coverage, dict):
+        detector_coverage[detector] = dict(record)
+
+    coverage_warnings = getattr(lang, "coverage_warnings", None)
+    if isinstance(coverage_warnings, list):
+        if not any(
+            isinstance(entry, dict) and entry.get("detector") == detector
+            for entry in coverage_warnings
+        ):
+            coverage_warnings.append(dict(record))
 
 
 def make_tool_phase(
@@ -32,8 +68,16 @@ def make_tool_phase(
     parser = PARSERS[fmt]
 
     def run(path: Path, lang: object) -> tuple[list, dict]:
-        del lang
-        entries = run_tool(cmd, path, parser)
+        run_result = run_tool_result(cmd, path, parser)
+        if run_result.status == "error":
+            _record_tool_failure_coverage(
+                lang,
+                detector=smell_id,
+                label=label,
+                result=run_result,
+            )
+            return [], {}
+        entries = list(run_result.entries)
         if not entries:
             return [], {}
         findings = [
@@ -52,18 +96,13 @@ def make_tool_phase(
     return DetectorPhase(label, run)
 
 
-def make_detect_fn(cmd: str, parser: Callable[[str, Path], list[dict]]) -> Callable:
-    """Create detect function that runs a tool and returns parsed entries."""
-    return make_detect_fn_with_runner(cmd, parser)
-
-
-def make_detect_fn_with_runner(
+def make_detect_fn(
     cmd: str,
     parser: Callable[[str, Path], list[dict]],
     *,
     run_subprocess: SubprocessRun | None = None,
 ) -> Callable:
-    """Create detect function that runs a tool with an injected subprocess runner."""
+    """Create detect function that runs a tool with an optional injected runner."""
     def detect(path, **kwargs):
         del kwargs
         return run_tool(cmd, path, parser, run_subprocess=run_subprocess)
@@ -71,20 +110,17 @@ def make_detect_fn_with_runner(
     return detect
 
 
-def make_generic_fixer(tool: dict[str, Any]) -> FixerConfig:
-    """Create a FixerConfig from a tool spec with fix_cmd."""
-    return make_generic_fixer_with_runner(tool)
-
-
-def make_generic_fixer_with_runner(
-    tool: dict[str, Any],
+def make_generic_fixer(
+    tool: ToolSpec,
     *,
     run_subprocess: SubprocessRun | None = None,
 ) -> FixerConfig:
-    """Create a FixerConfig from a tool spec with an injected subprocess runner."""
+    """Create a FixerConfig from a tool spec with an optional injected runner."""
     smell_id = tool["id"]
     fix_cmd = tool["fix_cmd"]
-    detect = make_detect_fn_with_runner(
+    if fix_cmd is None:
+        raise ValueError("make_generic_fixer requires tool['fix_cmd'] to be provided")
+    detect = make_detect_fn(
         tool["cmd"],
         PARSERS[tool["fmt"]],
         run_subprocess=run_subprocess,
@@ -120,6 +156,11 @@ def make_generic_fixer_with_runner(
         verb="Fixed",
         dry_verb="Would fix",
     )
+
+
+# Backwards-compatible aliases for historical import sites.
+make_detect_fn_with_runner = make_detect_fn
+make_generic_fixer_with_runner = make_generic_fixer
 
 
 __all__ = [

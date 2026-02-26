@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from desloppify import state as state_mod
-from desloppify.utils import LOC_COMPACT_THRESHOLD, colorize
+from desloppify.core.output_api import LOC_COMPACT_THRESHOLD, colorize
 
 
 def score_summary_lines(
@@ -27,7 +27,13 @@ def score_summary_lines(
                 f"strict {strict_score:.1f}/100 · "
                 f"verified {verified_strict_score:.1f}/100",
                 "bold",
-            )
+            ),
+            (
+                "  Score guide: overall (lenient) · objective (mechanical only) · "
+                "strict (penalizes wontfix) · verified (scan-confirmed only)",
+                "dim",
+            ),
+            ("  Focus on strict — it's your north star.", "dim"),
         ]
     return [
         ("\n  Scores unavailable", "bold"),

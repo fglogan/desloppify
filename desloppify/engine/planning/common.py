@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 TIER_LABELS = {
-    1: "Auto-fixable (imports, logs, dead deprecated)",
+    1: "Highest priority (auto-fixable + high-confidence holistic review)",
     2: "Quick fixes (unused vars, dead exports, exact dupes, orphaned files, cross-tool imports)",
     3: "Needs judgment (smells, near-dupes, single-use, small cycles, state sync)",
     4: "Major refactors (structural decomposition, large import cycles)",

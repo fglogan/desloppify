@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from desloppify.engine._state.filtering import matched_ignore_pattern
-from desloppify.file_discovery import matches_exclusion
+from desloppify.core.discovery_api import matches_exclusion
 
 
 def find_suspect_detectors(

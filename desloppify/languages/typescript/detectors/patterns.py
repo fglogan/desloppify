@@ -22,9 +22,9 @@ from pathlib import Path
 
 from desloppify.core._internal.text_utils import get_area
 from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.file_discovery import find_ts_files, rel, resolve_path
+from desloppify.core.discovery_api import find_ts_files, rel, resolve_path
 from desloppify.languages.typescript.detectors.contracts import DetectorResult
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 # ── Pattern families ────────────────────────────────────────────
 #

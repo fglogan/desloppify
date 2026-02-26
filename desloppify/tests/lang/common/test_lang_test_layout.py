@@ -16,10 +16,10 @@ except ImportError:
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine.policy.zones import FileZoneMap, Zone
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.languages import available_langs, get_lang
 from desloppify.languages._framework.structure_validation import validate_lang_structure
-from desloppify.utils import compute_tool_hash
+from desloppify.core.tooling import compute_tool_hash
 
 
 def _full_langs() -> list[str]:
@@ -146,7 +146,7 @@ def test_compute_tool_hash_ignores_colocated_tests(tmp_path):
     test_file = test_dir / "test_core.py"
     test_file.write_text("def test_x():\n    assert True\n")
 
-    with patch("desloppify.utils.TOOL_DIR", tmp_path):
+    with patch("desloppify.core.tooling.TOOL_DIR", tmp_path):
         base = compute_tool_hash()
 
         # Test-only changes should not affect runtime tool hash.

@@ -128,6 +128,23 @@ class TestDetectSingleUseAbstractions:
         )
         assert entries == []
 
+    def test_relative_graph_paths_resolve_from_scan_root(self, tmp_path):
+        target = tmp_path / "src" / "util.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(f"line_{i}" for i in range(50)))
+
+        graph = {
+            "src/util.py": _make_graph_entry({"src/main.py"}),
+        }
+        entries, total = detect_single_use_abstractions(
+            tmp_path,
+            graph,
+            barrel_names=set(),
+        )
+        assert total == 1
+        assert len(entries) == 1
+        assert entries[0]["file"] == "src/util.py"
+
     def test_entry_contains_loc_and_sole_importer(self, tmp_path):
         """Entries should contain loc/import metadata and sole importer."""
         target = tmp_path / "util.py"

@@ -615,37 +615,6 @@ class TestDevParser:
         assert args.wire_pyproject is False
 
 
-class TestIssuesParser:
-    def test_issues_show(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers(dest="command")
-        parser_admin_mod._add_issues_parser(sub)
-
-        args = parser.parse_args(["issues", "show", "42"])
-        assert args.issues_action == "show"
-        assert args.number == 42
-
-    def test_issues_update(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers(dest="command")
-        parser_admin_mod._add_issues_parser(sub)
-
-        args = parser.parse_args(["issues", "update", "5", "--file", "report.json"])
-        assert args.issues_action == "update"
-        assert args.number == 5
-        assert args.file == "report.json"
-
-    def test_issues_merge(self):
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers(dest="command")
-        parser_admin_mod._add_issues_parser(sub)
-
-        args = parser.parse_args(["issues", "merge", "--dry-run", "--similarity", "0.85"])
-        assert args.issues_action == "merge"
-        assert args.dry_run is True
-        assert args.similarity == 0.85
-
-
 class TestLangsAndUpdateSkillParsers:
     def test_langs_parser(self):
         parser = argparse.ArgumentParser()
@@ -957,8 +926,8 @@ class TestFindExternalTestFiles:
         mock_lang.extensions = [".py"]
 
         with patch(
-            "desloppify.languages._framework.base.shared_phases.PROJECT_ROOT",
-            tmp_path,
+            "desloppify.languages._framework.base.shared_phases.get_project_root",
+            return_value=tmp_path,
         ):
             result = shared_phases_mod.find_external_test_files(src_dir, mock_lang)
 
@@ -980,8 +949,8 @@ class TestFindExternalTestFiles:
         mock_lang.test_file_extensions = [".py"]
 
         with patch(
-            "desloppify.languages._framework.base.shared_phases.PROJECT_ROOT",
-            tmp_path,
+            "desloppify.languages._framework.base.shared_phases.get_project_root",
+            return_value=tmp_path,
         ):
             result = shared_phases_mod.find_external_test_files(src_dir, mock_lang)
 
@@ -997,8 +966,8 @@ class TestFindExternalTestFiles:
         mock_lang.test_file_extensions = [".py"]
 
         with patch(
-            "desloppify.languages._framework.base.shared_phases.PROJECT_ROOT",
-            tmp_path,
+            "desloppify.languages._framework.base.shared_phases.get_project_root",
+            return_value=tmp_path,
         ):
             result = shared_phases_mod.find_external_test_files(src_dir, mock_lang)
 
@@ -1018,8 +987,8 @@ class TestFindExternalTestFiles:
         mock_lang.extensions = [".ts", ".tsx"]
 
         with patch(
-            "desloppify.languages._framework.base.shared_phases.PROJECT_ROOT",
-            tmp_path,
+            "desloppify.languages._framework.base.shared_phases.get_project_root",
+            return_value=tmp_path,
         ):
             result = shared_phases_mod.find_external_test_files(src_dir, mock_lang)
 
@@ -1039,8 +1008,8 @@ class TestFindExternalTestFiles:
         mock_lang.test_file_extensions = [".py"]
 
         with patch(
-            "desloppify.languages._framework.base.shared_phases.PROJECT_ROOT",
-            tmp_path,
+            "desloppify.languages._framework.base.shared_phases.get_project_root",
+            return_value=tmp_path,
         ):
             result = shared_phases_mod.find_external_test_files(src_dir, mock_lang)
 

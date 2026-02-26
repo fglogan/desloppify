@@ -13,9 +13,10 @@ from desloppify.app.commands.scan.scan_workflow import (
 )
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.core.config import config_for_query
+from desloppify.core.output_contract import OutputResult
 from desloppify.scoring import compute_health_breakdown
 from desloppify.state import open_scope_breakdown, score_snapshot
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def build_scan_query_payload(
@@ -83,7 +84,7 @@ def _load_scorecard_helpers():
 
 def emit_scorecard_badge(
     args, config: dict[str, object], state: dict[str, object]
-) -> Path | None:
+) -> tuple[Path | None, OutputResult]:
     """Generate a scorecard image badge and print usage hints."""
     generate_scorecard, get_badge_config = _load_scorecard_helpers()
     if not callable(generate_scorecard) or not callable(get_badge_config):
@@ -99,19 +100,39 @@ def emit_scorecard_badge(
                     "yellow",
                 )
             )
-        return None
+            return None, OutputResult(
+                ok=False,
+                status="error",
+                message="scorecard support not installed",
+                error_kind="scorecard_dependency_missing",
+            )
+        return None, OutputResult(ok=True, status="skipped", message="badge generation disabled")
 
     try:
         badge_path, disabled = get_badge_config(args, config)
-    except OSError:
-        return None
+    except OSError as exc:
+        print(
+            colorize(f"  ⚠ Could not resolve scorecard badge path: {exc}", "yellow")
+        )
+        return None, OutputResult(
+            ok=False,
+            status="error",
+            message=str(exc),
+            error_kind="badge_path_resolution_error",
+        )
     if disabled or not badge_path:
-        return None
+        return None, OutputResult(ok=True, status="skipped", message="badge generation disabled")
 
     try:
         generate_scorecard(state, badge_path)
-    except (OSError, ImportError):
-        return None
+    except (OSError, ImportError) as exc:
+        print(colorize(f"  ⚠ Could not generate scorecard badge: {exc}", "yellow"))
+        return None, OutputResult(
+            ok=False,
+            status="error",
+            message=str(exc),
+            error_kind="badge_generation_error",
+        )
 
     try:
         rel_path = str(badge_path.relative_to(PROJECT_ROOT))
@@ -137,7 +158,9 @@ def emit_scorecard_badge(
                 "dim",
             )
         )
-        return badge_path
+        return badge_path, OutputResult(
+            ok=True, status="written", message=f"scorecard badge written to {rel_path}"
+        )
 
     print(colorize(f"  Scorecard → {rel_path}", "dim"))
     print(
@@ -148,7 +171,9 @@ def emit_scorecard_badge(
     )
     print(colorize(f'     <img src="{rel_path}" width="100%">', "dim"))
     print(colorize("     (disable: --no-badge | move: --badge-path <path>)", "dim"))
-    return badge_path
+    return badge_path, OutputResult(
+        ok=True, status="written", message=f"scorecard badge written to {rel_path}"
+    )
 
 
 __all__ = ["build_scan_query_payload", "emit_scorecard_badge"]

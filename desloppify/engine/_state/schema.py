@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, NotRequired, Required, TypedDict, cast
+from typing import Any, Literal, NotRequired, Required, TypedDict
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core.enums import canonical_finding_status, finding_status_tokens
 from desloppify.languages._framework.base.types import ScanCoverageRecord
 
 __all__ = [
@@ -37,11 +38,7 @@ __all__ = [
 
 FindingStatus = Literal["open", "fixed", "auto_resolved", "wontfix", "false_positive"]
 _ALLOWED_FINDING_STATUSES: set[str] = {
-    "open",
-    "fixed",
-    "auto_resolved",
-    "wontfix",
-    "false_positive",
+    *finding_status_tokens(),
 }
 
 
@@ -219,8 +216,8 @@ def _as_non_negative_int(value: Any, default: int = 0) -> int:
     return parsed if parsed >= 0 else 0
 
 
-def ensure_state_defaults(state: StateModel | dict) -> StateModel:
-    """Normalize loose/legacy state payloads to a valid base shape."""
+def ensure_state_defaults(state: StateModel | dict) -> None:
+    """Normalize loose/legacy state payloads to a valid base shape in-place."""
     for key, value in empty_state().items():
         state.setdefault(key, value)
 
@@ -252,11 +249,10 @@ def ensure_state_defaults(state: StateModel | dict) -> StateModel:
         finding.setdefault("summary", "")
         finding.setdefault("detail", {})
         finding.setdefault("status", "open")
-        # Migrate legacy "resolved" status (renamed to "fixed" during Status enum migration)
-        if finding["status"] == "resolved":
-            finding["status"] = "fixed"
-        if finding["status"] not in _ALLOWED_FINDING_STATUSES:
-            finding["status"] = "open"
+        finding["status"] = canonical_finding_status(
+            finding.get("status"),
+            default="open",
+        )
         finding.setdefault("note", None)
         finding.setdefault("first_seen", state.get("created") or utc_now())
         finding.setdefault("last_seen", finding["first_seen"])
@@ -279,7 +275,7 @@ def ensure_state_defaults(state: StateModel | dict) -> StateModel:
             entry["subjective_integrity"] = None
 
     state["scan_count"] = _as_non_negative_int(state.get("scan_count", 0), default=0)
-    return cast(StateModel, state)
+    return None
 
 
 def validate_state_invariants(state: StateModel) -> None:

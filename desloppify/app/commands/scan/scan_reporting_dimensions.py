@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from desloppify import scoring as scoring_mod
 from desloppify import state as state_mod
-from desloppify.app.commands.scan import scan_reporting_presentation as presentation_mod
+from . import scan_reporting_presentation as presentation_mod
 from desloppify.app.commands.scan.scan_reporting_subjective import (
     SubjectiveFollowup,
     build_subjective_followup,
@@ -15,18 +15,21 @@ from desloppify.app.commands.scan.scan_reporting_subjective import (
     subjective_integrity_notice_lines,
     subjective_rerun_command,
 )
-from desloppify.app.output.scorecard_parts.projection import (
-    dimension_cli_key as _projection_dimension_cli_key,
+from desloppify.engine.planning.scorecard_projection import (
+    dimension_cli_key,
 )
-from desloppify.app.output.scorecard_parts.projection import (
-    scorecard_dimension_cli_keys as _projection_scorecard_dimension_cli_keys,
+from desloppify.engine.planning.scorecard_projection import (
+    scorecard_dimension_cli_keys,
 )
-from desloppify.app.output.scorecard_parts.projection import (
-    scorecard_dimension_rows as _projection_scorecard_dimension_rows,
+from desloppify.engine.planning.scorecard_projection import (
+    scorecard_dimension_rows,
 )
+from desloppify.engine.planning.scorecard_projection import (
+    scorecard_subjective_entries,
+)
+from desloppify.core.output import colorize
 from desloppify.core import registry as registry_mod
 from desloppify.intelligence import narrative as narrative_mod
-from desloppify.utils import colorize
 
 
 def show_detector_progress(state: dict):
@@ -40,15 +43,6 @@ def show_detector_progress(state: dict):
     )
 
 
-def _scorecard_dimension_rows(
-    state: dict,
-    *,
-    dim_scores: dict | None = None,
-) -> list[tuple[str, dict]]:
-    """Return dimension rows using canonical scorecard projection rules."""
-    return _projection_scorecard_dimension_rows(state, dim_scores=dim_scores)
-
-
 def _dimension_bar(score: float, *, bar_len: int = 15) -> str:
     """Render a score bar consistent with scan detector bars."""
     return presentation_mod.dimension_bar(score, colorize_fn=colorize, bar_len=bar_len)
@@ -60,36 +54,36 @@ def scorecard_dimension_entries(
     dim_scores: dict | None = None,
 ) -> list[dict]:
     """Return scorecard rows with presentation-friendly metadata."""
-    rows = _scorecard_dimension_rows(state, dim_scores=dim_scores)
-    assessments = state.get("subjective_assessments") or {}
+    rows = scorecard_dimension_rows(state, dim_scores=dim_scores)
+    subjective_by_name = {
+        entry["name"]: entry
+        for entry in scorecard_subjective_entries(
+            state,
+            dim_scores=dim_scores,
+        )
+    }
     entries: list[dict] = []
     for name, data in rows:
         detectors = data.get("detectors", {})
-        is_subjective = "subjective_assessment" in detectors
+        subjective_meta = subjective_by_name.get(name)
+        is_subjective = subjective_meta is not None
         score = float(data.get("score", 0.0))
         strict = float(data.get("strict", score))
         issues = int(data.get("issues", 0))
         checks = int(data.get("checks", 0))
-        assessment_meta = detectors.get("subjective_assessment", {})
-        placeholder = bool(
-            is_subjective
-            and (
-                assessment_meta.get("placeholder")
-                or (score == 0.0 and issues == 0 and checks == 0)
-            )
-        )
+        placeholder = bool(subjective_meta.get("placeholder")) if subjective_meta else False
         not_scanned = bool(
             not is_subjective and not detectors and checks == 0
         )
         carried_forward = bool(
             not is_subjective and data.get("carried_forward")
         )
-        dim_key = assessment_meta.get("dimension_key", "")
-        stale = bool(
-            is_subjective
-            and dim_key
-            and isinstance(assessments.get(dim_key), dict)
-            and assessments[dim_key].get("needs_review_refresh")
+        dim_key = str(subjective_meta.get("dimension_key", "")) if subjective_meta else ""
+        stale = bool(subjective_meta.get("stale")) if subjective_meta else False
+        cli_keys = (
+            list(subjective_meta.get("cli_keys", []))
+            if subjective_meta
+            else scorecard_dimension_cli_keys(name, data)
         )
         entries.append(
             {
@@ -104,7 +98,7 @@ def scorecard_dimension_entries(
                 "dimension_key": dim_key,
                 "not_scanned": not_scanned,
                 "carried_forward": carried_forward,
-                "cli_keys": _projection_scorecard_dimension_cli_keys(name, data),
+                "cli_keys": cli_keys,
             }
         )
     return entries
@@ -163,31 +157,6 @@ def show_score_model_breakdown(state: dict, *, dim_scores: dict | None = None) -
     )
 
 
-def scorecard_subjective_entries(
-    state: dict,
-    *,
-    dim_scores: dict | None = None,
-) -> list[dict]:
-    """Return scorecard-subjective entries with score + strict + CLI key mapping."""
-    entries: list[dict] = []
-    for entry in scorecard_dimension_entries(state, dim_scores=dim_scores):
-        if not entry.get("subjective"):
-            continue
-        entries.append(
-            {
-                "name": entry["name"],
-                "score": float(entry["score"]),
-                "strict": float(entry["strict"]),
-                "issues": int(entry["issues"]),
-                "placeholder": bool(entry["placeholder"]),
-                "stale": bool(entry.get("stale")),
-                "dimension_key": entry.get("dimension_key", ""),
-                "cli_keys": list(entry["cli_keys"]),
-            }
-        )
-    return entries
-
-
 def show_dimension_deltas(prev: dict, current: dict):
     """Show which dimensions changed between scans (health and strict)."""
     return presentation_mod.show_dimension_deltas(
@@ -207,17 +176,11 @@ def show_low_dimension_hints(dim_scores: dict):
     )
 
 
-def dimension_cli_key(dimension_name: str) -> str:
-    """Best-effort map from display name to CLI dimension key."""
-    return _projection_dimension_cli_key(dimension_name)
-
-
 def show_subjective_paths_section(
     state: dict,
     dim_scores: dict,
     *,
     threshold: float = 95.0,
-    target_strict_score: float | None = None,
 ) -> None:
     """Show explicit subjective-score improvement paths (coverage vs quality)."""
     return show_subjective_paths(
@@ -226,7 +189,6 @@ def show_subjective_paths_section(
         colorize_fn=colorize,
         scorecard_subjective_entries_fn=scorecard_subjective_entries,
         threshold=threshold,
-        target_strict_score=target_strict_score,
     )
 
 

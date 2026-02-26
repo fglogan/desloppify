@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from desloppify import state as state_mod
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def _print_resolve_summary(*, status: str, all_resolved: list[str]) -> None:
@@ -90,6 +90,16 @@ def _print_score_movement(
             f"  verified {new.verified:.1f}/100{_delta_suffix(verified_delta)}", "dim"
         )
     )
+    if status == "wontfix":
+        strict_gap = round(new.overall - new.strict, 1)
+        if strict_gap > 0:
+            print(
+                colorize(
+                    f"  Note: wontfix items still count against strict score. "
+                    f"Current gap: overall {new.overall:.1f} vs strict {new.strict:.1f} ({strict_gap:.1f} pts of hidden debt).",
+                    "yellow",
+                )
+            )
     if has_review_findings and abs(overall_delta) < 0.05:
         print(
             colorize(
@@ -162,18 +172,19 @@ def _print_next_command(state: dict) -> str:
     remaining = sum(
         1
         for finding in state["findings"].values()
-        if finding["status"] == "open" and finding.get("detector") == "review"
+        if finding["status"] == "open"
+        and not finding.get("suppressed")
     )
     next_command = "desloppify scan"
     if remaining > 0:
         suffix = "s" if remaining != 1 else ""
         print(
             colorize(
-                f"\n  {remaining} review finding{suffix} remaining — run `desloppify issues`",
+                f"\n  {remaining} finding{suffix} remaining — run `desloppify next`",
                 "dim",
             )
         )
-        next_command = "desloppify issues"
+        next_command = "desloppify next"
     print(colorize(f"  Next command: `{next_command}`", "dim"))
     print()
     return next_command

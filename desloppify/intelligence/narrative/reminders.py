@@ -263,8 +263,8 @@ def _review_queue_reminders(
                 {
                     "type": "review_findings_pending",
                     "message": f"{len(uninvestigated)} review finding(s) need investigation. "
-                    f"Run `desloppify issues` to see the work queue.",
-                    "command": "desloppify issues",
+                    f"Run `desloppify show review --status open` to see the work queue.",
+                    "command": "desloppify show review --status open",
                 }
             )
 
@@ -295,6 +295,30 @@ def _review_queue_reminders(
             )
 
     return reminders
+
+
+def _stale_assessment_reminder(state: StateModel) -> list[dict]:
+    """Nudge when mechanical changes have staled subjective assessments."""
+    assessments = state.get("subjective_assessments") or {}
+    stale_dims = [
+        dim_key
+        for dim_key, assessment in assessments.items()
+        if isinstance(assessment, dict) and assessment.get("needs_review_refresh")
+    ]
+    if not stale_dims:
+        return []
+    dims_arg = ",".join(stale_dims[:10])
+    return [
+        {
+            "type": "stale_assessments",
+            "message": (
+                f"{len(stale_dims)} subjective dimension{'s' if len(stale_dims) != 1 else ''} "
+                f"stale after mechanical changes — re-review with: "
+                f"`desloppify review --prepare --dimensions {dims_arg}`"
+            ),
+            "command": f"desloppify review --prepare --dimensions {dims_arg}",
+        }
+    ]
 
 
 def _review_staleness_reminder(state: StateModel, config: dict | None) -> list[dict]:
@@ -376,6 +400,7 @@ _REMINDER_METADATA: dict[str, tuple[int, str]] = {
     "wontfix_stale": (2, "medium"),
     "stagnant_nudge": (2, "medium"),
     "review_stale": (2, "medium"),
+    "stale_assessments": (1, "high"),
     "auto_fixers_available": (2, "medium"),
     "zone_classification": (2, "medium"),
     "fp_calibration": (2, "medium"),
@@ -475,6 +500,7 @@ def _compute_reminders(
     reminders.extend(
         _review_queue_reminders(state, scoped_findings, command, strict_score)
     )
+    reminders.extend(_stale_assessment_reminder(state))
     reminders.extend(_review_staleness_reminder(state, config))
     reminders.extend(_feedback_reminder(state, phase, command, fp_rates))
 

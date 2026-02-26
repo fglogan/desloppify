@@ -1,7 +1,7 @@
 """R language plugin — lintr + tree-sitter."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import R_SPEC
+from desloppify.languages._framework.treesitter import R_SPEC
 
 generic_lang(
     name="r",

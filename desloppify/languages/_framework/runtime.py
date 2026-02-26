@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from desloppify.languages._framework.base.types import (
+    DepGraphBuilder,
+    DetectorCoverageStatus,
     DetectorCoverageRecord,
+    FileFinder,
+    FunctionExtractor,
     LangConfig,
+    LangSecurityResult,
 )
 
 if TYPE_CHECKING:
@@ -51,6 +57,106 @@ class LangRunOverrides:
     coverage_warnings: list[DetectorCoverageRecord] | None = _UNSET
 
 
+_LANG_RUNTIME_STATE_FIELDS = frozenset(f.name for f in fields(LangRuntimeState))
+_LANG_OVERRIDE_FIELDS = tuple(f.name for f in fields(LangRunOverrides))
+_LANG_OVERRIDE_DICT_FIELDS = frozenset(
+    {
+        "complexity_map",
+        "review_cache",
+        "runtime_settings",
+        "runtime_options",
+        "detector_coverage",
+    }
+)
+_LANG_OVERRIDE_LIST_FIELDS = frozenset({"coverage_warnings"})
+_LANG_OVERRIDE_INT_FIELDS = frozenset(
+    {
+        "large_threshold_override",
+        "props_threshold_override",
+    }
+)
+_FORWARDED_CONFIG_ATTRS = frozenset(
+    {
+        # Explicit delegation surface for LangRun -> LangConfig.
+        # New LangConfig fields are intentionally opt-in here.
+        "name",
+        "extensions",
+        "exclusions",
+        "default_src",
+        "build_dep_graph",
+        "entry_patterns",
+        "barrel_names",
+        "phases",
+        "fixers",
+        "get_area",
+        "detect_commands",
+        "extract_functions",
+        "boundaries",
+        "typecheck_cmd",
+        "file_finder",
+        "large_threshold",
+        "complexity_threshold",
+        "default_scan_profile",
+        "setting_specs",
+        "runtime_option_specs",
+        "detect_markers",
+        "external_test_dirs",
+        "test_file_extensions",
+        "review_module_patterns_fn",
+        "review_api_surface_fn",
+        "review_guidance",
+        "review_low_value_pattern",
+        "holistic_review_dimensions",
+        "migration_pattern_pairs",
+        "migration_mixed_extensions",
+        "zone_rules",
+        "integration_depth",
+        "detect_lang_security",
+        "detect_lang_security_detailed",
+        "detect_private_imports",
+        "normalize_settings",
+        "normalize_runtime_options",
+        "scan_coverage_prerequisites",
+        "set_runtime_context",
+    }
+)
+
+
+class LangRuntimeContract(Protocol):
+    """Explicit runtime interface consumed by detector phases."""
+
+    name: str
+    extensions: list[str]
+    entry_patterns: list[str]
+    barrel_names: set[str]
+    external_test_dirs: list[str]
+    test_file_extensions: list[str]
+    review_low_value_pattern: object | None
+    file_finder: FileFinder | None
+    extract_functions: FunctionExtractor | None
+    get_area: Callable[[str], str] | None
+    build_dep_graph: DepGraphBuilder
+    detect_lang_security_detailed: Callable[[list[str], FileZoneMap | None], LangSecurityResult]
+    detect_private_imports: Callable[[dict, FileZoneMap | None], tuple[list[dict], int]]
+    large_threshold: int
+    complexity_threshold: int
+    props_threshold: int
+
+    zone_map: FileZoneMap | None
+    dep_graph: dict[str, dict[str, Any]] | None
+    complexity_map: dict[str, float]
+    review_cache: dict[str, Any]
+    review_max_age_days: int
+    detector_coverage: dict[str, DetectorCoverageRecord]
+    coverage_warnings: list[DetectorCoverageRecord]
+
+    def runtime_setting(self, key: str, default: Any = None) -> Any: ...
+
+    def runtime_option(self, key: str, default: Any = None) -> Any: ...
+
+    def scan_coverage_prerequisites(self) -> list[DetectorCoverageStatus]: ...
+
+
 @dataclass
 class LangRun:
     """Runtime facade over an immutable LangConfig."""
@@ -58,27 +164,20 @@ class LangRun:
     config: LangConfig
     state: LangRuntimeState = field(default_factory=LangRuntimeState)
 
-    def __getattr__(self, name: str):
-        return getattr(self.config, name)
-
-    def __dir__(self):
-        """Expose LangConfig fields for IDE autocomplete and discoverability."""
-        return list(super().__dir__()) + [f.name for f in fields(self.config)]
-
     @property
-    def zone_map(self):
+    def zone_map(self) -> FileZoneMap | None:
         return self.state.zone_map
 
     @zone_map.setter
-    def zone_map(self, value) -> None:
+    def zone_map(self, value: FileZoneMap | None) -> None:
         self.state.zone_map = value
 
     @property
-    def dep_graph(self):
+    def dep_graph(self) -> dict[str, dict[str, Any]] | None:
         return self.state.dep_graph
 
     @dep_graph.setter
-    def dep_graph(self, value) -> None:
+    def dep_graph(self, value: dict[str, dict[str, Any]] | None) -> None:
         self.state.dep_graph = value
 
     @property
@@ -106,6 +205,70 @@ class LangRun:
         self.state.review_max_age_days = int(value)
 
     @property
+    def runtime_settings(self) -> dict[str, Any]:
+        return self.state.runtime_settings
+
+    @runtime_settings.setter
+    def runtime_settings(self, value: dict[str, Any]) -> None:
+        self.state.runtime_settings = value
+
+    @property
+    def runtime_options(self) -> dict[str, Any]:
+        return self.state.runtime_options
+
+    @runtime_options.setter
+    def runtime_options(self, value: dict[str, Any]) -> None:
+        self.state.runtime_options = value
+
+    @property
+    def large_threshold_override(self) -> int:
+        return self.state.large_threshold_override
+
+    @large_threshold_override.setter
+    def large_threshold_override(self, value: int) -> None:
+        self.state.large_threshold_override = int(value)
+
+    @property
+    def props_threshold_override(self) -> int:
+        return self.state.props_threshold_override
+
+    @props_threshold_override.setter
+    def props_threshold_override(self, value: int) -> None:
+        self.state.props_threshold_override = int(value)
+
+    @property
+    def detector_coverage(self) -> dict[str, DetectorCoverageRecord]:
+        return self.state.detector_coverage
+
+    @detector_coverage.setter
+    def detector_coverage(self, value: dict[str, DetectorCoverageRecord]) -> None:
+        self.state.detector_coverage = value
+
+    @property
+    def coverage_warnings(self) -> list[DetectorCoverageRecord]:
+        return self.state.coverage_warnings
+
+    @coverage_warnings.setter
+    def coverage_warnings(self, value: list[DetectorCoverageRecord]) -> None:
+        self.state.coverage_warnings = value
+
+    def __getattr__(self, name: str):
+        if name in _FORWARDED_CONFIG_ATTRS:
+            return getattr(self.config, name)
+        raise AttributeError(
+            f"{self.__class__.__name__!s} has no attribute {name!r}; "
+            "access runtime state via explicit LangRun properties"
+        )
+
+    def __dir__(self):
+        """Expose LangConfig + mutable runtime fields for discoverability."""
+        return (
+            list(super().__dir__())
+            + sorted(_FORWARDED_CONFIG_ATTRS)
+            + sorted(_LANG_RUNTIME_STATE_FIELDS)
+        )
+
+    @property
     def large_threshold(self) -> int:
         override = self.state.large_threshold_override
         if isinstance(override, int) and override > 0:
@@ -117,7 +280,7 @@ class LangRun:
         override = self.state.props_threshold_override
         if isinstance(override, int) and override > 0:
             return override
-        return 14
+        return self.config.props_threshold
 
     def runtime_setting(self, key: str, default: Any = None) -> Any:
         if key in self.state.runtime_settings:
@@ -135,21 +298,32 @@ class LangRun:
             return copy.deepcopy(spec.default)
         return default
 
-    @property
-    def detector_coverage(self) -> dict[str, DetectorCoverageRecord]:
-        return self.state.detector_coverage
 
-    @detector_coverage.setter
-    def detector_coverage(self, value: dict[str, DetectorCoverageRecord]) -> None:
-        self.state.detector_coverage = value
+def _coerce_lang_override(field_name: str, value: object) -> object:
+    """Normalize override values to LangRuntimeState-compatible payloads."""
+    if field_name in _LANG_OVERRIDE_DICT_FIELDS:
+        return value or {}
+    if field_name in _LANG_OVERRIDE_LIST_FIELDS:
+        return value or []
+    if field_name in _LANG_OVERRIDE_INT_FIELDS:
+        return int(value or 0)
+    if field_name == "review_max_age_days":
+        if value is None:
+            return None
+        return int(value)
+    return value
 
-    @property
-    def coverage_warnings(self) -> list[DetectorCoverageRecord]:
-        return self.state.coverage_warnings
 
-    @coverage_warnings.setter
-    def coverage_warnings(self, value: list[DetectorCoverageRecord]) -> None:
-        self.state.coverage_warnings = value
+def _apply_lang_overrides(runtime: LangRun, overrides: LangRunOverrides) -> None:
+    """Apply override bundle to runtime state via one normalized loop."""
+    for field_name in _LANG_OVERRIDE_FIELDS:
+        value = getattr(overrides, field_name)
+        if value is _UNSET:
+            continue
+        coerced = _coerce_lang_override(field_name, value)
+        if field_name == "review_max_age_days" and coerced is None:
+            continue
+        setattr(runtime, field_name, coerced)
 
 
 def make_lang_run(
@@ -170,38 +344,12 @@ def make_lang_run(
         )
 
     resolved = overrides if overrides is not None else LangRunOverrides()
-    if resolved.zone_map is not _UNSET:
-        runtime.zone_map = resolved.zone_map
-    if resolved.dep_graph is not _UNSET:
-        runtime.dep_graph = resolved.dep_graph
-    if resolved.complexity_map is not _UNSET:
-        runtime.complexity_map = resolved.complexity_map or {}
-    if resolved.review_cache is not _UNSET:
-        runtime.review_cache = resolved.review_cache or {}
-    if resolved.review_max_age_days is not _UNSET:
-        if resolved.review_max_age_days is not None:
-            runtime.review_max_age_days = int(resolved.review_max_age_days)
-    if resolved.runtime_settings is not _UNSET:
-        runtime.state.runtime_settings = resolved.runtime_settings or {}
-    if resolved.runtime_options is not _UNSET:
-        runtime.state.runtime_options = resolved.runtime_options or {}
-    if resolved.large_threshold_override is not _UNSET:
-        runtime.state.large_threshold_override = int(
-            resolved.large_threshold_override or 0
-        )
-    if resolved.props_threshold_override is not _UNSET:
-        runtime.state.props_threshold_override = int(
-            resolved.props_threshold_override or 0
-        )
-    if resolved.detector_coverage is not _UNSET:
-        runtime.state.detector_coverage = resolved.detector_coverage or {}
-    if resolved.coverage_warnings is not _UNSET:
-        runtime.state.coverage_warnings = resolved.coverage_warnings or []
-
+    _apply_lang_overrides(runtime, resolved)
     return runtime
 
 
 __all__ = [
+    "LangRuntimeContract",
     "LangRun",
     "LangRunOverrides",
     "LangRuntimeState",

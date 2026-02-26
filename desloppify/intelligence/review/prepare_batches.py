@@ -140,6 +140,8 @@ def _batch_arch_coupling(ctx: HolisticContext, *, max_files: int | None = None) 
         [
             ctx.architecture.get("god_modules", []),
             ctx.coupling.get("module_level_io", []),
+            ctx.coupling.get("boundary_violations", []),
+            ctx.dependencies.get("deferred_import_density", []),
         ],
         max_files=max_files,
     )
@@ -147,7 +149,7 @@ def _batch_arch_coupling(ctx: HolisticContext, *, max_files: int | None = None) 
         "name": "Architecture & Coupling",
         "dimensions": ["cross_module_architecture", "high_level_elegance"],
         "files_to_read": files,
-        "why": "god modules, import-time side effects",
+        "why": "god modules, import-time side effects, boundary violations, deferred import pressure",
     }
 
 
@@ -167,15 +169,32 @@ def _batch_conventions_errors(
         for filepath in _representative_files_for_directory(ctx, directory):
             mixed_dir_files.append({"file": filepath})
 
+    exception_files = [
+        {"file": item.get("file", "")}
+        for item in ctx.errors.get("exception_hotspots", [])
+        if isinstance(item, dict)
+    ]
+    dupe_files = [
+        {"file": item.get("files", [""])[0]}
+        for item in ctx.conventions.get("duplicate_clusters", [])
+        if isinstance(item, dict) and item.get("files")
+    ]
+    naming_drift_files: list[dict[str, str]] = []
+    for entry in ctx.conventions.get("naming_drift", []):
+        if isinstance(entry, dict):
+            directory = entry.get("directory", "")
+            for filepath in _representative_files_for_directory(ctx, directory):
+                naming_drift_files.append({"file": filepath})
+
     files = _collect_unique_files(
-        [outlier_files, mixed_dir_files],
+        [outlier_files, mixed_dir_files, exception_files, dupe_files, naming_drift_files],
         max_files=max_files,
     )
     return {
         "name": "Conventions & Errors",
         "dimensions": ["convention_outlier", "error_consistency", "mid_level_elegance"],
         "files_to_read": files,
-        "why": "naming drift, behavioral outliers, mixed error strategies",
+        "why": "naming drift, behavioral outliers, mixed error strategies, exception hotspots, duplicate clusters",
     }
 
 
@@ -207,6 +226,28 @@ def _batch_abstractions_deps(
             for filepath in item.get(group, []):
                 interface_files.append({"file": filepath})
 
+    delegation_files = [
+        {"file": item.get("file", "")}
+        for item in ctx.abstractions.get("delegation_heavy_classes", [])
+        if isinstance(item, dict)
+    ]
+    facade_files = [
+        {"file": item.get("file", "")}
+        for item in ctx.abstractions.get("facade_modules", [])
+        if isinstance(item, dict)
+    ]
+    type_violation_files = [
+        {"file": item.get("file", "")}
+        for item in ctx.abstractions.get("typed_dict_violations", [])
+        if isinstance(item, dict)
+    ]
+
+    complexity_files = [
+        {"file": item.get("file", "")}
+        for item in ctx.abstractions.get("complexity_hotspots", [])
+        if isinstance(item, dict)
+    ]
+
     cycle_files: list[dict] = []
     for summary in ctx.dependencies.get("cycle_summaries", []):
         for token in summary.split():
@@ -219,6 +260,10 @@ def _batch_abstractions_deps(
             indirection_files,
             param_bag_files,
             interface_files,
+            delegation_files,
+            facade_files,
+            type_violation_files,
+            complexity_files,
             cycle_files,
         ],
         max_files=max_files,
@@ -232,7 +277,7 @@ def _batch_abstractions_deps(
             "low_level_elegance",
         ],
         "files_to_read": files,
-        "why": "abstraction hotspots (wrappers/interfaces/param bags), dep cycles",
+        "why": "abstraction hotspots (wrappers/interfaces/param bags/delegation-heavy classes/facade modules/TypedDict violations), dep cycles",
     }
 
 
@@ -301,6 +346,12 @@ def _batch_package_organization(
     """Batch 7: Package Organization - file placement, directory boundaries."""
     structure = ctx.structure
     struct_files: list[dict] = []
+    # Add flat_dir_findings directory representatives
+    for entry in structure.get("flat_dir_findings", []):
+        if isinstance(entry, dict):
+            directory = entry.get("directory", "")
+            for filepath in _representative_files_for_directory(ctx, directory):
+                struct_files.append({"file": filepath})
     for rf in structure.get("root_files", []):
         if rf.get("role") == "peripheral":
             struct_files.append({"file": rf["file"]})
@@ -333,6 +384,38 @@ def _batch_package_organization(
         "dimensions": ["package_organization", "high_level_elegance"],
         "files_to_read": files,
         "why": "file placement, directory boundaries, architectural layering",
+    }
+
+
+def _batch_state_design(ctx: HolisticContext, *, max_files: int | None = None) -> dict:
+    """Batch 8: State & Design Integrity - mutable globals, signal density hotspots."""
+    evidence = ctx.scan_evidence
+    mutable_files = [
+        item for item in evidence.get("mutable_globals", [])
+        if isinstance(item, dict)
+    ]
+    complexity_files = [
+        item for item in evidence.get("complexity_hotspots", [])[:10]
+        if isinstance(item, dict)
+    ]
+    error_files = [
+        item for item in evidence.get("error_hotspots", [])[:10]
+        if isinstance(item, dict)
+    ]
+    density_files = [
+        {"file": item["file"]}
+        for item in evidence.get("signal_density", [])[:10]
+        if isinstance(item, dict) and item.get("file")
+    ]
+    files = _collect_unique_files(
+        [mutable_files, complexity_files, error_files, density_files],
+        max_files=max_files,
+    )
+    return {
+        "name": "State & Design Integrity",
+        "dimensions": ["initialization_coupling", "design_coherence"],
+        "files_to_read": files,
+        "why": "mutable global state, concentrated quality signals, initialization coupling patterns",
     }
 
 
@@ -415,6 +498,7 @@ def build_investigation_batches(
         _batch_authorization(ctx, max_files=max_files_per_batch),
         _batch_ai_debt_migrations(ctx, max_files=max_files_per_batch),
         _batch_package_organization(ctx, max_files=max_files_per_batch),
+        _batch_state_design(ctx, max_files=max_files_per_batch),
         _batch_governance_contracts(
             ctx,
             repo_root=repo_root,
@@ -476,6 +560,7 @@ def batch_concerns(
     concerns: list,
     *,
     max_files: int | None = None,
+    active_dimensions: list[str] | None = None,
 ) -> dict | None:
     """Build investigation batch from mechanical concern signals.
 
@@ -484,18 +569,55 @@ def batch_concerns(
     """
     if not concerns:
         return None
+    default_dims = ["design_coherence", "initialization_coupling"]
+    selected_dims = [
+        dim for dim in (active_dimensions or [])
+        if isinstance(dim, str) and dim
+    ]
+    selected_set = set(selected_dims)
+    overlap_dims = [dim for dim in default_dims if dim in selected_set]
+    concern_dims = overlap_dims or list(default_dims)
+    mapped_to_active_dims = bool(selected_dims) and not overlap_dims
+    if mapped_to_active_dims:
+        # Prevent concern signals from being silently dropped by scoped runs.
+        concern_dims = list(selected_dims)
+
     types = sorted({c.type for c in concerns if c.type})
     why_parts = ["mechanical detectors identified structural patterns needing judgment"]
     if types:
         why_parts.append(f"concern types: {', '.join(types)}")
+    if mapped_to_active_dims:
+        why_parts.append(
+            "mapped to active dimensions because design_coherence/initialization_coupling are not selected"
+        )
     files: list[str] = []
     seen: set[str] = set()
+    concern_signals: list[dict[str, object]] = []
     for concern in concerns:
         candidate = _normalize_file_path(getattr(concern, "file", ""))
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
         files.append(candidate)
+
+        evidence_raw = getattr(concern, "evidence", ())
+        evidence = [
+            str(entry).strip()
+            for entry in evidence_raw
+            if isinstance(entry, str) and entry.strip()
+        ][:4]
+        summary = str(getattr(concern, "summary", "")).strip()
+        question = str(getattr(concern, "question", "")).strip()
+        concern_type = str(getattr(concern, "type", "")).strip()
+        concern_signals.append(
+            {
+                "type": concern_type or "design_concern",
+                "file": candidate,
+                "summary": summary or "Mechanical concern requires subjective judgment",
+                "question": question or "Is this pattern intentional or debt?",
+                "evidence": evidence,
+            }
+        )
 
     total_candidate_files = len(files)
     if (
@@ -511,10 +633,13 @@ def batch_concerns(
 
     return {
         "name": "Design coherence — Mechanical Concern Signals",
-        "dimensions": ["design_coherence"],
+        "dimensions": concern_dims,
         "files_to_read": files,
         "why": "; ".join(why_parts),
         "total_candidate_files": total_candidate_files,
+        "concern_signals": concern_signals[:12],
+        "concern_signal_count": len(concern_signals),
+        "mapped_to_active_dimensions": mapped_to_active_dims,
     }
 
 

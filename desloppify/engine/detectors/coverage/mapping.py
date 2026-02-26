@@ -9,8 +9,8 @@ from collections import deque
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.core.fallbacks import log_best_effort_failure
 from desloppify.hook_registry import get_lang_hook
+from desloppify.engine.detectors.test_coverage.io import read_coverage_file
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +108,12 @@ def _import_based_mapping(
             entry = graph.get(f)
             if entry is None:
                 continue
-            try:
-                content = Path(f).read_text()
-            except (OSError, UnicodeDecodeError):
+            read_result = read_coverage_file(
+                f, context="coverage_import_mapping_facade_logic"
+            )
+            if not read_result.ok:
                 continue
+            content = read_result.content
             if not has_logic(f, content):
                 for imp in entry.get("imports", set()):
                     if imp in production_files:
@@ -157,11 +159,10 @@ def _parse_test_imports(
 ) -> set[str]:
     """Parse import statements from a test file and resolve production files."""
     tested = set()
-    try:
-        content = Path(test_path).read_text()
-    except (OSError, UnicodeDecodeError) as exc:
-        log_best_effort_failure(logger, f"read test import source {test_path}", exc)
+    read_result = read_coverage_file(test_path, context="coverage_import_mapping_parse")
+    if not read_result.ok:
         return tested
+    content = read_result.content
 
     if lang_name is None:
         lang_name = _infer_lang_name({test_path}, production_files)
@@ -293,13 +294,10 @@ def _analyze_test_quality(
     quality_map: dict[str, dict] = {}
 
     for tf in test_files:
-        try:
-            content = Path(tf).read_text()
-        except (OSError, UnicodeDecodeError) as exc:
-            log_best_effort_failure(
-                logger, f"read test file for quality analysis {tf}", exc
-            )
+        read_result = read_coverage_file(tf, context="coverage_quality_analysis")
+        if not read_result.ok:
             continue
+        content = read_result.content
 
         stripped = strip_comments(content)
         lines = stripped.splitlines()
@@ -319,8 +317,11 @@ def _analyze_test_quality(
                 )
             )
         except TypeError as exc:
-            log_best_effort_failure(
-                logger, f"classify placeholder test quality for {tf}", exc
+            logger.debug(
+                "Best-effort fallback failed while trying to classify placeholder "
+                "test quality for %s: %s",
+                tf,
+                exc,
             )
             is_placeholder = False
 

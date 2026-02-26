@@ -72,18 +72,21 @@ def test_item_sort_key_tier_ordering():
     )
 
 
-def test_item_sort_key_review_highest_priority():
-    """Review findings sort before all other items."""
-    review_item = {
+def test_item_sort_key_review_uses_natural_tier():
+    """Review findings sort by their natural tier like mechanical findings."""
+    review_t2 = {
         "is_review": True,
         "review_weight": 1.0,
+        "effective_tier": 2,
+        "tier": 2,
         "confidence": "high",
         "id": "r1",
     }
     t1_item = {"tier": 1, "effective_tier": 1, "confidence": "high", "id": "a"}
-    assert work_queue_ranking.item_sort_key(
-        review_item
-    ) < work_queue_ranking.item_sort_key(t1_item)
+    # T1 mechanical sorts before T2 review
+    assert work_queue_ranking.item_sort_key(t1_item) < work_queue_ranking.item_sort_key(
+        review_t2
+    )
 
 
 def test_group_queue_items_by_detector():

@@ -9,7 +9,8 @@ from desloppify.app.commands.scan.scan_helpers import _format_delta
 from desloppify.app.commands.status_parts.strict_target import (
     format_strict_target_progress,
 )
-from desloppify.utils import colorize
+from desloppify.app.commands.scan.scan_reporting_llm import _is_agent_environment
+from desloppify.core.output_api import colorize
 
 logger = logging.getLogger(__name__)
 
@@ -64,21 +65,9 @@ def show_score_delta(
     prev_verified: float | None = None,
     non_comparable_reason: str | None = None,
 ):
-    """Print the canonical score trio with deltas."""
+    """Print the canonical score quartet with deltas."""
     stats = state["stats"]
     new = state_mod.score_snapshot(state)
-    findings = state.get("findings", {})
-    scoped_open = int(stats.get("open", 0) or 0)
-    out_of_scope_open = 0
-    global_open = scoped_open
-    if isinstance(findings, dict) and findings:
-        scope_counts = state_mod.open_scope_breakdown(findings, state.get("scan_path"))
-        scoped_open = int(scope_counts.get("in_scope", scoped_open) or 0)
-        out_of_scope_open = int(scope_counts.get("out_of_scope", 0) or 0)
-        global_open = int(scope_counts.get("global", scoped_open) or 0)
-
-    wontfix = stats.get("wontfix", 0)
-    wontfix_str = f" · {wontfix} wontfix" if wontfix else ""
 
     if (
         new.overall is None
@@ -110,18 +99,11 @@ def show_score_delta(
             f"  verified {new.verified:.1f}/100{verified_delta_str}",
             verified_color,
         )
-        + colorize(
-            "  |  "
-            f"open (in-scope): {scoped_open} · "
-            f"open (out-of-scope carried): {out_of_scope_open} · "
-            f"open (global): {global_open}"
-            f"{wontfix_str} / {stats['total']} in-scope total",
-            "dim",
-        )
     )
     if isinstance(non_comparable_reason, str) and non_comparable_reason.strip():
         print(colorize(f"  Δ non-comparable: {non_comparable_reason.strip()}", "yellow"))
     # Surface wontfix debt gap prominently when significant
+    wontfix = stats.get("wontfix", 0)
     gap = (new.overall or 0) - (new.strict or 0)
     if gap >= 5 and wontfix >= 10:
         print(
@@ -131,6 +113,15 @@ def show_score_delta(
                 "yellow",
             )
         )
+
+    # Score legend — shown on first scan or when strict gap is significant
+    scan_count = state.get("scan_count", 0)
+    if scan_count <= 1 or gap > 10 or _is_agent_environment():
+        print(colorize("  Score guide:", "dim"))
+        print(colorize("    overall  = 40% mechanical + 60% subjective (lenient — ignores wontfix)", "dim"))
+        print(colorize("    objective = mechanical detectors only (no subjective review)", "dim"))
+        print(colorize("    strict   = like overall, but wontfix counts against you  <-- your north star", "dim"))
+        print(colorize("    verified = strict, but only credits scan-verified fixes", "dim"))
 
     integrity = state.get("subjective_integrity", {})
     if isinstance(integrity, dict):

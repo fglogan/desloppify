@@ -8,6 +8,7 @@ __all__ = [
     "suppression_metrics",
 ]
 
+from desloppify.core._internal.coercions import coerce_confidence
 from desloppify.engine._scoring.policy.core import matches_target_score
 from desloppify.engine._state.filtering import path_scoped_findings
 from desloppify.engine._state.schema import StateModel, ensure_state_defaults
@@ -139,14 +140,6 @@ def _aggregate_scores(
     }
 
 
-def _coerce_confidence(value: object, *, default: float = 1.0) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(0.0, min(1.0, parsed))
-
-
 def _active_scan_coverage(state: StateModel) -> ScanCoverageRecord:
     scan_coverage = state.get("scan_coverage", {})
     if not isinstance(scan_coverage, dict) or not scan_coverage:
@@ -184,7 +177,7 @@ def _apply_scan_coverage_to_dimension_scores(
         if not isinstance(raw, dict):
             continue
         status = str(raw.get("status", "full")).lower()
-        confidence = _coerce_confidence(raw.get("confidence"), default=1.0)
+        confidence = coerce_confidence(raw.get("confidence"), default=1.0)
         if status != "reduced" and confidence >= 1.0:
             continue
         reduced_detectors[str(detector)] = dict(raw)
@@ -197,7 +190,7 @@ def _apply_scan_coverage_to_dimension_scores(
                 "detector": detector,
                 "status": str(payload.get("status", "reduced")),
                 "confidence": round(
-                    _coerce_confidence(payload.get("confidence"), default=1.0), 2
+                    coerce_confidence(payload.get("confidence"), default=1.0), 2
                 ),
                 "summary": str(payload.get("summary", "") or ""),
                 "impact": str(payload.get("impact", "") or ""),
@@ -224,7 +217,7 @@ def _apply_scan_coverage_to_dimension_scores(
                 detector_meta.pop("coverage_confidence", None)
                 detector_meta.pop("coverage_summary", None)
                 continue
-            confidence = _coerce_confidence(reduced.get("confidence"), default=1.0)
+            confidence = coerce_confidence(reduced.get("confidence"), default=1.0)
             status = str(reduced.get("status", "reduced"))
             summary = str(reduced.get("summary", "") or "")
             detector_meta["coverage_status"] = status
@@ -248,7 +241,7 @@ def _apply_scan_coverage_to_dimension_scores(
         reduced_dimensions.append(str(dim_name))
         dim_data["coverage_status"] = "reduced"
         dim_data["coverage_confidence"] = round(
-            min(_coerce_confidence(item.get("confidence"), default=1.0) for item in impacts),
+            min(coerce_confidence(item.get("confidence"), default=1.0) for item in impacts),
             2,
         )
         dim_data["coverage_impacts"] = impacts
@@ -266,7 +259,7 @@ def _apply_scan_coverage_to_dimension_scores(
         "status": "reduced",
         "confidence": round(
             min(
-                _coerce_confidence(item.get("confidence"), default=1.0)
+                coerce_confidence(item.get("confidence"), default=1.0)
                 for item in score_confidence_detectors
             ),
             2,

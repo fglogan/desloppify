@@ -5,14 +5,18 @@ from __future__ import annotations
 import re
 from fnmatch import fnmatch
 
+from desloppify.core.enums import finding_status_tokens
 from desloppify.core.registry import DETECTORS
+from desloppify.engine.planning.scorecard_projection import (
+    scorecard_subjective_entries,
+)
 from desloppify.intelligence.integrity import (
     is_holistic_subjective_finding,
     unassessed_subjective_dimensions,
 )
 from desloppify.scoring import DISPLAY_NAMES
 
-ALL_STATUSES = {"open", "fixed", "wontfix", "false_positive", "auto_resolved", "all"}
+ALL_STATUSES = set(finding_status_tokens(include_all=True))
 ATTEST_EXAMPLE = (
     "I have actually [DESCRIBE THE CONCRETE CHANGE YOU MADE] "
     "and I am not gaming the score by resolving without fixing."
@@ -153,22 +157,11 @@ def primary_command_for_finding(
         ]
         if available_fixers:
             return f"desloppify fix {available_fixers[0]} --dry-run"
-    if detector == "review":
-        return "desloppify issues"
     if detector == "subjective_review":
         if is_holistic_subjective_finding(item):
             return "desloppify review --prepare"
-        return "desloppify show subjective_review --status open"
+        return "desloppify show subjective"
     return f'desloppify resolve fixed "{item.get("id", "")}" --note "<what you did>" --attest "{ATTEST_EXAMPLE}"'
-
-
-def _get_scorecard_subjective_entries(state: dict, dim_scores: dict) -> list[dict]:
-    """Deferred import to avoid engine -> app layer dependency."""
-    from desloppify.app.output.scorecard_parts.projection import (
-        scorecard_subjective_entries,
-    )
-
-    return scorecard_subjective_entries(state, dim_scores=dim_scores)
 
 
 def subjective_strict_scores(state: dict) -> dict[str, float]:
@@ -176,7 +169,7 @@ def subjective_strict_scores(state: dict) -> dict[str, float]:
     if not dim_scores:
         return {}
 
-    entries = _get_scorecard_subjective_entries(state, dim_scores)
+    entries = scorecard_subjective_entries(state, dim_scores=dim_scores)
     scores: dict[str, float] = {}
     for entry in entries:
         name = str(entry.get("name", "")).strip()
@@ -207,7 +200,7 @@ def build_subjective_items(
         return []
     threshold = max(0.0, min(100.0, float(threshold)))
 
-    subjective_entries = _get_scorecard_subjective_entries(state, dim_scores)
+    subjective_entries = scorecard_subjective_entries(state, dim_scores=dim_scores)
     if not subjective_entries:
         return []
     unassessed_dims = {
@@ -250,18 +243,27 @@ def build_subjective_items(
             name in unassessed_dims
             or (strict_val <= 0.0 and int(entry.get("issues", 0)) == 0)
         )
+        is_stale = bool(entry.get("stale"))
         if is_unassessed:
             primary_command = "desloppify review --prepare"
+        elif is_stale:
+            if cli_keys:
+                primary_command = (
+                    "desloppify review --prepare --dimensions " + ",".join(cli_keys)
+                )
+            else:
+                primary_command = "desloppify review --prepare"
         else:
             if open_review > 0:
-                primary_command = "desloppify issues"
+                primary_command = "desloppify show review --status open"
             elif cli_keys:
                 primary_command = (
                     "desloppify review --prepare --dimensions " + ",".join(cli_keys)
                 )
             else:
                 primary_command = "desloppify review --prepare"
-        summary = f"Subjective dimension below target: {name} ({strict_val:.1f}%)"
+        stale_tag = " [stale — re-review]" if is_stale else ""
+        summary = f"Subjective dimension below target: {name} ({strict_val:.1f}%){stale_tag}"
         items.append(
             {
                 "id": f"subjective::{slugify(dim_key)}",

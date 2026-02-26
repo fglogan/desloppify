@@ -1976,7 +1976,7 @@ class TestReviewHeadline:
         assert "review finding" in headline.lower()
 
     def test_review_suffix_with_uninvestigated(self):
-        """Uninvestigated review findings should mention `desloppify issues`."""
+        """Uninvestigated review findings should mention show review."""
         by_det = {"review": 2, "review_uninvestigated": 2}
         headline = _compute_headline(
             "maintenance",
@@ -1991,7 +1991,7 @@ class TestReviewHeadline:
             open_by_detector=by_det,
         )
         assert headline is not None
-        assert "desloppify issues" in headline
+        assert "desloppify show review" in headline
 
     def test_review_suffix_all_investigated(self):
         """When all review findings are investigated, show 'pending' not 'issues'."""
@@ -2010,7 +2010,7 @@ class TestReviewHeadline:
         )
         assert headline is not None
         assert "pending" in headline
-        assert "desloppify issues" not in headline
+        assert "desloppify show review" not in headline
 
     def test_no_review_suffix_when_zero(self):
         by_det = {"unused": 3, "review": 0, "review_uninvestigated": 0}
@@ -2082,7 +2082,7 @@ class TestReviewReminders:
         assert "review_findings_pending" in types
         msg = next(r for r in reminders if r["type"] == "review_findings_pending")
         assert "1 review finding" in msg["message"]
-        assert "desloppify issues" in msg["message"]
+        assert "desloppify show review" in msg["message"]
 
     def test_no_review_pending_when_all_investigated(self):
         state = self._base_state()
@@ -2141,17 +2141,17 @@ class TestStrategyReviewHint:
             },
             {
                 "priority": 2,
-                "type": "issue_queue",
+                "type": "refactor",
                 "detector": "review",
                 "count": 3,
                 "impact": 0,
-                "command": "desloppify issues",
+                "command": "desloppify show review --status open",
             },
         ]
         result = _compute_strategy(
             findings, by_det, actions, "middle_grind", "typescript"
         )
-        assert "desloppify issues" in result["hint"]
+        assert "desloppify show review" in result["hint"]
         assert "3 finding" in result["hint"]
 
     def test_no_review_in_hint_without_action(self):
@@ -2172,7 +2172,7 @@ class TestStrategyReviewHint:
         result = _compute_strategy(
             findings, by_det, actions, "middle_grind", "typescript"
         )
-        assert "desloppify issues" not in result["hint"]
+        assert "desloppify show review" not in result["hint"]
 
 
 class TestComputeNarrativeContract:

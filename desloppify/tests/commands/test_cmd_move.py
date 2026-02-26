@@ -12,8 +12,8 @@ from desloppify.app.commands.move.move_language import (
     resolve_move_verify_hint,
 )
 from desloppify.app.commands.move.move_planning import dedup_replacements, resolve_dest
-from desloppify.file_discovery import resolve_path
-from desloppify.file_discovery import safe_write_text as safe_write
+from desloppify.core.discovery_api import resolve_path
+from desloppify.core.discovery_api import safe_write_text as safe_write
 
 # ---------------------------------------------------------------------------
 # Module imports

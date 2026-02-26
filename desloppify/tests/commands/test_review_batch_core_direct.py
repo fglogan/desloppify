@@ -105,6 +105,9 @@ def test_batch_prompt_requires_score_and_finding_consistency():
         },
     )
     assert "Score/finding consistency is required" in prompt
+    assert "Seed files (start here):" in prompt
+    assert "Start with the seed files, then freely explore additional repository files" in prompt
+    assert "Evaluate ONLY listed files and ONLY listed dimensions" not in prompt
 
 
 def test_dimension_merge_scorer_penalizes_higher_pressure():

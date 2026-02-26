@@ -6,17 +6,17 @@ import argparse
 import urllib.error
 import urllib.request
 
-from desloppify.utils import (
-    PROJECT_ROOT,
+from desloppify.core._internal.text_utils import get_project_root
+from desloppify.core.skill_docs import (
     SKILL_BEGIN,
     SKILL_END,
     SKILL_TARGETS,
     SKILL_VERSION,
     SKILL_VERSION_RE,
     SkillInstall,
-    colorize,
     find_installed_skill,
 )
+from desloppify.core.output_api import colorize
 
 _RAW_BASE = (
     "https://raw.githubusercontent.com/peteromallet/desloppify/main/docs"
@@ -89,7 +89,7 @@ def update_installed_skill(interface: str) -> bool:
     Returns True on success, False on failure. Prints status messages.
     """
     target_rel, overlay_name, dedicated = SKILL_TARGETS[interface]
-    target_path = PROJECT_ROOT / target_rel
+    target_path = get_project_root() / target_rel
 
     print(colorize(f"Downloading skill document ({interface})...", "dim"))
     try:

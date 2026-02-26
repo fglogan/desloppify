@@ -1,7 +1,7 @@
 """Kotlin language plugin — ktlint."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import KOTLIN_SPEC
+from desloppify.languages._framework.treesitter import KOTLIN_SPEC
 
 generic_lang(
     name="kotlin",

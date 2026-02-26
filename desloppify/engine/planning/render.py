@@ -11,7 +11,7 @@ from desloppify.engine.planning.types import PlanState
 from desloppify.engine.work_queue import QueueBuildOptions, build_work_queue
 from desloppify.scoring import DIMENSIONS, DISPLAY_NAMES
 from desloppify.state import get_objective_score, get_overall_score, get_strict_score
-from desloppify.utils import LOC_COMPACT_THRESHOLD
+from desloppify.core.output_api import LOC_COMPACT_THRESHOLD
 
 
 def _plan_header(state: PlanState, stats: dict) -> list[str]:

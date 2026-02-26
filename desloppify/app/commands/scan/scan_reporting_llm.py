@@ -8,11 +8,11 @@ from pathlib import Path
 
 from desloppify import scoring as scoring_mod
 from desloppify import state as state_mod
-from desloppify import utils as utils_mod
 from desloppify.app.commands.scan.scan_reporting_text import build_workflow_guide
-from desloppify.app.output.scorecard_parts import projection as scorecard_projection_mod
+from desloppify.engine.planning import scorecard_projection as scorecard_projection_mod
 from desloppify.core import registry as registry_mod
 from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core import skill_docs as skill_docs_mod
 from desloppify.engine.work_queue import ATTEST_EXAMPLE
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,12 @@ def _print_score_lines(
         lines.append(f"Verified score:  {verified_score:.1f}/100")
     if lines:
         print("\n".join(lines))
+    # Score legend — always shown in LLM block so agents understand the scoring model
+    print("Score guide:")
+    print("  overall  = 40% mechanical + 60% subjective (lenient — ignores wontfix)")
+    print("  objective = mechanical detectors only (no subjective review)")
+    print("  strict   = like overall, but wontfix counts against you  <-- your north star")
+    print("  verified = strict, but only credits scan-verified fixes")
     print()
 
 
@@ -112,6 +118,30 @@ def _print_dimension_table(state: dict, dim_scores: dict) -> None:
                 f"| {name} | {score:.1f}% | {strict:.1f}% | {issues} | T{tier} | review |"
             )
     print()
+
+
+def _print_drag_summary(dim_scores: dict) -> None:
+    """Print the biggest score-drag dimensions so agents know where to focus."""
+    if not dim_scores:
+        return
+    try:
+        breakdown = scoring_mod.compute_health_breakdown(dim_scores)
+        entries = breakdown.get("entries", [])
+        drags = sorted(
+            [e for e in entries if isinstance(e, dict) and float(e.get("overall_drag", 0) or 0) > 0.01],
+            key=lambda e: -float(e.get("overall_drag", 0) or 0),
+        )
+        if drags:
+            print("Biggest score drags (fixing these dimensions has the most impact):")
+            for entry in drags[:5]:
+                print(
+                    f"  - {entry['name']}: -{float(entry['overall_drag']):.2f} pts "
+                    f"(score {float(entry['score']):.1f}%, "
+                    f"{float(entry['pool_share'])*100:.1f}% of {entry['pool']} pool)"
+                )
+            print()
+    except (ImportError, TypeError, ValueError, KeyError) as exc:
+        logger.debug("Drag summary skipped: %s", exc)
 
 
 def _print_stats_summary(
@@ -193,7 +223,7 @@ def _try_auto_update_skill() -> None:
     Best-effort: swallows all exceptions so a network failure or permission
     error never breaks the scan.
     """
-    install = utils_mod.find_installed_skill()
+    install = skill_docs_mod.find_installed_skill()
 
     if install and not install.stale:
         return  # Up to date.
@@ -266,6 +296,7 @@ def _print_llm_summary(
         verified_score=scores.verified,
     )
     _print_dimension_table(state, dim_scores)
+    _print_drag_summary(dim_scores)
     _print_stats_summary(
         state,
         diff,
@@ -289,9 +320,9 @@ def auto_update_skill() -> None:
     _try_auto_update_skill()
 
     # Single post-check: whatever happened above, is the doc current now?
-    install = utils_mod.find_installed_skill()
+    install = skill_docs_mod.find_installed_skill()
     if not install:
-        names = ", ".join(sorted(utils_mod.SKILL_TARGETS))
+        names = ", ".join(sorted(skill_docs_mod.SKILL_TARGETS))
         print(
             f"No skill document found. Install one for better workflow guidance: "
             f"desloppify update-skill <{names}>"
@@ -299,7 +330,7 @@ def auto_update_skill() -> None:
     elif install.stale:
         print(
             f"Skill document is outdated "
-            f"(v{install.version}, current v{utils_mod.SKILL_VERSION}). "
+            f"(v{install.version}, current v{skill_docs_mod.SKILL_VERSION}). "
             f"Run: desloppify update-skill"
         )
 

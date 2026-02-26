@@ -10,7 +10,7 @@ from pathlib import Path
 from desloppify.engine.detectors.base import ComplexitySignal
 from desloppify.languages._framework.base.shared_phases import run_structural_phase
 from desloppify.languages._framework.runtime import LangRun
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 GO_COMPLEXITY_SIGNALS = [
     ComplexitySignal(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections import defaultdict
 
 from desloppify.app.commands.helpers.rendering import print_ranked_actions
@@ -11,9 +10,12 @@ from desloppify.app.commands.helpers.subjective import print_subjective_followup
 from desloppify.app.commands.scan import (
     scan_reporting_dimensions as reporting_dimensions_mod,
 )
+from desloppify.core.output_api import colorize
+from desloppify.core.paths_api import read_code_snippet
+from desloppify.core.fallbacks import print_write_error
+from desloppify.core.enums import canonical_finding_status
 from desloppify.engine.planning import CONFIDENCE_ORDER
-from desloppify.file_discovery import safe_write_text
-from desloppify.utils import colorize, read_code_snippet
+from desloppify.core.discovery_api import safe_write_text
 
 from .formatting import format_detail
 
@@ -25,7 +27,7 @@ def write_show_output_file(output_file: str, payload: dict, surfaced_count: int)
         print(colorize(f"Wrote {surfaced_count} findings to {output_file}", "green"))
     except OSError as exc:
         payload["output_error"] = str(exc)
-        print(colorize(f"Could not write to {output_file}: {exc}", "red"), file=sys.stderr)
+        print_write_error(output_file, exc, label="show output")
         return False
     return True
 
@@ -40,13 +42,14 @@ def group_matches_by_file(matches: list[dict]) -> list[tuple[str, list]]:
 
 def _print_single_finding(finding: dict, *, show_code: bool) -> None:
     """Render a single finding to terminal."""
+    normalized_status = canonical_finding_status(finding.get("status"))
     status_icon = {
         "open": "○",
         "fixed": "✓",
         "wontfix": "—",
         "false_positive": "✗",
         "auto_resolved": "◌",
-    }.get(finding["status"], "?")
+    }.get(normalized_status, "?")
     zone = finding.get("zone", "production")
     zone_tag = colorize(f" [{zone}]", "dim") if zone != "production" else ""
     print(

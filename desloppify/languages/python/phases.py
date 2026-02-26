@@ -51,7 +51,7 @@ from desloppify.languages.python.phases_quality import (
     phase_smells,
 )
 from desloppify.state import Finding
-from desloppify.utils import log
+from desloppify.core.output_api import log
 
 # ── Config data (single source of truth) ──────────────────
 
@@ -173,6 +173,8 @@ def phase_structural(
         path, file_finder=lang.file_finder
     )
     for e in flat_entries:
+        child_dir_count = int(e.get("child_dir_count", 0))
+        combined_score = int(e.get("combined_score", e.get("file_count", 0)))
         results.append(
             state_mod.make_finding(
                 "flat_dirs",
@@ -180,12 +182,27 @@ def phase_structural(
                 "",
                 tier=3,
                 confidence="medium",
-                summary=f"Flat directory: {e['file_count']} files — consider grouping by domain",
-                detail={"file_count": e["file_count"]},
+                summary=flat_dirs_detector_mod.format_flat_dir_summary(e),
+                detail={
+                    "file_count": e["file_count"],
+                    "child_dir_count": child_dir_count,
+                    "combined_score": combined_score,
+                    "kind": e.get("kind", "overload"),
+                    "parent_sibling_count": int(e.get("parent_sibling_count", 0)),
+                    "wrapper_item_count": int(e.get("wrapper_item_count", 0)),
+                    "sparse_child_count": int(e.get("sparse_child_count", 0)),
+                    "sparse_child_ratio": float(e.get("sparse_child_ratio", 0.0)),
+                    "sparse_child_file_threshold": int(
+                        e.get("sparse_child_file_threshold", 0)
+                    ),
+                },
             )
         )
     if flat_entries:
-        log(f"         flat dirs: {len(flat_entries)} directories with 20+ files")
+        log(
+            f"         flat dirs: {len(flat_entries)} overloaded directories "
+            "(files/subdirs/combined)"
+        )
 
     # Passthrough functions
     pt_entries = detect_passthrough_functions(path)

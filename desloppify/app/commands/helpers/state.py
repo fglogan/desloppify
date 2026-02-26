@@ -6,7 +6,7 @@ from pathlib import Path
 
 from desloppify.app.commands.helpers.lang import auto_detect_lang_name
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 
 def _sole_existing_lang_state_file() -> Path | None:

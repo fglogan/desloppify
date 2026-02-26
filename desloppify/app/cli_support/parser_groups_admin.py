@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from desloppify.languages import get_lang
 
@@ -35,38 +34,6 @@ class _DeprecatedBoolAction(argparse.Action):
             file=sys.stderr,
         )
         setattr(namespace, self.dest, True)
-
-
-_ISSUES_STATUS_LIKE = {
-    "open",
-    "fixed",
-    "wontfix",
-    "false_positive",
-    "auto_resolved",
-    "resolved",
-    "all",
-}
-
-
-def _issues_state_file(value: str) -> str:
-    """Validate issues state-path inputs and reject obvious status-like tokens."""
-    candidate = str(value).strip()
-    normalized = candidate.lower()
-    local_candidate = Path(candidate)
-
-    if (
-        normalized in _ISSUES_STATUS_LIKE
-        and local_candidate.suffix == ""
-        and not local_candidate.exists()
-        and local_candidate.parent == Path(".")
-    ):
-        raise argparse.ArgumentTypeError(
-            f"'{candidate}' looks like a status value, but `issues --state-file` expects "
-            "a path to a state JSON file. Use `desloppify issues list` and pass "
-            "a file path such as `.desloppify/state-typescript.json` when needed."
-        )
-
-    return candidate
 
 
 def _add_detect_parser(sub, detector_names: list[str]) -> None:
@@ -335,7 +302,7 @@ def _add_review_parser(sub) -> None:
         type=int,
         default=120,
         help=(
-            "Terminate a batch when output file is stable and runner streams are idle "
+            "Terminate a batch when output state is unchanged and runner streams are idle "
             "for this many seconds (default: 120; 0 disables kill recovery)"
         ),
     )
@@ -378,45 +345,16 @@ def _add_review_parser(sub) -> None:
         action="store_true",
         help="Run `scan` after successful merged import",
     )
-
-
-def _add_issues_parser(sub) -> None:
-    p_issues = sub.add_parser("issues", help="Review issues (findings) work queue")
-    p_issues.add_argument(
-        "--state-file",
-        dest="state",
-        type=_issues_state_file,
-        default=None,
-        help="Path to state file (default: auto-detected per language)",
-    )
-    p_issues.add_argument(
-        "--state",
-        dest="state",
-        type=_issues_state_file,
-        action=_DeprecatedAction,
-        help=argparse.SUPPRESS,
-    )
-    issues_sub = p_issues.add_subparsers(dest="issues_action")
-    issues_sub.add_parser("list", help="List open review issues")
-    iss_show = issues_sub.add_parser("show", help="Show issue details")
-    iss_show.add_argument("number", type=int)
-    iss_update = issues_sub.add_parser("update", help="Add investigation to an issue")
-    iss_update.add_argument("number", type=int)
-    iss_update.add_argument("--file", type=str, required=True)
-    iss_merge = issues_sub.add_parser(
-        "merge",
+    p_review.add_argument(
+        "--merge",
+        action="store_true",
         help="Merge conceptually duplicate open review findings",
     )
-    iss_merge.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show merge plan without mutating state",
-    )
-    iss_merge.add_argument(
+    p_review.add_argument(
         "--similarity",
         type=float,
         default=0.8,
-        help="Summary similarity threshold for non-identifier merges (0-1, default: 0.8)",
+        help="Summary similarity threshold for merge (0-1, default: 0.8)",
     )
 
 

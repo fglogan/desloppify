@@ -31,6 +31,30 @@ def test_select_holistic_files_uses_lang_file_finder(tmp_path):
     assert seen["path"] == tmp_path
 
 
+def test_select_holistic_files_skips_excluded_zones(tmp_path):
+    class _ZoneMap:
+        def __init__(self, zone_by_file):
+            self._zone_by_file = zone_by_file
+
+        def get(self, filepath):
+            return SimpleNamespace(value=self._zone_by_file.get(filepath, "production"))
+
+    files = ["prod.py", "vendor.py", "test_file.py", "script.py"]
+    zone_map = _ZoneMap(
+        {
+            "prod.py": "production",
+            "vendor.py": "vendor",
+            "test_file.py": "test",
+            "script.py": "script",
+        }
+    )
+    lang = SimpleNamespace(file_finder=lambda _path: files, zone_map=zone_map)
+
+    selected = selection_mod.select_holistic_files(tmp_path, lang, None)
+
+    assert selected == ["prod.py", "script.py"]
+
+
 def test_sibling_behavior_context_reports_shared_pattern_outlier(tmp_path):
     svc_dir = tmp_path / "service"
     files = {
@@ -347,4 +371,3 @@ def test_testing_context_no_test_coverage_findings():
     state = {"findings": {"f1": {"detector": "smells", "status": "open"}}}
     result = selection_mod._testing_context(lang, state, {"a.py": "code"})
     assert result == {"total_files": 1}
-

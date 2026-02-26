@@ -4,12 +4,12 @@
 
   Workflow:
     1. Read .desloppify/query.json for context, excerpts, and investigation batches
-    2. For each batch: read the listed files, evaluate the batch's dimensions (batches are independent — parallelize)
+    2. For each batch: start from listed seed files, then explore likely hotspots/unreviewed neighbors; evaluate the batch's dimensions (batches are independent — parallelize)
     3. Cross-reference findings with the sibling_behavior and convention data
     4. IMPORTANT: findings must be defects only — never positive observations. High scores capture quality; findings capture problems.
     5. Write ALL findings to findings.json — do NOT fix code before importing. Import creates tracked state entries that let desloppify correlate fixes to findings.
     6. Import: desloppify review --import findings.json
-    7. AFTER importing: run `desloppify issues` to see the work queue, then fix each finding in code and `desloppify resolve fixed <id>`
+    7. AFTER importing: run `desloppify show review --status open` to see the work queue, then fix each finding in code and `desloppify resolve fixed <id>`
 
   AGENT PLAN:
   1. Run each investigation batch independently (parallel-friendly)

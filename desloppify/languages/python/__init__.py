@@ -7,9 +7,9 @@ from functools import partial
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import get_area
+from desloppify.core.source_discovery import find_py_files
 from desloppify.engine.detectors.base import FunctionInfo
 from desloppify.engine.policy.zones import COMMON_ZONE_RULES, Zone, ZoneRule
-from desloppify.file_discovery import find_py_files
 from desloppify.hook_registry import register_lang_hooks
 from desloppify.languages import register_lang
 from desloppify.languages._framework.base.phase_builders import (

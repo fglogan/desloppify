@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     get_exclusions,
     matches_exclusion,
     rel,

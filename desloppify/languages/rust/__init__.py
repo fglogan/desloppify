@@ -1,7 +1,7 @@
 """Rust language plugin — cargo clippy + cargo check."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import RUST_SPEC
+from desloppify.languages._framework.treesitter import RUST_SPEC
 
 generic_lang(
     name="rust",

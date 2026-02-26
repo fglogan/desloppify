@@ -9,21 +9,21 @@ from pathlib import Path
 from typing import Any
 
 from desloppify.core.fallbacks import log_best_effort_failure
+from desloppify.core.grep import grep_count_files, grep_files
+from desloppify.core.output_api import colorize, print_table
 from desloppify.core.signal_patterns import DEPRECATION_MARKER_RE
-from desloppify.file_discovery import find_ts_files, rel, resolve_path
+from desloppify.core.discovery_api import find_ts_files, rel, resolve_path
 from desloppify.languages.typescript.detectors.contracts import DetectorResult
-from desloppify.utils import (
-    colorize,
-    grep_count_files,
-    grep_files,
-    print_table,
-)
 
 logger = logging.getLogger(__name__)
 
 
 def detect_deprecated(path: Path) -> tuple[list[dict[str, Any]], int]:
-    """Deprecated detector entrypoint."""
+    """Legacy tuple adapter for deprecated detection.
+
+    Prefer ``detect_deprecated_result`` for new call sites. This wrapper
+    remains for compatibility and will be removed after migration.
+    """
     return detect_deprecated_result(path).as_tuple()
 
 
@@ -177,9 +177,19 @@ def _count_importers(
 
 
 def cmd_deprecated(args: Any) -> None:
-    entries, _ = detect_deprecated(Path(args.path))
+    result = detect_deprecated_result(Path(args.path))
+    entries = result.entries
     if args.json:
-        print(json.dumps({"count": len(entries), "entries": entries}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "count": len(entries),
+                    "entries": entries,
+                    "population_size": result.population_size,
+                },
+                indent=2,
+            )
+        )
         return
 
     if not entries:

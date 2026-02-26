@@ -13,14 +13,14 @@ from collections import defaultdict
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT, strip_c_style_comments
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     find_ts_files,
     read_file_text,
     rel,
     resolve_path,
     safe_write_text,
 )
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 TS6133_RE = re.compile(
     r"^(.+)\((\d+),(\d+)\): error TS6133: '(\S+)' is declared but its value is never read\."

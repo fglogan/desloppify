@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,46 @@ from desloppify.intelligence.review.feedback_contract import (
     LOW_SCORE_FINDING_THRESHOLD,
     REVIEW_QUALITY_HIGH_SCORE_MISSING_ISSUES_KEY,
 )
+from desloppify.intelligence.review.importing.contracts import (
+    ReviewFindingPayload,
+    validate_review_finding_payload,
+)
 
 _DIMENSION_SCORER = DimensionMergeScorer()
+
+
+@dataclass(frozen=True)
+class NormalizedBatchFinding:
+    """Typed internal finding contract for normalized batch payloads."""
+
+    dimension: str
+    identifier: str
+    summary: str
+    confidence: str
+    suggestion: str
+    related_files: list[str]
+    evidence: list[str]
+    impact_scope: str
+    fix_scope: str
+    reasoning: str = ""
+    evidence_lines: list[int] | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "dimension": self.dimension,
+            "identifier": self.identifier,
+            "summary": self.summary,
+            "confidence": self.confidence,
+            "suggestion": self.suggestion,
+            "related_files": list(self.related_files),
+            "evidence": list(self.evidence),
+            "impact_scope": self.impact_scope,
+            "fix_scope": self.fix_scope,
+            "reasoning": self.reasoning,
+        }
+        if self.evidence_lines:
+            payload["evidence_lines"] = list(self.evidence_lines)
+        return payload
 
 
 def parse_batch_selection(raw: str | None, batch_count: int) -> list[int]:
@@ -147,57 +186,69 @@ def _normalize_findings(
     dimension_notes: dict[str, dict[str, Any]],
     *,
     max_batch_findings: int,
+    allowed_dims: set[str],
     low_score_dimensions: set[str] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[NormalizedBatchFinding]:
     """Validate and normalize the findings array from a batch payload."""
     if not isinstance(raw_findings, list):
         raise ValueError("findings must be an array")
 
-    findings: list[dict[str, Any]] = []
-    for item in raw_findings:
-        if not isinstance(item, dict):
+    findings: list[NormalizedBatchFinding] = []
+    errors: list[str] = []
+    for idx, item in enumerate(raw_findings):
+        finding: ReviewFindingPayload | None
+        finding, finding_errors = validate_review_finding_payload(
+            item,
+            label=f"findings[{idx}]",
+            allowed_dimensions=allowed_dims,
+            allow_dismissed=False,
+        )
+        if finding_errors:
+            errors.extend(finding_errors)
             continue
-        dim = str(item.get("dimension", "")).strip()
-        if not dim:
-            continue
-        identifier = str(item.get("identifier", "")).strip()
-        summary = str(item.get("summary", "")).strip()
-        suggestion = str(item.get("suggestion", "")).strip()
-        confidence = str(item.get("confidence", "")).strip().lower()
-        if not identifier or not summary or not suggestion:
-            continue
-        if confidence not in {"high", "medium", "low"}:
-            continue
-        related_files = item.get("related_files")
-        evidence = item.get("evidence")
-        if not isinstance(related_files, list) or not any(
-            isinstance(path, str) and path.strip() for path in related_files
-        ):
-            continue
-        if not isinstance(evidence, list) or not any(
-            isinstance(line, str) and line.strip() for line in evidence
-        ):
-            continue
+        assert finding is not None
 
+        dim = finding["dimension"]
         note = dimension_notes.get(dim, {})
         impact_scope = str(
-            item.get("impact_scope", note.get("impact_scope", ""))
+            (item if isinstance(item, dict) else {}).get(
+                "impact_scope", note.get("impact_scope", "")
+            )
         ).strip()
-        fix_scope = str(item.get("fix_scope", note.get("fix_scope", ""))).strip()
+        fix_scope = str(
+            (item if isinstance(item, dict) else {}).get(
+                "fix_scope", note.get("fix_scope", "")
+            )
+        ).strip()
         if not impact_scope or not fix_scope:
+            errors.append(
+                f"findings[{idx}] requires impact_scope and fix_scope "
+                "(or dimension_notes defaults)"
+            )
             continue
         findings.append(
-            {
-                **item,
-                "dimension": dim,
-                "identifier": identifier,
-                "summary": summary,
-                "suggestion": suggestion,
-                "confidence": confidence,
-                "impact_scope": impact_scope,
-                "fix_scope": fix_scope,
-            }
+            NormalizedBatchFinding(
+                dimension=finding["dimension"],
+                identifier=finding["identifier"],
+                summary=finding["summary"],
+                confidence=finding["confidence"],
+                suggestion=finding["suggestion"],
+                related_files=list(finding.get("related_files", [])),
+                evidence=list(finding.get("evidence", [])),
+                impact_scope=impact_scope,
+                fix_scope=fix_scope,
+                reasoning=str(finding.get("reasoning", "")),
+                evidence_lines=list(finding.get("evidence_lines", []))
+                if isinstance(finding.get("evidence_lines"), list)
+                else None,
+            )
         )
+    if errors:
+        visible = errors[:10]
+        remaining = len(errors) - len(visible)
+        if remaining > 0:
+            visible.append(f"... {remaining} additional finding schema error(s) omitted")
+        raise ValueError("; ".join(visible))
     if len(findings) <= max_batch_findings:
         return findings
 
@@ -206,13 +257,13 @@ def _normalize_findings(
         return findings[:max_batch_findings]
 
     # Preserve at least one finding per low-score dimension before trimming.
-    selected: list[dict[str, Any]] = []
+    selected: list[NormalizedBatchFinding] = []
     selected_indexes: set[int] = set()
     covered: set[str] = set()
     for idx, finding in enumerate(findings):
         if len(selected) >= max_batch_findings:
             break
-        dim = str(finding.get("dimension", "")).strip()
+        dim = finding.dimension.strip()
         if dim not in required_dims or dim in covered:
             continue
         selected.append(finding)
@@ -240,14 +291,14 @@ def _low_score_dimensions(assessments: dict[str, float]) -> set[str]:
 def _enforce_low_score_findings(
     *,
     assessments: dict[str, float],
-    findings: list[dict[str, Any]],
+    findings: list[NormalizedBatchFinding],
 ) -> None:
     """Fail closed when low scores do not report explicit findings."""
     required_dims = _low_score_dimensions(assessments)
     if not required_dims:
         return
     finding_dims = {
-        str(finding.get("dimension", "")).strip() for finding in findings if isinstance(finding, dict)
+        finding.dimension.strip() for finding in findings
     }
     missing = sorted(dim for dim in required_dims if dim not in finding_dims)
     if not missing:
@@ -261,7 +312,7 @@ def _enforce_low_score_findings(
 
 def _compute_batch_quality(
     assessments: dict[str, float],
-    findings: list[dict[str, Any]],
+    findings: list[NormalizedBatchFinding],
     dimension_notes: dict[str, dict[str, Any]],
     allowed_dims: set[str],
     high_score_missing_issue_note: float,
@@ -350,6 +401,7 @@ def normalize_batch_result(
         payload.get("findings"),
         dimension_notes,
         max_batch_findings=max_batch_findings,
+        allowed_dims=allowed_dims,
         low_score_dimensions=_low_score_dimensions(assessments),
     )
     _enforce_low_score_findings(assessments=assessments, findings=findings)
@@ -361,7 +413,12 @@ def normalize_batch_result(
         allowed_dims,
         high_score_missing_issue_note,
     )
-    return assessments, findings, dimension_notes, quality
+    return (
+        assessments,
+        [finding.to_payload() for finding in findings],
+        dimension_notes,
+        quality,
+    )
 
 
 def assessment_weight(

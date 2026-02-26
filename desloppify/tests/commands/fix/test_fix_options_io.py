@@ -129,39 +129,3 @@ def test_load_fixer_exits_when_fixer_name_unknown():
             _load_fixer(args, "nonexistent")
         assert exc_info.value.code == 1
 
-
-# ── fix/io.py: thin wrappers ─────────────────────────────────
-
-
-def test_load_state_delegates_to_state_mod():
-    """_load_state calls state_mod.load_state with the resolved state path."""
-    from desloppify.app.commands.fix.io import _load_state
-
-    fake_state = {"findings": []}
-    args = _FakeArgs()
-
-    with patch(
-        "desloppify.app.commands.fix.io.state_path", return_value="/tmp/state.json"
-    ), patch(
-        "desloppify.app.commands.fix.io.state_mod.load_state",
-        return_value=fake_state,
-    ) as mock_load:
-        path, state = _load_state(args)
-
-    assert path == "/tmp/state.json"
-    assert state is fake_state
-    mock_load.assert_called_once_with("/tmp/state.json")
-
-
-def test_save_state_delegates_to_state_mod():
-    """_save_state calls state_mod.save_state with state and path."""
-    from desloppify.app.commands.fix.io import _save_state
-
-    fake_state = {"findings": []}
-
-    with patch(
-        "desloppify.app.commands.fix.io.state_mod.save_state"
-    ) as mock_save:
-        _save_state(fake_state, "/tmp/state.json")
-
-    mock_save.assert_called_once_with(fake_state, "/tmp/state.json")

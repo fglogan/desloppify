@@ -181,16 +181,16 @@ def _build_refactor_entry(
     adjusted_info = {**tool_info, "guidance": guidance}
 
     if detector == "subjective_review":
-        command = "desloppify fix review"
-        description = f"{count} files need design review — run design review with dimension templates"
+        command = "desloppify review --prepare"
+        description = f"{count} files need design review — run holistic review to refresh subjective scores"
     elif detector == "review":
-        command = "desloppify issues"
+        command = "desloppify show review --status open"
         suffix = "s" if count != 1 else ""
         description = (
             f"{count} review finding{suffix} need investigation — "
-            "run `desloppify issues` to see the work queue"
+            "run `desloppify show review --status open` to see them"
         )
-        adjusted_info = {**adjusted_info, "action_type": "issue_queue"}
+        adjusted_info = {**adjusted_info, "action_type": "refactor"}
     else:
         command = f"desloppify show {detector} --status open"
         description = f"{count} {detector} findings — {guidance}"

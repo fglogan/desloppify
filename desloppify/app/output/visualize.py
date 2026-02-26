@@ -11,14 +11,27 @@ from typing import Any
 
 from desloppify.app.output._viz_cmd_context import load_cmd_context
 from desloppify.app.output.tree_text import render_tree_lines
-from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.core.fallbacks import log_best_effort_failure
-from desloppify.file_discovery import rel, safe_write_text
+from desloppify.core.file_paths import resolve_scan_file
+from desloppify.core.fallbacks import (
+    log_best_effort_failure,
+    print_write_error,
+    warn_best_effort,
+)
+from desloppify.core.output_contract import OutputResult
+from desloppify.core.discovery_api import rel, safe_write_text
 from desloppify.state import get_objective_score, get_overall_score, get_strict_score
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 D3_CDN_URL = "https://d3js.org/d3.v7.min.js"
 logger = logging.getLogger(__name__)
+_RECOVERABLE_LANG_RESOLUTION_ERRORS = (
+    ImportError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+)
 
 
 __all__ = ["D3_CDN_URL", "cmd_viz", "cmd_tree"]
@@ -32,21 +45,65 @@ def _resolve_visualization_lang(path: Path, lang):
 
     search_roots = [path if path.is_dir() else path.parent]
     search_roots.extend(search_roots[0].parents)
+    warned = False
     for root in search_roots:
-        detected = auto_detect_lang(root)
+        try:
+            detected = auto_detect_lang(root)
+        except _RECOVERABLE_LANG_RESOLUTION_ERRORS as exc:
+            log_best_effort_failure(
+                logger,
+                f"auto-detect visualization language for {root}",
+                exc,
+            )
+            if not warned:
+                warned = True
+                warn_best_effort(
+                    "Could not auto-detect language plugins for visualization; "
+                    f"using fallback source discovery ({type(exc).__name__}: {exc})."
+                )
+            continue
         if detected:
-            return get_lang(detected)
+            try:
+                return get_lang(detected)
+            except _RECOVERABLE_LANG_RESOLUTION_ERRORS as exc:
+                log_best_effort_failure(
+                    logger,
+                    f"load visualization language plugin '{detected}'",
+                    exc,
+                )
+                if not warned:
+                    warned = True
+                    warn_best_effort(
+                        "Visualization language plugin failed to load; using fallback source discovery "
+                        f"({type(exc).__name__}: {exc})."
+                    )
+                continue
     return None
 
 
 def _fallback_source_files(path: Path) -> list[str]:
     """Collect source files using extensions from all registered language plugins."""
-    from desloppify.file_discovery import find_source_files
+    from desloppify.core.discovery_api import find_source_files
     from desloppify.languages import available_langs, get_lang
 
     extensions: set[str] = set()
+    warned = False
     for lang_name in available_langs():
-        cfg = get_lang(lang_name)
+        try:
+            cfg = get_lang(lang_name)
+        except _RECOVERABLE_LANG_RESOLUTION_ERRORS as exc:
+            log_best_effort_failure(
+                logger,
+                f"load fallback visualization language plugin '{lang_name}'",
+                exc,
+            )
+            if not warned:
+                warned = True
+                warn_best_effort(
+                    "Some language plugins could not be loaded for visualization fallback; using available plugins only "
+                    f"({type(exc).__name__}: {exc})."
+                )
+            continue
         extensions.update(cfg.extensions)
     if not extensions:
         return []
@@ -61,13 +118,10 @@ def _collect_file_data(path: Path, lang=None) -> list[dict]:
     else:
         source_files = _fallback_source_files(path)
     files = []
+    warned_read_failure = False
     for filepath in source_files:
         try:
-            p = (
-                Path(filepath)
-                if Path(filepath).is_absolute()
-                else PROJECT_ROOT / filepath
-            )
+            p = resolve_scan_file(filepath, scan_root=path)
             content = p.read_text()
             loc = len(content.splitlines())
             files.append(
@@ -81,6 +135,11 @@ def _collect_file_data(path: Path, lang=None) -> list[dict]:
             log_best_effort_failure(
                 logger, f"read visualization source file {filepath}", exc
             )
+            if not warned_read_failure:
+                warned_read_failure = True
+                warn_best_effort(
+                    "Some visualization source files could not be read; output may be incomplete."
+                )
             continue
     return files
 
@@ -139,7 +198,19 @@ def _build_dep_graph_for_path(path: Path, lang) -> dict:
     """Build dependency graph using the resolved language plugin."""
     resolved_lang = _resolve_visualization_lang(path, lang)
     if resolved_lang and resolved_lang.build_dep_graph:
-        return resolved_lang.build_dep_graph(path)
+        try:
+            return resolved_lang.build_dep_graph(path)
+        except (
+            OSError,
+            UnicodeDecodeError,
+            ValueError,
+            RuntimeError,
+            TypeError,
+        ) as exc:
+            log_best_effort_failure(logger, "build visualization dependency graph", exc)
+            warn_best_effort(
+                "Could not build visualization dependency graph; showing file-only view."
+            )
     return {}
 
 
@@ -152,57 +223,84 @@ def _findings_by_file(state: dict | None) -> dict[str, list]:
     return result
 
 
+def _write_visualization_output(output: Path, html: str) -> OutputResult:
+    """Write visualization HTML to disk using the shared output-result contract."""
+    try:
+        safe_write_text(output, html)
+    except OSError as exc:
+        return OutputResult(
+            ok=False,
+            status="error",
+            message=str(exc),
+            error_kind="visualization_write_error",
+        )
+    return OutputResult(ok=True, status="written", message=f"wrote {output}")
+
+
 def generate_visualization(
     path: Path, state: dict | None = None, output: Path | None = None, lang=None
-) -> str:
-    """Generate an HTML treemap visualization."""
-    files = _collect_file_data(path, lang)
-    dep_graph = _build_dep_graph_for_path(path, lang)
-    findings_by_file = _findings_by_file(state)
-    tree = _build_tree(files, dep_graph, findings_by_file)
-    # Escape </ to prevent </script> in filenames from breaking HTML
-    tree_json = json.dumps(tree).replace("</", r"<\/")
+) -> tuple[str, OutputResult]:
+    """Generate an HTML treemap visualization and explicit output result."""
+    try:
+        files = _collect_file_data(path, lang)
+        dep_graph = _build_dep_graph_for_path(path, lang)
+        findings_by_file = _findings_by_file(state)
+        tree = _build_tree(files, dep_graph, findings_by_file)
+        # Escape </ to prevent </script> in filenames from breaking HTML
+        tree_json = json.dumps(tree).replace("</", r"<\/")
 
-    # Stats for header
-    total_files = len(files)
-    total_loc = sum(f["loc"] for f in files)
-    total_findings = sum(len(v) for v in findings_by_file.values())
-    open_findings = sum(
-        1 for fs in findings_by_file.values() for f in fs if f.get("status") == "open"
-    )
-    if state:
-        overall_score = get_overall_score(state)
-        objective_score = get_objective_score(state)
-        strict_score = get_strict_score(state)
-    else:
-        overall_score = objective_score = strict_score = None
+        # Stats for header
+        total_files = len(files)
+        total_loc = sum(f["loc"] for f in files)
+        total_findings = sum(len(v) for v in findings_by_file.values())
+        open_findings = sum(
+            1 for fs in findings_by_file.values() for f in fs if f.get("status") == "open"
+        )
+        if state:
+            overall_score = get_overall_score(state)
+            objective_score = get_objective_score(state)
+            strict_score = get_strict_score(state)
+        else:
+            overall_score = objective_score = strict_score = None
 
-    def fmt_score(value):
-        return f"{value:.1f}" if isinstance(value, int | float) else "N/A"
+        def fmt_score(value):
+            return f"{value:.1f}" if isinstance(value, int | float) else "N/A"
 
-    replacements = {
-        "__D3_CDN_URL__": D3_CDN_URL,
-        "__TREE_DATA__": tree_json,
-        "__TOTAL_FILES__": str(total_files),
-        "__TOTAL_LOC__": f"{total_loc:,}",
-        "__TOTAL_FINDINGS__": str(total_findings),
-        "__OPEN_FINDINGS__": str(open_findings),
-        "__OVERALL_SCORE__": fmt_score(overall_score),
-        "__OBJECTIVE_SCORE__": fmt_score(objective_score),
-        "__STRICT_SCORE__": fmt_score(strict_score),
-    }
-    html = _get_html_template()
-    for placeholder, value in replacements.items():
-        html = html.replace(placeholder, value)
+        replacements = {
+            "__D3_CDN_URL__": D3_CDN_URL,
+            "__TREE_DATA__": tree_json,
+            "__TOTAL_FILES__": str(total_files),
+            "__TOTAL_LOC__": f"{total_loc:,}",
+            "__TOTAL_FINDINGS__": str(total_findings),
+            "__OPEN_FINDINGS__": str(open_findings),
+            "__OVERALL_SCORE__": fmt_score(overall_score),
+            "__OBJECTIVE_SCORE__": fmt_score(objective_score),
+            "__STRICT_SCORE__": fmt_score(strict_score),
+        }
+        html = _get_html_template()
+        for placeholder, value in replacements.items():
+            html = html.replace(placeholder, value)
+    except OSError as exc:
+        return "", OutputResult(
+            ok=False,
+            status="error",
+            message=str(exc),
+            error_kind="visualization_generation_error",
+        )
 
     if output:
-        try:
-            safe_write_text(output, html)
-        except OSError as e:
-            print(f"  \u26a0 Could not write visualization: {e}", file=sys.stderr)
-            return html
+        write_result = _write_visualization_output(output, html)
+        if not write_result.ok:
+            message = write_result.message or "unknown write failure"
+            print_write_error(output, OSError(message), label="visualization")
+            return html, write_result
+        return html, write_result
 
-    return html
+    return html, OutputResult(
+        ok=True,
+        status="not_requested",
+        message="visualization generated in memory only",
+    )
 
 
 def cmd_viz(args: argparse.Namespace) -> None:
@@ -210,7 +308,17 @@ def cmd_viz(args: argparse.Namespace) -> None:
     path, lang, state = load_cmd_context(args)
     output = Path(getattr(args, "output", None) or ".desloppify/treemap.html")
     print(colorize("Collecting file data and building dependency graph...", "dim"))
-    generate_visualization(path, state, output, lang=lang)
+    _, output_result = generate_visualization(path, state, output, lang=lang)
+    if output_result.status != "written":
+        message = output_result.message or "unknown write failure"
+        print(
+            colorize(
+                f"\nVisualization write failed ({output_result.status}): {output} ({message})",
+                "red",
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     print(colorize(f"\nTreemap written to {output}", "green"))
     print(colorize(f"Open in browser: file://{output.resolve()}", "dim"))
 

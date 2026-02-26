@@ -53,9 +53,7 @@ def build_finding_items(
         item["is_review"] = is_review_finding(item)
         item["is_subjective"] = is_subjective_finding(item)
         item["effective_tier"] = (
-            1
-            if item["is_review"]
-            else (4 if item["is_subjective"] else int(finding.get("tier", 3)))
+            4 if item["is_subjective"] else int(finding.get("tier", 3))
         )
         item["review_weight"] = (
             review_finding_weight(item) if item["is_review"] else None
@@ -83,15 +81,6 @@ def build_finding_items(
 
 
 def item_sort_key(item: dict) -> tuple:
-    if item.get("is_review"):
-        # Review queue is always highest priority in `next`.
-        return (
-            0,
-            -float(item.get("review_weight", 0.0) or 0.0),
-            CONFIDENCE_ORDER.get(item.get("confidence", "low"), 9),
-            item.get("id", ""),
-        )
-
     if item.get("kind") == "subjective_dimension" or item.get("is_subjective"):
         return (
             int(item.get("effective_tier", 4)),
@@ -101,10 +90,12 @@ def item_sort_key(item: dict) -> tuple:
         )
 
     detail = detail_dict(item)
+    review_weight = float(item.get("review_weight", 0.0) or 0.0)
     return (
         int(item.get("effective_tier", item.get("tier", 3))),
         0,
         CONFIDENCE_ORDER.get(item.get("confidence", "low"), 9),
+        -review_weight,
         -int(detail.get("count", 0) or 0),
         item.get("id", ""),
     )
@@ -112,24 +103,6 @@ def item_sort_key(item: dict) -> tuple:
 
 def item_explain(item: dict) -> dict:
     effective_tier = int(item.get("effective_tier", item.get("tier", 3)))
-    if item.get("is_review"):
-        return {
-            "kind": "finding",
-            "effective_tier": effective_tier,
-            "confidence": item.get("confidence", "low"),
-            "review_weight": float(item.get("review_weight", 0.0) or 0.0),
-            "id": item.get("id", ""),
-            "policy": (
-                "Open review findings are always ranked first and shown before "
-                "mechanical or synthetic subjective queue items."
-            ),
-            "ranking_factors": [
-                "review_priority",
-                "review_weight desc",
-                "confidence asc",
-                "id asc",
-            ],
-        }
 
     if item.get("kind") == "subjective_dimension":
         return {
@@ -146,11 +119,20 @@ def item_explain(item: dict) -> dict:
     detail = detail_dict(item)
     confidence = item.get("confidence", "low")
     is_subjective = bool(item.get("is_subjective"))
-    ranking_factors = (
-        ["tier fixed to T4", "subjective_score asc", "id asc"]
-        if is_subjective
-        else ["tier asc", "confidence asc", "count desc", "id asc"]
-    )
+    is_review = bool(item.get("is_review"))
+    ranking_factors: list[str]
+    if is_subjective:
+        ranking_factors = ["tier fixed to T4", "subjective_score asc", "id asc"]
+    elif is_review:
+        ranking_factors = [
+            "tier asc",
+            "confidence asc",
+            "review_weight desc",
+            "count desc",
+            "id asc",
+        ]
+    else:
+        ranking_factors = ["tier asc", "confidence asc", "count desc", "id asc"]
     explain = {
         "kind": "finding",
         "effective_tier": effective_tier,
@@ -160,6 +142,8 @@ def item_explain(item: dict) -> dict:
         "id": item.get("id", ""),
         "ranking_factors": ranking_factors,
     }
+    if is_review:
+        explain["review_weight"] = float(item.get("review_weight", 0.0) or 0.0)
     if is_subjective:
         explain["policy"] = (
             "Subjective findings are forced to T4 and do not outrank "

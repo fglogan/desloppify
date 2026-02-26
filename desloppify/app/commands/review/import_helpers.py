@@ -6,10 +6,19 @@ import hashlib
 import json
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.text_utils import get_project_root
+from desloppify.intelligence.review.importing.contracts import (
+    AssessmentImportPolicyModel,
+    AssessmentImportPolicy,
+    AssessmentProvenanceModel,
+    ReviewFindingPayload,
+    ReviewImportPayload,
+    validate_review_finding_payload,
+)
 from desloppify.intelligence.review.feedback_contract import (
     ASSESSMENT_FEEDBACK_THRESHOLD,
     LOW_SCORE_FINDING_THRESHOLD,
@@ -19,16 +28,6 @@ from desloppify.intelligence.review.feedback_contract import (
 from desloppify.intelligence.review.dimensions.data import load_dimensions_for_lang
 from desloppify.state import coerce_assessment_score
 
-_VALID_CONFIDENCE = {"high", "medium", "low"}
-_REQUIRED_HOLISTIC_FIELDS = (
-    "dimension",
-    "identifier",
-    "summary",
-    "related_files",
-    "evidence",
-    "suggestion",
-    "confidence",
-)
 _ASSESSMENT_POLICY_KEY = "_assessment_policy"
 _BLIND_PROVENANCE_KIND = "blind_review_batch_import"
 _SUPPORTED_BLIND_REVIEW_RUNNERS = {"codex", "claude"}
@@ -37,7 +36,6 @@ _ATTESTED_EXTERNAL_REQUIRED_PHRASES = ("without awareness", "unbiased")
 _ATTESTED_EXTERNAL_ATTEST_EXAMPLE = (
     "I validated this review was completed without awareness of overall score and is unbiased."
 )
-_DEFAULT_BLIND_PACKET_PATH = PROJECT_ROOT / ".desloppify" / "review_packet_blind.json"
 _ASSESSMENT_MODE_LABELS = {
     "none": "findings-only (no assessments in payload)",
     "trusted_internal": "trusted internal (durable scores)",
@@ -45,6 +43,91 @@ _ASSESSMENT_MODE_LABELS = {
     "manual_override": "manual override (provisional scores)",
     "findings_only": "findings-only (assessments skipped)",
 }
+
+
+class ImportPayloadLoadError(ValueError):
+    """Raised when review import payload parsing/validation fails."""
+
+    def __init__(self, errors: list[str]) -> None:
+        cleaned = [str(error).strip() for error in errors if str(error).strip()]
+        self.errors = cleaned
+        message = "; ".join(cleaned) if cleaned else "import payload validation failed"
+        super().__init__(message)
+
+
+def _normalize_import_payload_shape(
+    payload: dict[str, Any],
+) -> tuple[ReviewImportPayload | None, list[str]]:
+    """Normalize payload into required-key contract with strict type checks."""
+    errors: list[str] = []
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        errors.append("findings must be a JSON array")
+        findings = []
+
+    assessments = payload.get("assessments")
+    if assessments is None:
+        assessments = {}
+    elif not isinstance(assessments, dict):
+        errors.append("assessments must be an object when provided")
+        assessments = {}
+
+    reviewed_files = payload.get("reviewed_files")
+    normalized_reviewed_files: list[str] = []
+    if reviewed_files is None:
+        normalized_reviewed_files = []
+    elif isinstance(reviewed_files, list):
+        normalized_reviewed_files = [
+            str(item).strip()
+            for item in reviewed_files
+            if isinstance(item, str) and str(item).strip()
+        ]
+    else:
+        errors.append("reviewed_files must be an array when provided")
+
+    review_scope = payload.get("review_scope")
+    if review_scope is None:
+        review_scope = {}
+    elif not isinstance(review_scope, dict):
+        errors.append("review_scope must be an object when provided")
+        review_scope = {}
+
+    provenance = payload.get("provenance")
+    if provenance is None:
+        provenance = {}
+    elif not isinstance(provenance, dict):
+        errors.append("provenance must be an object when provided")
+        provenance = {}
+
+    dimension_notes = payload.get("dimension_notes")
+    if dimension_notes is None:
+        dimension_notes = {}
+    elif not isinstance(dimension_notes, dict):
+        errors.append("dimension_notes must be an object when provided")
+        dimension_notes = {}
+
+    policy = payload.get(_ASSESSMENT_POLICY_KEY)
+    normalized_policy = (
+        policy if isinstance(policy, dict) else AssessmentImportPolicyModel().to_dict()
+    )
+    if errors:
+        return None, errors
+    return (
+        {
+            "findings": findings,
+            "assessments": assessments,
+            "reviewed_files": normalized_reviewed_files,
+            "review_scope": review_scope,
+            "provenance": provenance,
+            "dimension_notes": dimension_notes,
+            _ASSESSMENT_POLICY_KEY: normalized_policy,
+        },
+        [],
+    )
+
+
+def _default_blind_packet_path() -> Path:
+    return get_project_root() / ".desloppify" / "review_packet_blind.json"
 
 
 def _is_sha256_hex(raw: object) -> bool:
@@ -70,91 +153,91 @@ def _resolve_packet_path(raw_path: object) -> Path | None:
     if not text:
         return None
     path = Path(text)
-    return path if path.is_absolute() else PROJECT_ROOT / path
+    return path if path.is_absolute() else get_project_root() / path
 
 
 def _assessment_provenance_status(
-    findings_data: dict[str, Any],
+    findings_data: ReviewImportPayload,
     *,
     import_file: str,
-) -> dict[str, Any]:
+) -> AssessmentProvenanceModel:
     """Evaluate whether assessments come from a trusted blind batch artifact."""
-    provenance = findings_data.get("provenance")
-    if not isinstance(provenance, dict):
-        return {
-            "trusted": False,
-            "reason": "missing provenance metadata",
-            "import_file": import_file,
-        }
+    provenance = findings_data["provenance"]
+    if not provenance:
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason="missing provenance metadata",
+            import_file=import_file,
+        )
 
     kind = str(provenance.get("kind", "")).strip()
     if kind != _BLIND_PROVENANCE_KIND:
-        return {
-            "trusted": False,
-            "reason": f"unsupported provenance kind: {kind or '<missing>'}",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason=f"unsupported provenance kind: {kind or '<missing>'}",
+            import_file=import_file,
+        )
 
     if provenance.get("blind") is not True:
-        return {
-            "trusted": False,
-            "reason": "provenance is not marked blind=true",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason="provenance is not marked blind=true",
+            import_file=import_file,
+        )
 
     runner = str(provenance.get("runner", "")).strip().lower()
     if runner not in _SUPPORTED_BLIND_REVIEW_RUNNERS:
-        return {
-            "trusted": False,
-            "reason": f"unsupported runner in provenance: {runner or '<missing>'}",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason=f"unsupported runner in provenance: {runner or '<missing>'}",
+            import_file=import_file,
+        )
 
     packet_hash = provenance.get("packet_sha256")
     if not _is_sha256_hex(packet_hash):
-        return {
-            "trusted": False,
-            "reason": "missing or invalid packet_sha256 in provenance",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason="missing or invalid packet_sha256 in provenance",
+            import_file=import_file,
+        )
 
     packet_path = _resolve_packet_path(provenance.get("packet_path"))
     if packet_path is None:
-        packet_path = _DEFAULT_BLIND_PACKET_PATH
+        packet_path = _default_blind_packet_path()
     if not packet_path.exists():
-        return {
-            "trusted": False,
-            "reason": f"blind packet not found: {packet_path}",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason=f"blind packet not found: {packet_path}",
+            import_file=import_file,
+        )
     observed_hash = _hash_file_sha256(packet_path)
     if observed_hash is None:
-        return {
-            "trusted": False,
-            "reason": f"unable to hash blind packet: {packet_path}",
-            "import_file": import_file,
-        }
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason=f"unable to hash blind packet: {packet_path}",
+            import_file=import_file,
+        )
     if observed_hash != packet_hash:
-        return {
-            "trusted": False,
-            "reason": (
+        return AssessmentProvenanceModel(
+            trusted=False,
+            reason=(
                 "blind packet hash mismatch "
                 f"(expected {packet_hash[:12]}..., got {observed_hash[:12]}...)"
             ),
-            "import_file": import_file,
-        }
+            import_file=import_file,
+        )
 
-    return {
-        "trusted": True,
-        "reason": "trusted blind subagent provenance",
-        "runner": runner,
-        "packet_path": str(packet_path),
-        "packet_sha256": packet_hash,
-        "import_file": import_file,
-    }
+    return AssessmentProvenanceModel(
+        trusted=True,
+        reason="trusted blind subagent provenance",
+        runner=runner,
+        packet_path=str(packet_path),
+        packet_sha256=packet_hash,
+        import_file=import_file,
+    )
 
 
-def _normalize_override_flags(
+def resolve_override_context(
     *,
     manual_override: bool,
     manual_attest: str | None,
@@ -252,7 +335,7 @@ def _print_import_error_hints(
 
 
 def _apply_assessment_import_policy(
-    findings_data: dict[str, Any],
+    findings_data: ReviewImportPayload,
     *,
     import_file: str,
     attested_external: bool,
@@ -261,39 +344,39 @@ def _apply_assessment_import_policy(
     manual_attest: str | None,
     trusted_assessment_source: bool,
     trusted_assessment_label: str | None,
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[ReviewImportPayload | None, list[str]]:
     """Apply trust gating for assessment imports (findings import always allowed)."""
-    has_assessments = isinstance(findings_data.get("assessments"), dict) and bool(
-        findings_data.get("assessments")
-    )
-    assessment_count = (
-        len(findings_data.get("assessments", {})) if has_assessments else 0
-    )
+    assessments = findings_data["assessments"]
+    has_assessments = bool(assessments)
+    assessment_count = len(assessments) if has_assessments else 0
     provenance_status = _assessment_provenance_status(
         findings_data, import_file=import_file
     )
-    policy: dict[str, Any] = {
-        "assessments_present": has_assessments,
-        "assessment_count": int(assessment_count),
-        "trusted": False,
-        "mode": "none",
-        "reason": "",
-        "provenance": provenance_status,
-    }
+    policy = AssessmentImportPolicyModel(
+        assessments_present=has_assessments,
+        assessment_count=int(assessment_count),
+        trusted=False,
+        mode="none",
+        reason="",
+        provenance=provenance_status,
+    )
+
+    def _attach_policy(payload: ReviewImportPayload) -> ReviewImportPayload:
+        normalized = dict(payload)
+        normalized[_ASSESSMENT_POLICY_KEY] = policy.to_dict()
+        return normalized
+
     if not has_assessments:
-        payload = dict(findings_data)
-        payload[_ASSESSMENT_POLICY_KEY] = policy
-        return payload, []
+        return _attach_policy(findings_data), []
 
     if trusted_assessment_source:
-        policy["mode"] = "trusted_internal"
-        policy["trusted"] = True
-        policy["reason"] = (
-            trusted_assessment_label or "trusted internal run-batches import"
+        policy = replace(
+            policy,
+            mode="trusted_internal",
+            trusted=True,
+            reason=(trusted_assessment_label or "trusted internal run-batches import"),
         )
-        payload = dict(findings_data)
-        payload[_ASSESSMENT_POLICY_KEY] = policy
-        return payload, []
+        return _attach_policy(findings_data), []
 
     if attested_external:
         normalized_attest = _validate_attested_external_attestation(attested_attest)
@@ -302,59 +385,71 @@ def _apply_assessment_import_policy(
                 "--attested-external requires --attest containing both "
                 "'without awareness' and 'unbiased'"
             ]
-        if provenance_status.get("trusted") is not True:
+        if provenance_status.trusted is not True:
             return None, [
                 "--attested-external requires valid blind packet provenance "
-                f"(current status: {provenance_status.get('reason', 'untrusted provenance')})"
+                f"(current status: {provenance_status.reason or 'untrusted provenance'})"
             ]
-        runner = str(provenance_status.get("runner", "")).strip().lower()
+        runner = provenance_status.runner.strip().lower()
         if runner not in _ATTESTED_EXTERNAL_RUNNERS:
             return None, [
                 "--attested-external currently supports runner='claude' provenance only"
             ]
-        policy["mode"] = "attested_external"
-        policy["trusted"] = True
-        policy["reason"] = "attested external blind subagent provenance"
-        policy["attest"] = normalized_attest
-        payload = dict(findings_data)
-        payload[_ASSESSMENT_POLICY_KEY] = policy
-        return payload, []
+        policy = replace(
+            policy,
+            mode="attested_external",
+            trusted=True,
+            reason="attested external blind subagent provenance",
+            attest=normalized_attest,
+        )
+        return _attach_policy(findings_data), []
 
     if manual_override:
         if not isinstance(manual_attest, str) or not manual_attest.strip():
             return None, ["--manual-override requires --attest"]
-        policy["mode"] = "manual_override"
-        policy["reason"] = "manual override attested by operator"
-        policy["attest"] = manual_attest.strip()
-        payload = dict(findings_data)
-        payload[_ASSESSMENT_POLICY_KEY] = policy
-        return payload, []
+        policy = replace(
+            policy,
+            mode="manual_override",
+            reason="manual override attested by operator",
+            attest=manual_attest.strip(),
+        )
+        return _attach_policy(findings_data), []
 
-    policy["mode"] = "findings_only"
-    if findings_data.get("provenance") is not None:
-        provenance_reason = str(provenance_status.get("reason", "")).strip()
-        if provenance_status.get("trusted") is True:
-            policy["reason"] = (
-                "external imports cannot self-attest trust even when provenance appears valid; "
-                "run review --run-batches to apply assessments automatically"
+    policy = replace(policy, mode="findings_only")
+    if findings_data["provenance"]:
+        provenance_reason = provenance_status.reason.strip()
+        if provenance_status.trusted is True:
+            policy = replace(
+                policy,
+                reason=(
+                    "external imports cannot self-attest trust even when provenance appears valid; "
+                    "run review --run-batches to apply assessments automatically"
+                ),
             )
         elif provenance_reason:
-            policy["reason"] = (
-                "external imports cannot self-attest trust "
-                f"({provenance_reason}); run review --run-batches to apply assessments automatically"
+            policy = replace(
+                policy,
+                reason=(
+                    "external imports cannot self-attest trust "
+                    f"({provenance_reason}); run review --run-batches to apply assessments automatically"
+                ),
             )
         else:
-            policy["reason"] = (
-                "external imports cannot self-attest trust; "
-                "run review --run-batches to apply assessments automatically"
+            policy = replace(
+                policy,
+                reason=(
+                    "external imports cannot self-attest trust; "
+                    "run review --run-batches to apply assessments automatically"
+                ),
             )
     else:
-        policy["reason"] = (
-            "missing trusted run-batches source; imported findings only"
+        policy = replace(
+            policy,
+            reason="missing trusted run-batches source; imported findings only",
         )
     payload = dict(findings_data)
-    payload.pop("assessments", None)
-    payload[_ASSESSMENT_POLICY_KEY] = policy
+    payload["assessments"] = {}
+    payload[_ASSESSMENT_POLICY_KEY] = policy.to_dict()
     return payload, []
 
 
@@ -366,14 +461,12 @@ def _has_non_empty_strings(items: object) -> bool:
 
 
 def _validate_holistic_findings_schema(
-    findings_data: dict[str, Any],
+    findings_data: ReviewImportPayload,
     *,
     lang_name: str | None = None,
 ) -> list[str]:
     """Validate strict holistic finding schema expected by issue import."""
-    findings = findings_data.get("findings")
-    if not isinstance(findings, list):
-        return ["findings must be a JSON array"]
+    findings = findings_data["findings"]
 
     allowed_dimensions: set[str] = set()
     if isinstance(lang_name, str) and lang_name.strip():
@@ -382,61 +475,24 @@ def _validate_holistic_findings_schema(
 
     errors: list[str] = []
     for idx, entry in enumerate(findings):
-        label = f"findings[{idx}]"
-        if not isinstance(entry, dict):
-            errors.append(f"{label} must be an object")
-            continue
-
-        # Dismissed concern records use a different shape.
-        if entry.get("concern_verdict") == "dismissed":
-            fingerprint = entry.get("concern_fingerprint")
-            if not isinstance(fingerprint, str) or not fingerprint.strip():
-                errors.append(
-                    f"{label}.concern_fingerprint is required when concern_verdict='dismissed'"
+        _normalized: ReviewFindingPayload | None
+        _normalized, entry_errors = validate_review_finding_payload(
+            entry,
+            label=f"findings[{idx}]",
+            allowed_dimensions=allowed_dimensions or None,
+            allow_dismissed=True,
+        )
+        for message in entry_errors:
+            if (
+                "is not allowed" in message
+                and lang_name
+                and "dimension '" in message
+            ):
+                message = message.replace(
+                    "is not allowed",
+                    f"is not valid for language '{lang_name}'",
                 )
-            continue
-
-        missing = [field for field in _REQUIRED_HOLISTIC_FIELDS if field not in entry]
-        if missing:
-            errors.append(f"{label} missing required fields: {', '.join(missing)}")
-            continue
-
-        dimension = entry.get("dimension")
-        if not isinstance(dimension, str) or not dimension.strip():
-            errors.append(f"{label}.dimension must be a non-empty string")
-        elif allowed_dimensions and dimension not in allowed_dimensions:
-            errors.append(
-                f"{label}.dimension '{dimension}' is not valid for language '{lang_name}'"
-            )
-
-        identifier = entry.get("identifier")
-        if not isinstance(identifier, str) or not identifier.strip():
-            errors.append(f"{label}.identifier must be a non-empty string")
-
-        summary = entry.get("summary")
-        if not isinstance(summary, str) or not summary.strip():
-            errors.append(f"{label}.summary must be a non-empty string")
-
-        suggestion = entry.get("suggestion")
-        if not isinstance(suggestion, str) or not suggestion.strip():
-            errors.append(f"{label}.suggestion must be a non-empty string")
-
-        confidence = str(entry.get("confidence", "")).strip().lower()
-        if confidence not in _VALID_CONFIDENCE:
-            errors.append(
-                f"{label}.confidence must be one of: high, medium, low"
-            )
-
-        if not _has_non_empty_strings(entry.get("related_files")):
-            errors.append(
-                f"{label}.related_files must contain at least one file path string"
-            )
-
-        if not _has_non_empty_strings(entry.get("evidence")):
-            errors.append(
-                f"{label}.evidence must contain at least one concrete evidence string"
-            )
-
+            errors.append(message)
     return errors
 
 
@@ -474,17 +530,17 @@ def _feedback_dimensions_from_dimension_notes(dimension_notes: object) -> set[st
 
 
 def _validate_assessment_feedback(
-    findings_data: dict[str, Any],
+    findings_data: ReviewImportPayload,
 ) -> tuple[list[str], list[str]]:
     """Return dimensions missing required feedback and required low-score findings."""
-    assessments = findings_data.get("assessments")
-    if not isinstance(assessments, dict) or not assessments:
+    assessments = findings_data["assessments"]
+    if not assessments:
         return [], []
 
-    finding_dims = _feedback_dimensions_from_findings(findings_data.get("findings"))
+    finding_dims = _feedback_dimensions_from_findings(findings_data["findings"])
     feedback_dims = set(finding_dims)
     feedback_dims.update(
-        _feedback_dimensions_from_dimension_notes(findings_data.get("dimension_notes"))
+        _feedback_dimensions_from_dimension_notes(findings_data["dimension_notes"])
     )
     missing_feedback: list[str] = []
     missing_low_score_findings: list[str] = []
@@ -513,7 +569,7 @@ def _parse_and_validate_import(
     manual_attest: str | None = None,
     assessment_override: bool = False,
     assessment_note: str | None = None,
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[ReviewImportPayload | None, list[str]]:
     """Parse and validate a review import file (pure function).
 
     Returns ``(data, errors)`` where *data* is the normalized payload on
@@ -535,8 +591,14 @@ def _parse_and_validate_import(
 
     if "findings" not in findings_data:
         return None, ["findings object must contain a 'findings' key"]
+    normalized_findings_data, shape_errors = _normalize_import_payload_shape(
+        findings_data
+    )
+    if shape_errors:
+        return None, shape_errors
+    assert normalized_findings_data is not None
 
-    override_enabled, override_attest = _normalize_override_flags(
+    override_enabled, override_attest = resolve_override_context(
         manual_override=manual_override,
         manual_attest=manual_attest,
         assessment_override=assessment_override,
@@ -557,7 +619,7 @@ def _parse_and_validate_import(
             "manual score imports require fully valid findings payloads"
         ]
     findings_data, policy_errors = _apply_assessment_import_policy(
-        findings_data,
+        normalized_findings_data,
         import_file=import_file,
         attested_external=attested_external,
         attested_attest=override_attest,
@@ -618,7 +680,7 @@ def _parse_and_validate_import(
 def load_import_findings_data(
     import_file: str,
     *,
-    colorize_fn,
+    colorize_fn=None,
     lang_name: str | None = None,
     allow_partial: bool = False,
     trusted_assessment_source: bool = False,
@@ -628,11 +690,10 @@ def load_import_findings_data(
     manual_attest: str | None = None,
     assessment_override: bool = False,
     assessment_note: str | None = None,
-) -> dict[str, Any]:
+) -> ReviewImportPayload:
     """Load and normalize review import payload to object format.
 
-    CLI wrapper over ``_parse_and_validate_import`` that prints errors
-    and calls ``sys.exit(1)`` on failure.
+    Raises ``ImportPayloadLoadError`` when validation fails.
     """
     data, errors = _parse_and_validate_import(
         import_file,
@@ -647,36 +708,53 @@ def load_import_findings_data(
         assessment_note=assessment_note,
     )
     if errors:
-        for err in errors:
-            print(colorize_fn(f"  Error: {err}", "red"), file=sys.stderr)
-        _print_import_error_hints(errors, import_file=import_file, colorize_fn=colorize_fn)
-        sys.exit(1)
+        raise ImportPayloadLoadError(errors)
     assert data is not None  # guaranteed when errors is empty
     return data
 
 
-def assessment_policy_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def print_import_load_errors(
+    errors: list[str],
+    *,
+    import_file: str,
+    colorize_fn,
+) -> None:
+    """Print import payload validation errors and actionable hints."""
+    for err in errors:
+        print(colorize_fn(f"  Error: {err}", "red"), file=sys.stderr)
+    _print_import_error_hints(errors, import_file=import_file, colorize_fn=colorize_fn)
+
+
+def assessment_policy_from_payload(payload: ReviewImportPayload) -> AssessmentImportPolicy:
     """Return parsed assessment policy metadata from a loaded import payload."""
-    policy = payload.get(_ASSESSMENT_POLICY_KEY)
-    return policy if isinstance(policy, dict) else {}
+    policy = payload[_ASSESSMENT_POLICY_KEY]
+    if isinstance(policy, dict):
+        return policy
+    return AssessmentImportPolicyModel().to_dict()
 
 
-def assessment_mode_label(policy: dict[str, Any]) -> str:
+def assessment_policy_model_from_payload(
+    payload: ReviewImportPayload,
+) -> AssessmentImportPolicyModel:
+    """Return typed assessment policy metadata from a loaded import payload."""
+    return AssessmentImportPolicyModel.from_mapping(assessment_policy_from_payload(payload))
+
+
+def assessment_mode_label(policy: AssessmentImportPolicy) -> str:
     """Return a user-facing label for the selected assessment import mode."""
-    mode = str(policy.get("mode", "none")).strip().lower()
+    mode = AssessmentImportPolicyModel.from_mapping(policy).mode.strip().lower()
     return _ASSESSMENT_MODE_LABELS.get(mode, f"unknown ({mode or 'none'})")
 
 
 def print_assessment_mode_banner(
-    policy: dict[str, Any],
+    policy: AssessmentImportPolicy,
     *,
     colorize_fn,
 ) -> None:
     """Print the selected assessment import mode to make policy explicit."""
-    if not policy:
-        return
-    mode = str(policy.get("mode", "none")).strip().lower()
-    assessments_present = bool(policy.get("assessments_present"))
+    policy_model = AssessmentImportPolicyModel.from_mapping(policy)
+    mode = policy_model.mode.strip().lower()
+    assessments_present = bool(policy_model.assessments_present)
     if not assessments_present and mode == "none":
         return
     style = "yellow" if mode in {"manual_override", "findings_only"} else "dim"
@@ -684,22 +762,21 @@ def print_assessment_mode_banner(
 
 
 def print_assessment_policy_notice(
-    policy: dict[str, Any],
+    policy: AssessmentImportPolicy,
     *,
     import_file: str,
     colorize_fn,
 ) -> None:
     """Render trust/override status for assessment-bearing imports."""
-    if not policy or not policy.get("assessments_present"):
+    policy_model = AssessmentImportPolicyModel.from_mapping(policy)
+    if not policy_model.assessments_present:
         return
-    mode = str(policy.get("mode", "none")).strip().lower()
-    reason = str(policy.get("reason", "")).strip()
+    mode = policy_model.mode.strip().lower()
+    reason = policy_model.reason.strip()
 
     if mode == "trusted":
-        packet_path = None
-        if isinstance(policy.get("provenance"), dict):
-            packet_path = policy.get("provenance", {}).get("packet_path")
-        detail = f" · blind packet {packet_path}" if isinstance(packet_path, str) else ""
+        packet_path = policy_model.provenance.packet_path.strip() or None
+        detail = f" · blind packet {packet_path}" if packet_path else ""
         print(
             colorize_fn(
                 f"  Assessment provenance: trusted blind batch artifact{detail}.",
@@ -709,8 +786,8 @@ def print_assessment_policy_notice(
         return
 
     if mode == "trusted_internal":
-        count = int(policy.get("assessment_count", 0) or 0)
-        reason_text = str(policy.get("reason", "")).strip()
+        count = int(policy_model.assessment_count or 0)
+        reason_text = policy_model.reason.strip()
         suffix = f" ({reason_text})" if reason_text else ""
         print(
             colorize_fn(
@@ -721,7 +798,7 @@ def print_assessment_policy_notice(
         return
 
     if mode == "manual_override":
-        count = int(policy.get("assessment_count", 0) or 0)
+        count = int(policy_model.assessment_count or 0)
         print(
             colorize_fn(
                 f"  WARNING: applying {count} assessment update(s) via manual override from untrusted provenance.",
@@ -733,7 +810,7 @@ def print_assessment_policy_notice(
         return
 
     if mode == "attested_external":
-        count = int(policy.get("assessment_count", 0) or 0)
+        count = int(policy_model.assessment_count or 0)
         print(
             colorize_fn(
                 f"  Assessment updates applied via attested external blind review: {count} dimension(s).",
@@ -745,7 +822,7 @@ def print_assessment_policy_notice(
         return
 
     if mode == "findings_only":
-        count = int(policy.get("assessment_count", 0) or 0)
+        count = int(policy_model.assessment_count or 0)
         print(
             colorize_fn(
                 "  WARNING: untrusted assessment source detected. "
@@ -839,8 +916,8 @@ def print_open_review_summary(state: dict[str, Any], *, colorize_fn) -> str:
             "bold",
         )
     )
-    print(colorize_fn("  Run `desloppify issues` to see the work queue", "dim"))
-    return "desloppify issues"
+    print(colorize_fn("  Run `desloppify show review --status open` to see the work queue", "dim"))
+    return "desloppify show review --status open"
 
 
 def print_review_import_scores_and_integrity(
@@ -898,13 +975,17 @@ def print_review_import_scores_and_integrity(
 
 
 __all__ = [
+    "ImportPayloadLoadError",
     "assessment_mode_label",
+    "assessment_policy_model_from_payload",
     "assessment_policy_from_payload",
     "load_import_findings_data",
     "print_assessment_mode_banner",
+    "print_import_load_errors",
     "print_assessment_policy_notice",
     "print_assessments_summary",
     "print_open_review_summary",
     "print_review_import_scores_and_integrity",
     "print_skipped_validation_details",
+    "resolve_override_context",
 ]

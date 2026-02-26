@@ -22,8 +22,8 @@ from desloppify.engine.detectors.orphaned import (
     OrphanedDetectionOptions,
     detect_orphaned_files,
 )
-from desloppify.file_discovery import rel
-from desloppify.utils import colorize, display_entries, print_table
+from desloppify.core.discovery_api import rel
+from desloppify.core.output_api import colorize, display_entries, print_table
 
 if TYPE_CHECKING:
     import argparse

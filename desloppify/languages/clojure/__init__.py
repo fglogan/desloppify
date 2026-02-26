@@ -1,7 +1,7 @@
 """Clojure language plugin — clj-kondo."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import CLOJURE_SPEC
+from desloppify.languages._framework.treesitter import CLOJURE_SPEC
 
 generic_lang(
     name="clojure",

@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from desloppify.core.enums import Tier
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.state import Finding, make_finding
 
 

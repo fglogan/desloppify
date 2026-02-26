@@ -1,7 +1,7 @@
 """Haskell language plugin — hlint."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import HASKELL_SPEC
+from desloppify.languages._framework.treesitter import HASKELL_SPEC
 
 generic_lang(
     name="haskell",

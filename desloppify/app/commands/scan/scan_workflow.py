@@ -32,19 +32,61 @@ from desloppify.app.commands.scan.scan_wontfix import (
 )
 from desloppify.core._internal.text_utils import PROJECT_ROOT
 from desloppify.engine import work_queue as issues_mod
-from desloppify.engine.planning import core as plan_mod
+from desloppify.engine import planning as plan_mod
 from desloppify.engine.planning.scan import PlanScanOptions
-from desloppify.file_discovery import (
+from desloppify.core.file_paths import rel
+from desloppify.core.source_discovery import (
     disable_file_cache,
     enable_file_cache,
     get_exclusions,
-    rel,
 )
 from desloppify.languages._framework.base.types import DetectorCoverageRecord
 from desloppify.languages._framework.runtime import LangRunOverrides, make_lang_run
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
 
 _WONTFIX_DECAY_SCANS_DEFAULT = 20
+
+
+class ScanStateContractError(ValueError):
+    """Raised when persisted scan state violates required runtime contracts."""
+
+
+def _state_subjective_assessments(
+    state: state_mod.StateModel,
+) -> dict[str, object]:
+    """Return normalized subjective assessment store from state."""
+    assessments = state.get("subjective_assessments")
+    if isinstance(assessments, dict):
+        return assessments
+    raise ScanStateContractError(
+        "state.subjective_assessments must be an object; rerun with a valid state file"
+    )
+
+
+def _state_lang_capabilities(
+    state: state_mod.StateModel,
+) -> dict[str, dict[str, object]]:
+    """Return normalized language capability map from state."""
+    capabilities = state.get("lang_capabilities")
+    if capabilities is None:
+        normalized: dict[str, dict[str, object]] = {}
+        state["lang_capabilities"] = normalized
+        return normalized
+    if isinstance(capabilities, dict):
+        return capabilities
+    raise ScanStateContractError(
+        "state.lang_capabilities must be an object when present"
+    )
+
+
+def _state_findings(state: state_mod.StateModel) -> dict[str, dict[str, Any]]:
+    """Return normalized finding map from state."""
+    findings = state.get("findings")
+    if isinstance(findings, dict):
+        return findings
+    raise ScanStateContractError(
+        "state.findings must be an object; state file appears corrupted"
+    )
 
 
 def _subjective_reset_dimensions(*, lang_name: str | None = None) -> tuple[str, ...]:
@@ -122,7 +164,8 @@ def _configure_lang_runtime(
         ),
     )
 
-    state.setdefault("lang_capabilities", {})[runtime_lang.name] = {
+    lang_capabilities = _state_lang_capabilities(state)
+    lang_capabilities[runtime_lang.name] = {
         "fixers": sorted(runtime_lang.fixers.keys()),
         "typecheck_cmd": runtime_lang.typecheck_cmd,
     }
@@ -135,10 +178,7 @@ def _reset_subjective_assessments_for_scan_reset(
     lang_name: str | None = None,
 ) -> int:
     """Reset known subjective dimensions to 0 so the next scan starts fresh."""
-    assessments = state.setdefault("subjective_assessments", {})
-    if not isinstance(assessments, dict):
-        assessments = {}
-        state["subjective_assessments"] = assessments
+    assessments = _state_subjective_assessments(state)
 
     reset_keys = {
         key.strip()
@@ -174,9 +214,7 @@ def _expire_provisional_manual_override_assessments(
     state: state_mod.StateModel,
 ) -> int:
     """Expire provisional manual-override assessments at scan start."""
-    assessments = state.get("subjective_assessments")
-    if not isinstance(assessments, dict):
-        return 0
+    assessments = _state_subjective_assessments(state)
 
     now = state_mod.utc_now()
     expired = 0
@@ -204,6 +242,7 @@ def prepare_scan_runtime(args) -> ScanRuntime:
     runtime = command_runtime(args)
     state_file = runtime.state_path
     state = runtime.state if isinstance(runtime.state, dict) else {}
+    state_mod.ensure_state_defaults(state)
     path = Path(args.path)
     config = runtime.config if isinstance(runtime.config, dict) else {}
     lang_config = resolve_lang(args)
@@ -393,9 +432,7 @@ def resolve_noise_snapshot(
     noise_budget, global_noise_budget, budget_warning = (
         state_mod.resolve_finding_noise_settings(config)
     )
-    findings_by_id = state.get("findings", {})
-    if not isinstance(findings_by_id, dict):
-        findings_by_id = {}
+    findings_by_id = _state_findings(state)
     open_findings = [
         finding
         for finding in state_mod.path_scoped_findings(
@@ -436,6 +473,7 @@ def persist_reminder_history(
 
 
 __all__ = [
+    "ScanStateContractError",
     "ScanMergeResult",
     "ScanNoiseSnapshot",
     "ScanRuntime",

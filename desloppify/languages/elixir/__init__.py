@@ -1,7 +1,7 @@
 """Elixir language plugin — mix credo."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import ELIXIR_SPEC
+from desloppify.languages._framework.treesitter import ELIXIR_SPEC
 
 generic_lang(
     name="elixir",

@@ -1,7 +1,7 @@
 """Java language plugin — pmd."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import JAVA_SPEC
+from desloppify.languages._framework.treesitter import JAVA_SPEC
 
 generic_lang(
     name="java",

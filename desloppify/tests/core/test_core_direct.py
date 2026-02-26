@@ -19,11 +19,13 @@ def test_write_query_injects_config_payload(tmp_path, monkeypatch):
     query_path = tmp_path / "query.json"
     payload = {"command": "status"}
 
-    query_mod.write_query(payload, query_file=query_path)
+    result = query_mod.write_query(payload, query_file=query_path)
 
     saved = json.loads(query_path.read_text())
     assert saved["command"] == "status"
     assert saved["config"]["target_strict_score"] == 97
+    assert result.ok is True
+    assert result.status == "written"
 
 
 def test_write_query_records_config_error(tmp_path, monkeypatch):
@@ -34,12 +36,13 @@ def test_write_query_records_config_error(tmp_path, monkeypatch):
     query_path = tmp_path / "query.json"
     payload = {"command": "scan"}
 
-    query_mod.write_query(payload, query_file=query_path)
+    result = query_mod.write_query(payload, query_file=query_path)
 
     saved = json.loads(query_path.read_text())
     assert saved["command"] == "scan"
     assert "config_error" in saved
     assert "invalid config" in saved["config_error"]
+    assert result.ok is True
 
 
 def test_restore_files_best_effort_collects_failures():
@@ -65,3 +68,17 @@ def test_log_best_effort_failure_debugs(caplog):
         )
 
     assert "Best-effort fallback failed while trying to read cache" in caplog.text
+
+
+def test_warn_best_effort_uses_warning_style(monkeypatch, capsys):
+    styles: list[str] = []
+    monkeypatch.setattr(
+        fallbacks_mod,
+        "colorize",
+        lambda text, style: styles.append(style) or text,
+    )
+
+    fallbacks_mod.warn_best_effort("partial fallback path in use")
+
+    assert styles == ["yellow"]
+    assert "WARNING: partial fallback path in use" in capsys.readouterr().err

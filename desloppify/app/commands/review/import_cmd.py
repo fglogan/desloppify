@@ -8,33 +8,37 @@ from pathlib import Path
 
 from desloppify import state as state_mod
 from desloppify.app.commands.helpers.query import write_query
+from desloppify.app.commands.helpers.score import target_strict_score_from_config
+from desloppify.app.commands.scan import (
+    scan_reporting_dimensions as reporting_dimensions_mod,
+)
+from desloppify.app.commands.review.assessment_integrity import (
+    bind_scorecard_subjective_at_target,
+    subjective_at_target_dimensions,
+)
 from desloppify.app.commands.review import import_helpers as import_helpers_mod
-from desloppify.app.commands.review import output as review_output_mod
+from desloppify.intelligence import integrity as subjective_integrity_mod
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.intelligence.narrative.core import NarrativeContext
 from desloppify.intelligence.review.dimensions import normalize_dimension_name
-from desloppify.utils import colorize
+from desloppify.intelligence.review.importing.contracts import (
+    AssessmentImportPolicyModel,
+    ReviewImportPayload,
+)
+from desloppify.core.output_api import colorize
+
+_SCORECARD_SUBJECTIVE_AT_TARGET = bind_scorecard_subjective_at_target(
+    reporting_dimensions_mod=reporting_dimensions_mod,
+    subjective_integrity_mod=subjective_integrity_mod,
+)
 
 
-def _resolve_override_context(
-    *,
-    manual_override: bool,
-    manual_attest: str | None,
-    assessment_override: bool,
-    assessment_note: str | None,
-) -> tuple[bool, str | None]:
-    """Normalize legacy/new override flags to one override + attestation tuple."""
-    override_enabled = bool(manual_override or assessment_override)
-    override_attest = (
-        manual_attest
-        if isinstance(manual_attest, str) and manual_attest.strip()
-        else assessment_note
-    )
-    return override_enabled, override_attest
+class ImportFlagValidationError(ValueError):
+    """Raised when review import CLI flags are mutually incompatible."""
 
 
-def _enforce_import_flag_combos_or_exit(
+def _validate_import_flag_combos(
     *,
     attested_external: bool,
     allow_partial: bool,
@@ -43,81 +47,26 @@ def _enforce_import_flag_combos_or_exit(
 ) -> None:
     """Fail fast on conflicting import flags to keep behavior explicit."""
     if attested_external and override_enabled:
-        print(
-            colorize(
-                "  Error: --attested-external cannot be combined with --manual-override",
-                "red",
-            ),
-            file=sys.stderr,
+        raise ImportFlagValidationError(
+            "--attested-external cannot be combined with --manual-override"
         )
-        sys.exit(1)
     if attested_external and allow_partial:
-        print(
-            colorize(
-                "  Error: --attested-external cannot be combined with --allow-partial",
-                "red",
-            ),
-            file=sys.stderr,
+        raise ImportFlagValidationError(
+            "--attested-external cannot be combined with --allow-partial"
         )
-        sys.exit(1)
     if override_enabled and allow_partial:
-        print(
-            colorize(
-                "  Error: --manual-override cannot be combined with --allow-partial",
-                "red",
-            ),
-            file=sys.stderr,
+        raise ImportFlagValidationError(
+            "--manual-override cannot be combined with --allow-partial"
         )
-        sys.exit(1)
     if override_enabled and (
         not isinstance(override_attest, str) or not override_attest.strip()
     ):
-        print(
-            colorize(
-                "  Error: --manual-override requires --attest",
-                "red",
-            ),
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        raise ImportFlagValidationError("--manual-override requires --attest")
 
 
-def subjective_at_target_dimensions(
-    state_or_dim_scores: dict,
-    dim_scores: dict | None = None,
-    *,
-    target: float,
-    scorecard_subjective_entries_fn,
-    matches_target_score_fn,
-) -> list[dict]:
-    """Return scorecard-aligned subjective rows that sit on the target threshold."""
-    state = state_or_dim_scores
-    if dim_scores is None:
-        dim_scores = state_or_dim_scores
-        state = {"dimension_scores": dim_scores}
-
-    rows: list[dict] = []
-    for entry in scorecard_subjective_entries_fn(state, dim_scores=dim_scores):
-        if entry.get("placeholder"):
-            continue
-        strict_val = float(entry.get("strict", entry.get("score", 100.0)))
-        if matches_target_score_fn(strict_val, target):
-            rows.append(
-                {
-                    "name": str(entry.get("name", "Subjective")),
-                    "score": strict_val,
-                    "cli_keys": list(entry.get("cli_keys", [])),
-                }
-            )
-    rows.sort(key=lambda item: item["name"].lower())
-    return rows
-
-
-def _imported_assessment_keys(findings_data: dict) -> set[str]:
+def _imported_assessment_keys(findings_data: ReviewImportPayload) -> set[str]:
     """Return normalized assessment dimension keys from payload."""
-    raw_assessments = findings_data.get("assessments")
-    if not isinstance(raw_assessments, dict):
-        return set()
+    raw_assessments = findings_data["assessments"]
     keys: set[str] = set()
     for raw_key in raw_assessments:
         normalized = normalize_dimension_name(str(raw_key))
@@ -196,39 +145,52 @@ def do_import(
     assessment_note: str | None = None,
 ) -> None:
     """Import mode: ingest agent-produced findings."""
-    override_enabled, override_attest = _resolve_override_context(
+    override_enabled, override_attest = import_helpers_mod.resolve_override_context(
         manual_override=manual_override,
         manual_attest=manual_attest,
         assessment_override=assessment_override,
         assessment_note=assessment_note,
     )
-    _enforce_import_flag_combos_or_exit(
-        attested_external=attested_external,
-        allow_partial=allow_partial,
-        override_enabled=override_enabled,
-        override_attest=override_attest,
-    )
+    try:
+        _validate_import_flag_combos(
+            attested_external=attested_external,
+            allow_partial=allow_partial,
+            override_enabled=override_enabled,
+            override_attest=override_attest,
+        )
+    except ImportFlagValidationError as exc:
+        print(colorize(f"  Error: {exc}", "red"), file=sys.stderr)
+        sys.exit(1)
 
-    findings_data = import_helpers_mod.load_import_findings_data(
-        import_file,
-        colorize_fn=colorize,
-        lang_name=lang.name,
-        allow_partial=allow_partial,
-        trusted_assessment_source=trusted_assessment_source,
-        trusted_assessment_label=trusted_assessment_label,
-        attested_external=attested_external,
-        manual_override=override_enabled,
-        manual_attest=override_attest,
-        assessment_override=assessment_override,
-        assessment_note=assessment_note,
+    try:
+        findings_data = import_helpers_mod.load_import_findings_data(
+            import_file,
+            lang_name=lang.name,
+            allow_partial=allow_partial,
+            trusted_assessment_source=trusted_assessment_source,
+            trusted_assessment_label=trusted_assessment_label,
+            attested_external=attested_external,
+            manual_override=override_enabled,
+            manual_attest=override_attest,
+            assessment_override=assessment_override,
+            assessment_note=assessment_note,
+        )
+    except import_helpers_mod.ImportPayloadLoadError as exc:
+        import_helpers_mod.print_import_load_errors(
+            exc.errors,
+            import_file=str(import_file),
+            colorize_fn=colorize,
+        )
+        sys.exit(1)
+    assessment_policy: AssessmentImportPolicyModel = (
+        import_helpers_mod.assessment_policy_model_from_payload(findings_data)
     )
-    assessment_policy = import_helpers_mod.assessment_policy_from_payload(findings_data)
     import_helpers_mod.print_assessment_mode_banner(
-        assessment_policy,
+        assessment_policy.to_dict(),
         colorize_fn=colorize,
     )
     import_helpers_mod.print_assessment_policy_notice(
-        assessment_policy,
+        assessment_policy.to_dict(),
         import_file=str(import_file),
         colorize_fn=colorize,
     )
@@ -245,12 +207,12 @@ def do_import(
     label = "Holistic review"
     imported_assessment_keys = _imported_assessment_keys(findings_data)
     provisional_count = 0
-    if assessment_policy.get("mode") == "manual_override":
+    if assessment_policy.mode == "manual_override":
         provisional_count = _mark_manual_override_assessments_provisional(
             working_state,
             assessment_keys=imported_assessment_keys,
         )
-    elif assessment_policy.get("mode") in {"trusted_internal", "attested_external"}:
+    elif assessment_policy.mode in {"trusted_internal", "attested_external"}:
         _clear_provisional_override_flags(
             working_state,
             assessment_keys=imported_assessment_keys,
@@ -282,19 +244,17 @@ def do_import(
         )
         sys.exit(1)
 
-    if assessment_policy.get("assessments_present"):
+    if assessment_policy.assessments_present:
         audit = working_state.setdefault("assessment_import_audit", [])
         audit.append(
             {
                 "timestamp": state_mod.utc_now(),
-                "mode": str(assessment_policy.get("mode", "unknown")),
-                "trusted": bool(assessment_policy.get("trusted", False)),
-                "reason": str(assessment_policy.get("reason", "")),
-                "override_used": bool(assessment_policy.get("mode") == "manual_override"),
-                "attested_external": bool(
-                    assessment_policy.get("mode") == "attested_external"
-                ),
-                "provisional": bool(assessment_policy.get("mode") == "manual_override"),
+                "mode": assessment_policy.mode,
+                "trusted": bool(assessment_policy.trusted),
+                "reason": assessment_policy.reason,
+                "override_used": bool(assessment_policy.mode == "manual_override"),
+                "attested_external": bool(assessment_policy.mode == "attested_external"),
+                "provisional": bool(assessment_policy.mode == "manual_override"),
                 "provisional_count": int(provisional_count),
                 "attest": (override_attest or "").strip(),
                 "import_file": str(import_file),
@@ -334,8 +294,14 @@ def do_import(
     next_command = import_helpers_mod.print_open_review_summary(
         state, colorize_fn=colorize
     )
-    at_target = review_output_mod._print_review_import_scores_and_integrity(
-        state, config or {}
+    at_target = import_helpers_mod.print_review_import_scores_and_integrity(
+        state,
+        config or {},
+        state_mod=state_mod,
+        target_strict_score_from_config_fn=target_strict_score_from_config,
+        subjective_at_target_fn=_SCORECARD_SUBJECTIVE_AT_TARGET,
+        subjective_rerun_command_fn=reporting_dimensions_mod.subjective_rerun_command,
+        colorize_fn=colorize,
     )
 
     print(
@@ -344,20 +310,20 @@ def do_import(
         )
     )
     write_query(
-        {
-            "command": "review",
-            "action": "import",
-            "mode": "holistic",
-            "diff": diff,
+            {
+                "command": "review",
+                "action": "import",
+                "mode": "holistic",
+                "diff": diff,
             "next_command": next_command,
             "subjective_at_target": [
                 {"dimension": entry["name"], "score": entry["score"]}
                 for entry in at_target
             ],
             "assessment_import": {
-                "mode": str(assessment_policy.get("mode", "none")),
-                "trusted": bool(assessment_policy.get("trusted", False)),
-                "reason": str(assessment_policy.get("reason", "")),
+                "mode": assessment_policy.mode,
+                "trusted": bool(assessment_policy.trusted),
+                "reason": assessment_policy.reason,
             },
             "narrative": narrative,
         }
@@ -376,49 +342,66 @@ def do_validate_import(
     assessment_note: str | None = None,
 ) -> None:
     """Validate import payload/policy and print mode without mutating state."""
-    override_enabled, override_attest = _resolve_override_context(
+    override_enabled, override_attest = import_helpers_mod.resolve_override_context(
         manual_override=manual_override,
         manual_attest=manual_attest,
         assessment_override=assessment_override,
         assessment_note=assessment_note,
     )
-    _enforce_import_flag_combos_or_exit(
-        attested_external=attested_external,
-        allow_partial=allow_partial,
-        override_enabled=override_enabled,
-        override_attest=override_attest,
-    )
+    try:
+        _validate_import_flag_combos(
+            attested_external=attested_external,
+            allow_partial=allow_partial,
+            override_enabled=override_enabled,
+            override_attest=override_attest,
+        )
+    except ImportFlagValidationError as exc:
+        print(colorize(f"  Error: {exc}", "red"), file=sys.stderr)
+        sys.exit(1)
 
-    findings_data = import_helpers_mod.load_import_findings_data(
-        import_file,
-        colorize_fn=colorize,
-        lang_name=lang.name,
-        allow_partial=allow_partial,
-        attested_external=attested_external,
-        manual_override=override_enabled,
-        manual_attest=override_attest,
-        assessment_override=assessment_override,
-        assessment_note=assessment_note,
+    try:
+        findings_data = import_helpers_mod.load_import_findings_data(
+            import_file,
+            lang_name=lang.name,
+            allow_partial=allow_partial,
+            attested_external=attested_external,
+            manual_override=override_enabled,
+            manual_attest=override_attest,
+            assessment_override=assessment_override,
+            assessment_note=assessment_note,
+        )
+    except import_helpers_mod.ImportPayloadLoadError as exc:
+        import_helpers_mod.print_import_load_errors(
+            exc.errors,
+            import_file=str(import_file),
+            colorize_fn=colorize,
+        )
+        sys.exit(1)
+    assessment_policy = import_helpers_mod.assessment_policy_model_from_payload(
+        findings_data
     )
-    assessment_policy = import_helpers_mod.assessment_policy_from_payload(findings_data)
     import_helpers_mod.print_assessment_mode_banner(
-        assessment_policy,
+        assessment_policy.to_dict(),
         colorize_fn=colorize,
     )
     import_helpers_mod.print_assessment_policy_notice(
-        assessment_policy,
+        assessment_policy.to_dict(),
         import_file=str(import_file),
         colorize_fn=colorize,
     )
 
-    findings = findings_data.get("findings")
-    findings_count = len(findings) if isinstance(findings, list) else 0
+    findings_count = len(findings_data["findings"])
     print(colorize("\n  Import payload validation passed.", "bold"))
     print(colorize(f"  Findings parsed: {findings_count}", "dim"))
-    if bool(assessment_policy.get("assessments_present")):
-        count = int(assessment_policy.get("assessment_count", 0) or 0)
+    if assessment_policy.assessments_present:
+        count = int(assessment_policy.assessment_count)
         print(colorize(f"  Assessment entries in payload: {count}", "dim"))
     print(colorize("  No state changes were made (--validate-import).", "dim"))
 
 
-__all__ = ["do_import", "do_validate_import", "subjective_at_target_dimensions"]
+__all__ = [
+    "ImportFlagValidationError",
+    "do_import",
+    "do_validate_import",
+    "subjective_at_target_dimensions",
+]

@@ -382,7 +382,7 @@ def test_get_lang_rejects_non_snake_case_detect_command_key():
         registry_state.remove("_bad_key")
 
 
-def test_load_all_surfaces_import_failures(monkeypatch):
+def test_load_all_surfaces_import_failures(monkeypatch, caplog):
     original_registry = dict(registry_state.all_items())
     original_attempted = registry_state.was_load_attempted()
     original_errors = registry_state.get_load_errors()
@@ -399,8 +399,13 @@ def test_load_all_surfaces_import_failures(monkeypatch):
     registry_state.clear()
 
     try:
-        with pytest.raises(ImportError, match="Language plugin import failures"):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
             load_all()
+        assert ".python" in caplog.text
+        assert "simulated import failure" in caplog.text
+        assert ".python" in registry_state.get_load_errors()
     finally:
         registry_state.clear()
         for name, cfg in original_registry.items():

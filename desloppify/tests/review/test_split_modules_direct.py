@@ -23,6 +23,8 @@ from desloppify.intelligence.review.importing.shared import (
 def test_import_split_extract_helpers_require_object_payloads():
     with pytest.raises(ValueError):
         parse_per_file_import_payload([{"summary": "x"}])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="findings\\[0\\]"):
+        parse_per_file_import_payload({"findings": ["x"]})  # type: ignore[list-item]
 
     findings2, assessments2, reviewed_files = parse_holistic_import_payload(
         {
@@ -34,6 +36,9 @@ def test_import_split_extract_helpers_require_object_payloads():
     assert findings2 == [{"summary": "y"}]
     assert assessments2 == {"naming_quality": 88}
     assert reviewed_files == ["a.py"]
+
+    with pytest.raises(ValueError, match="findings\\[0\\]"):
+        parse_holistic_import_payload({"findings": ["bad"]})  # type: ignore[list-item]
 
 
 def test_import_shared_extract_reviewed_files_deduplicates():
@@ -90,4 +95,4 @@ def test_issues_render_builds_markdown_payload():
 
     rendered = render_issue_detail(finding, "python")
     assert "Suggested Fix" in rendered
-    assert "desloppify --lang python resolve fixed" in rendered
+    assert "desloppify resolve fixed" in rendered

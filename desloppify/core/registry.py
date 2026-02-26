@@ -316,7 +316,7 @@ DETECTORS: dict[str, DetectorMeta] = {
         "subjective review",
         "Test health",
         "manual_fix",
-        "run `desloppify fix review` to evaluate files against quality dimensions",
+        "run `desloppify review --prepare` to evaluate files against quality dimensions",
     ),
 }
 

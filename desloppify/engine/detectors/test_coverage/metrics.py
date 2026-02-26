@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
+
+from .io import read_coverage_file
 
 # Minimum LOC threshold — tiny files don't need dedicated tests
 _MIN_LOC = 10
@@ -14,11 +15,11 @@ _COMPLEXITY_TIER_UPGRADE = 20
 
 
 def _file_loc(filepath: str) -> int:
-    """Count lines in a file, returning 0 on error."""
-    try:
-        return len(Path(filepath).read_text().splitlines())
-    except (OSError, UnicodeDecodeError):
+    """Count lines in a file, returning 0 when unreadable."""
+    read_result = read_coverage_file(filepath, context="loc_count")
+    if not read_result.ok:
         return 0
+    return len(read_result.content.splitlines())
 
 
 def _loc_weight(loc: int) -> float:

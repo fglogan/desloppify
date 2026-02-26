@@ -48,7 +48,8 @@ def resolve_project_name(project_root: Path) -> str:
         FileNotFoundError,
         IndexError,
         subprocess.TimeoutExpired,
-    ):
+    ) as exc:
+        logger.debug("git remote lookup failed, falling back to folder name: %s", exc)
         return project_root.name
 
 

@@ -1,4 +1,4 @@
-"""Canonical scorecard projection helpers shared by command/reporting surfaces."""
+"""Canonical scorecard projection helpers shared across app/engine code."""
 
 from __future__ import annotations
 
@@ -154,3 +154,12 @@ def scorecard_dimensions_payload(
             entry["cli_keys"] = list(sub.get("cli_keys", []))
         payload.append(entry)
     return payload
+
+
+__all__ = [
+    "dimension_cli_key",
+    "scorecard_dimension_cli_keys",
+    "scorecard_dimension_rows",
+    "scorecard_dimensions_payload",
+    "scorecard_subjective_entries",
+]

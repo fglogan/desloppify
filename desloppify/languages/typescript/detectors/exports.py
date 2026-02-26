@@ -6,9 +6,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.languages.typescript.detectors.knip_adapter import detect_with_knip
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 
 def detect_dead_exports(path: Path) -> tuple[list[dict], int]:

@@ -1,6 +1,6 @@
-"""Tests for desloppify.app.commands.status — display helpers."""
+"""Tests for desloppify.app.commands.status_cmd — display helpers."""
 
-from desloppify.app.commands.status import (
+from desloppify.app.commands.status_cmd import (
     cmd_status,
     show_dimension_table,
     show_focus_suggestion,
@@ -57,13 +57,16 @@ class TestStatusModuleSanity:
             strict_score=80.0,
             verified_strict_score=75.0,
         )
-        assert len(lines) == 1
+        assert len(lines) == 3
         text, style = lines[0]
         assert "85.0" in text
         assert "90.0" in text
         assert "80.0" in text
         assert "75.0" in text
         assert style == "bold"
+        # Score legend lines
+        assert "Score guide:" in lines[1][0]
+        assert "north star" in lines[2][0]
 
     def test_score_summary_lines_unavailable(self):
         """score_summary_lines returns fallback when scores are None."""

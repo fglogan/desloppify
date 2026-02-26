@@ -11,7 +11,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from desloppify.file_discovery import read_file_text, rel, resolve_path
+from desloppify.core.discovery_api import read_file_text, rel, resolve_path
 from desloppify.hook_registry import get_lang_hook
 
 _LOW_VALUE_NAMES = re.compile(

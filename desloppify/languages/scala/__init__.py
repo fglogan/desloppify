@@ -1,7 +1,7 @@
 """Scala language plugin — scalac warnings."""
 
 from desloppify.languages._framework.generic import generic_lang
-from desloppify.languages._framework.treesitter._specs import SCALA_SPEC
+from desloppify.languages._framework.treesitter import SCALA_SPEC
 
 generic_lang(
     name="scala",

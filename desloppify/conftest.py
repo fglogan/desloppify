@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from desloppify.core.runtime_state import RuntimeContext, runtime_scope
-from desloppify.file_discovery import _clear_source_file_cache
+from desloppify.core.source_discovery import clear_source_file_cache_for_tests
 
 
 @pytest.fixture()
@@ -15,6 +15,6 @@ def set_project_root(tmp_path: Path):
     """Set PROJECT_ROOT to tmp_path via RuntimeContext for the duration of a test."""
     ctx = RuntimeContext(project_root=tmp_path)
     with runtime_scope(ctx):
-        _clear_source_file_cache()
+        clear_source_file_cache_for_tests()
         yield tmp_path
-        _clear_source_file_cache()
+        clear_source_file_cache_for_tests()

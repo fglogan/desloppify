@@ -7,25 +7,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-from desloppify.app.commands.helpers.query import write_query
+from desloppify.app.commands.helpers.query import write_query_best_effort
 from desloppify.app.commands.review import batch_core as batch_core_mod
 from desloppify.app.commands.review import batches as review_batches_mod
 from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
-from desloppify.core._internal.text_utils import PROJECT_ROOT
+from desloppify.core._internal.coercions import (
+    coerce_non_negative_float,
+    coerce_non_negative_int,
+    coerce_positive_int,
+)
+from desloppify.core._internal.text_utils import get_project_root
 from desloppify.core.fallbacks import print_error
-from desloppify.file_discovery import safe_write_text
+from desloppify.core.discovery_api import safe_write_text
 from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.intelligence.review.feedback_contract import (
     max_batch_findings_for_dimension_count,
 )
-from desloppify.utils import colorize, log
+from desloppify.core.output_api import colorize, log
 
 from .import_cmd import do_import as _do_import
 from .runtime import setup_lang_concrete as _setup_lang
 
-REVIEW_PACKET_DIR = PROJECT_ROOT / ".desloppify" / "review_packets"
-SUBAGENT_RUNS_DIR = PROJECT_ROOT / ".desloppify" / "subagents" / "runs"
+# Backward-compatible override hooks for tests.
+PROJECT_ROOT: Path | None = None
+REVIEW_PACKET_DIR: Path | None = None
+SUBAGENT_RUNS_DIR: Path | None = None
 CODEX_BATCH_TIMEOUT_SECONDS = 20 * 60
 CODEX_BATCH_STALL_KILL_SECONDS = 120
 FOLLOWUP_SCAN_TIMEOUT_SECONDS = 45 * 60
@@ -42,6 +49,35 @@ ABSTRACTION_COMPONENT_NAMES = {
 DEFAULT_REVIEW_BATCH_MAX_FILES = 80
 
 
+def _runtime_project_root() -> Path:
+    if isinstance(PROJECT_ROOT, Path):
+        return PROJECT_ROOT
+    return get_project_root()
+
+
+def _review_packet_dir() -> Path:
+    if isinstance(REVIEW_PACKET_DIR, Path):
+        return REVIEW_PACKET_DIR
+    return _runtime_project_root() / ".desloppify" / "review_packets"
+
+
+def _subagent_runs_dir() -> Path:
+    if isinstance(SUBAGENT_RUNS_DIR, Path):
+        return SUBAGENT_RUNS_DIR
+    return _runtime_project_root() / ".desloppify" / "subagents" / "runs"
+
+
+def _blind_packet_path() -> Path:
+    return _runtime_project_root() / ".desloppify" / "review_packet_blind.json"
+
+
+def _redacted_review_config(config: dict | None) -> dict:
+    """Return review packet config with score-target hints removed."""
+    if not isinstance(config, dict):
+        return {}
+    return {key: value for key, value in config.items() if key != "target_strict_score"}
+
+
 def _coerce_review_batch_file_limit(config: dict | None) -> int | None:
     """Resolve per-batch file cap from config (0/negative => unlimited)."""
     raw = (config or {}).get("review_batch_max_files", DEFAULT_REVIEW_BATCH_MAX_FILES)
@@ -50,45 +86,6 @@ def _coerce_review_batch_file_limit(config: dict | None) -> int | None:
     except (TypeError, ValueError):
         return DEFAULT_REVIEW_BATCH_MAX_FILES
     return value if value > 0 else None
-
-
-def _coerce_positive_int(value: object, *, default: int, minimum: int = 1) -> int:
-    """Parse positive integer CLI/config inputs with safe defaults."""
-    if value is None:
-        return default
-    if not isinstance(value, int | float | str):
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed >= minimum else default
-
-
-def _coerce_non_negative_float(value: object, *, default: float) -> float:
-    """Parse non-negative float CLI/config inputs with safe defaults."""
-    if value is None:
-        return default
-    if not isinstance(value, int | float | str):
-        return default
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed >= 0.0 else default
-
-
-def _coerce_non_negative_int(value: object, *, default: int) -> int:
-    """Parse non-negative integer CLI/config inputs with safe defaults."""
-    if value is None:
-        return default
-    if not isinstance(value, int | float | str):
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed >= 0 else default
 
 
 def _merge_batch_results(batch_results: list[object]) -> dict[str, object]:
@@ -129,7 +126,7 @@ def _load_or_prepare_packet(
         except (OSError, json.JSONDecodeError) as exc:
             print_error(f"reading packet: {exc}")
             sys.exit(1)
-        blind_path = PROJECT_ROOT / ".desloppify" / "review_packet_blind.json"
+        blind_path = _blind_packet_path()
         blind_packet = runner_helpers_mod.build_blind_packet(packet)
         safe_write_text(blind_path, json.dumps(blind_packet, indent=2) + "\n")
         print(colorize(f"  Immutable packet: {packet_path}", "dim"))
@@ -140,12 +137,12 @@ def _load_or_prepare_packet(
     dims_str = getattr(args, "dimensions", None)
     dimensions = dims_str.split(",") if dims_str else None
     retrospective = bool(getattr(args, "retrospective", False))
-    retrospective_max_issues = _coerce_positive_int(
+    retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),
         default=30,
         minimum=1,
     )
-    retrospective_max_batch_items = _coerce_positive_int(
+    retrospective_max_batch_items = coerce_positive_int(
         getattr(args, "retrospective_max_batch_items", None),
         default=20,
         minimum=1,
@@ -157,7 +154,7 @@ def _load_or_prepare_packet(
         context=narrative_mod.NarrativeContext(lang=lang_name, command="review"),
     )
 
-    blind_path = PROJECT_ROOT / ".desloppify" / "review_packet_blind.json"
+    blind_path = _blind_packet_path()
     packet = review_mod.prepare_holistic_review(
         path,
         lang_run,
@@ -171,6 +168,7 @@ def _load_or_prepare_packet(
             issue_history_max_batch_items=retrospective_max_batch_items,
         ),
     )
+    packet["config"] = _redacted_review_config(config)
     packet["narrative"] = narrative
     next_command = "desloppify review --run-batches --runner codex --parallel"
     if retrospective:
@@ -180,11 +178,14 @@ def _load_or_prepare_packet(
             f" --retrospective-max-batch-items {retrospective_max_batch_items}"
         )
     packet["next_command"] = next_command
-    write_query(packet)
+    write_query_best_effort(
+        packet,
+        context="review packet query update",
+    )
     packet_path, blind_saved = runner_helpers_mod.write_packet_snapshot(
         packet,
         stamp=stamp,
-        review_packet_dir=REVIEW_PACKET_DIR,
+        review_packet_dir=_review_packet_dir(),
         blind_path=blind_path,
         safe_write_text_fn=safe_write_text,
     )
@@ -195,21 +196,22 @@ def _load_or_prepare_packet(
 
 def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -> None:
     """Run holistic investigation batches with a local subagent runner."""
-    batch_timeout_seconds = _coerce_positive_int(
+    runtime_project_root = _runtime_project_root()
+    batch_timeout_seconds = coerce_positive_int(
         getattr(args, "batch_timeout_seconds", None),
         default=CODEX_BATCH_TIMEOUT_SECONDS,
         minimum=1,
     )
-    batch_max_retries = _coerce_positive_int(
+    batch_max_retries = coerce_positive_int(
         getattr(args, "batch_max_retries", None),
         default=1,
         minimum=0,
     )
-    batch_retry_backoff_seconds = _coerce_non_negative_float(
+    batch_retry_backoff_seconds = coerce_non_negative_float(
         getattr(args, "batch_retry_backoff_seconds", None),
         default=2.0,
     )
-    batch_heartbeat_seconds = _coerce_non_negative_float(
+    batch_heartbeat_seconds = coerce_non_negative_float(
         getattr(args, "batch_heartbeat_seconds", None),
         default=15.0,
     )
@@ -218,7 +220,7 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
         if batch_heartbeat_seconds > 0
         else 5.0
     )
-    batch_stall_kill_seconds = _coerce_non_negative_int(
+    batch_stall_kill_seconds = coerce_non_negative_int(
         getattr(args, "batch_stall_kill_seconds", None),
         default=CODEX_BATCH_STALL_KILL_SECONDS,
     )
@@ -297,7 +299,7 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
             lang_name=lang_name,
             scan_path=scan_path,
             deps=runner_helpers_mod.FollowupScanDeps(
-                project_root=PROJECT_ROOT,
+                project_root=runtime_project_root,
                 timeout_seconds=FOLLOWUP_SCAN_TIMEOUT_SECONDS,
                 python_executable=sys.executable,
                 subprocess_run=subprocess.run,
@@ -307,6 +309,6 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
         ),
         safe_write_text_fn=safe_write_text,
         colorize_fn=colorize,
-        project_root=PROJECT_ROOT,
-        subagent_runs_dir=SUBAGENT_RUNS_DIR,
+        project_root=runtime_project_root,
+        subagent_runs_dir=_subagent_runs_dir(),
     )

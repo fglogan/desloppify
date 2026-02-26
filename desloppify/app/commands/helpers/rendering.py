@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from desloppify.file_discovery import rel
-from desloppify.utils import colorize
+from desloppify.core.discovery_api import rel
+from desloppify.core.output_api import colorize
 
 
 def print_agent_plan(

@@ -7,8 +7,8 @@ from pathlib import Path
 
 from desloppify import languages as lang_api
 from desloppify import state as state_mod
-from desloppify.file_discovery import DEFAULT_EXCLUSIONS, read_file_text
-from desloppify.utils import colorize
+from desloppify.core.discovery_api import DEFAULT_EXCLUSIONS, read_file_text
+from desloppify.core.output_api import colorize
 
 logger = logging.getLogger(__name__)
 

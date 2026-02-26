@@ -57,7 +57,7 @@ def patch_project_root(monkeypatch):
         monkeypatch.setattr(ctx, "project_root", tmp_path)
         monkeypatch.setattr(_u, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(_utils_text_mod, "PROJECT_ROOT", tmp_path)
-        _file_discovery_mod._clear_source_file_cache()
+        _file_discovery_mod.clear_source_file_cache_for_tests()
     return _patch
 
 
@@ -177,13 +177,14 @@ class TestHolisticDimensionsByLang:
 
         data = prepare_holistic_review(tmp_path, lang, state, files=[f1])
 
-        assert len(data["dimensions"]) == 12
+        assert len(data["dimensions"]) == 13
         assert "package_organization" in data["dimensions"]
         assert "api_surface_coherence" not in data["dimensions"]
         assert "high_level_elegance" in data["dimensions"]
         assert "mid_level_elegance" in data["dimensions"]
         assert "low_level_elegance" in data["dimensions"]
         assert "design_coherence" in data["dimensions"]
+        assert "initialization_coupling" in data["dimensions"]
 
     def test_typescript_gets_twelve_dims(self, tmp_path):
         f1 = _make_file(str(tmp_path), "module.ts", lines=50)
@@ -193,7 +194,7 @@ class TestHolisticDimensionsByLang:
 
         data = prepare_holistic_review(tmp_path, lang, state, files=[f1])
 
-        assert len(data["dimensions"]) == 13
+        assert len(data["dimensions"]) == 14
         assert "api_surface_coherence" in data["dimensions"]
         assert "package_organization" in data["dimensions"]
         assert "high_level_elegance" in data["dimensions"]
@@ -326,8 +327,8 @@ class TestPrepareHolisticReview:
 
         assert data["mode"] == "holistic"
         assert data["command"] == "review"
-        # Python lang gets curated 12-dim subset
-        assert len(data["dimensions"]) == 12
+        # Python lang gets curated 13-dim subset (including initialization_coupling)
+        assert len(data["dimensions"]) == 13
         assert "holistic_context" in data
         assert "system_prompt" in data
 
@@ -348,20 +349,31 @@ class TestPrepareHolisticReview:
 
     def test_concern_batch_respects_max_files(self):
         concerns = [
-            SimpleNamespace(type="design_concern", file=f"src/file_{idx}.ts")
+            SimpleNamespace(
+                type="design_concern",
+                file=f"src/file_{idx}.ts",
+                summary=f"concern {idx}",
+                question="is this intentional?",
+                evidence=("Flagged by: structural, coupling",),
+            )
             for idx in range(6)
         ]
         batch = _batch_concerns(concerns, max_files=3)
 
         assert batch is not None
         assert batch["name"] == "Design coherence — Mechanical Concern Signals"
-        assert batch["dimensions"] == ["design_coherence"]
+        assert batch["dimensions"] == ["design_coherence", "initialization_coupling"]
         assert batch["files_to_read"] == [
             "src/file_0.ts",
             "src/file_1.ts",
             "src/file_2.ts",
         ]
         assert batch["total_candidate_files"] == 6
+        assert batch["concern_signal_count"] == 6
+        assert len(batch["concern_signals"]) == 6
+        assert batch["concern_signals"][0]["summary"] == "concern 0"
+        assert batch["concern_signals"][0]["question"] == "is this intentional?"
+        assert batch["mapped_to_active_dimensions"] is False
         assert "truncated to 3 files from 6 candidates" in batch["why"]
 
     def test_prepare_holistic_review_applies_max_files_to_concern_batch(
@@ -405,6 +417,67 @@ class TestPrepareHolisticReview:
         concern_batch = concern_batches[0]
         assert concern_batch["files_to_read"] == ["src/file_0.ts", "src/file_1.ts"]
         assert concern_batch["total_candidate_files"] == 6
+
+    def test_prepare_holistic_review_maps_concerns_to_active_dimensions(
+        self, tmp_path, monkeypatch
+    ):
+        tracked_files = [
+            _make_file(str(tmp_path), f"src/file_{idx}.ts", lines=20)
+            for idx in range(3)
+        ]
+        lang = _mock_lang(tracked_files)
+        lang.name = "python"
+        state = empty_state()
+
+        concerns = [
+            SimpleNamespace(
+                type="mixed_responsibilities",
+                file=f"src/file_{idx}.ts",
+                summary="module does too much",
+                question="should this module be split by responsibility?",
+                evidence=("Flagged by: structural, responsibility_cohesion",),
+            )
+            for idx in range(3)
+        ]
+        monkeypatch.setattr(
+            "desloppify.engine.concerns.generate_concerns",
+            lambda *_args, **_kwargs: concerns,
+        )
+
+        active_dims = [
+            "cross_module_architecture",
+            "high_level_elegance",
+            "mid_level_elegance",
+        ]
+        data = _prepare_holistic_review_impl(
+            tmp_path,
+            lang,
+            state,
+            options=HolisticReviewPrepareOptions(
+                dimensions=active_dims,
+                files=tracked_files,
+                include_full_sweep=False,
+                max_files_per_batch=5,
+            ),
+        )
+
+        concern_batches = [
+            batch
+            for batch in data["investigation_batches"]
+            if batch.get("name") == "Design coherence — Mechanical Concern Signals"
+        ]
+        assert len(concern_batches) == 1
+        concern_batch = concern_batches[0]
+        assert concern_batch["dimensions"] == active_dims
+        assert concern_batch["files_to_read"] == [
+            "src/file_0.ts",
+            "src/file_1.ts",
+            "src/file_2.ts",
+        ]
+        assert concern_batch["concern_signal_count"] == 3
+        assert len(concern_batch["concern_signals"]) == 3
+        assert concern_batch["mapped_to_active_dimensions"] is True
+        assert "mapped to active dimensions" in concern_batch["why"]
 
 
 # ===================================================================
@@ -474,6 +547,7 @@ class TestImportHolisticFindings:
                 "summary": "utils.py imported everywhere",
                 "confidence": "high",
                 "related_files": ["utils.py", "a.py"],
+                "evidence": ["Utility module is imported by most entry points."],
                 "suggestion": "Split utils.py by domain",
             },
             {
@@ -482,6 +556,7 @@ class TestImportHolisticFindings:
                 "summary": "Three error strategies across modules",
                 "confidence": "medium",
                 "related_files": ["handler.py", "service.py"],
+                "evidence": ["Handlers mix exceptions, sentinel values, and Result types."],
                 "suggestion": "Consolidate to Result type",
             },
         ]
@@ -499,6 +574,8 @@ class TestImportHolisticFindings:
                 "identifier": "god_module",
                 "summary": "test finding",
                 "confidence": "high",
+                "related_files": ["src/a.py"],
+                "evidence": ["Single file coordinates unrelated responsibilities."],
                 "suggestion": "split it",
             }
         ]
@@ -582,6 +659,8 @@ class TestImportHolisticFindings:
                 "identifier": "unused_deps",
                 "summary": "3 unused deps",
                 "confidence": "medium",
+                "related_files": ["pyproject.toml"],
+                "evidence": ["Declared dependencies have no import references."],
                 "suggestion": "Remove unused dependencies",
             }
         ]
@@ -599,6 +678,8 @@ class TestImportHolisticFindings:
                 "identifier": "god_module",
                 "summary": "test",
                 "confidence": "high",
+                "related_files": ["src/a.py"],
+                "evidence": ["One module appears in many import chains."],
                 "suggestion": "split it",
             }
         ]
@@ -617,6 +698,8 @@ class TestImportHolisticFindings:
                 "identifier": "good_decomposition",
                 "summary": "Good decomposition of domain modules",
                 "confidence": "high",
+                "related_files": ["src/domain/a.py"],
+                "evidence": ["Boundaries are explicit and layered cleanly."],
                 "suggestion": "Keep it up",
             },
             {
@@ -624,6 +707,8 @@ class TestImportHolisticFindings:
                 "identifier": "well_structured",
                 "summary": "Well structured error handling throughout",
                 "confidence": "high",
+                "related_files": ["src/handlers/errors.py"],
+                "evidence": ["Error paths are consistently normalized."],
                 "suggestion": "Continue this pattern",
             },
             {
@@ -631,6 +716,8 @@ class TestImportHolisticFindings:
                 "identifier": "vague_name",
                 "summary": "processData is vague — rename to reconcileInvoice",
                 "confidence": "high",
+                "related_files": ["src/payments/service.py"],
+                "evidence": ["Function name hides invoice reconciliation semantics."],
                 "suggestion": "Rename processData to reconcileInvoice",
             },
         ]
@@ -653,6 +740,8 @@ class TestImportHolisticFindings:
                 "identifier": "god_module",
                 "summary": "utils.py imported everywhere",
                 "confidence": "high",
+                "related_files": ["utils.py"],
+                "evidence": ["Utility module is a fan-in bottleneck."],
                 # Missing: suggestion
             },
         ]
@@ -661,7 +750,7 @@ class TestImportHolisticFindings:
 
         assert diff["new"] == 0
         assert diff.get("skipped", 0) == 1
-        assert "suggestion" in diff["skipped_details"][0]["missing"]
+        assert "suggestion" in " ".join(diff["skipped_details"][0]["missing"])
 
 
 # ===================================================================
@@ -1762,6 +1851,8 @@ class TestNewHolisticDimensions:
                 "identifier": "auth_gap",
                 "summary": "Auth middleware missing on admin routes",
                 "confidence": "high",
+                "related_files": ["src/routes/admin.ts"],
+                "evidence": ["Admin route tree bypasses auth middleware."],
                 "suggestion": "Add auth middleware to admin routes",
             },
             {
@@ -1769,6 +1860,8 @@ class TestNewHolisticDimensions:
                 "identifier": "ai_comments",
                 "summary": "Restating comments across 12 files",
                 "confidence": "medium",
+                "related_files": ["src/services/a.ts", "src/services/b.ts"],
+                "evidence": ["Comments repeat code behavior without additional intent."],
                 "suggestion": "Remove restating comments",
             },
             {
@@ -1776,6 +1869,8 @@ class TestNewHolisticDimensions:
                 "identifier": "mixed_api",
                 "summary": "Old axios + new fetch coexist in services/",
                 "confidence": "high",
+                "related_files": ["src/services/http.ts", "src/services/users.ts"],
+                "evidence": ["Codebase mixes legacy axios wrappers and fetch helpers."],
                 "suggestion": "Consolidate to fetch",
             },
         ]
@@ -2145,6 +2240,7 @@ class TestPackageOrganizationDimension:
                 "summary": "3 viz files at root should be in output/ subpackage",
                 "confidence": "high",
                 "related_files": ["visualize.py", "scorecard.py", "_scorecard_draw.py"],
+                "evidence": ["Visualization modules sit at root with unrelated concerns."],
                 "suggestion": "Move viz files into output/ subpackage",
             }
         ]

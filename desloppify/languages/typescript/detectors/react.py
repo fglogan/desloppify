@@ -7,12 +7,12 @@ import re
 from pathlib import Path
 
 from desloppify.core._internal.text_utils import PROJECT_ROOT
-from desloppify.file_discovery import find_tsx_files, rel
+from desloppify.core.discovery_api import find_tsx_files, rel
 from desloppify.languages.typescript.detectors._smell_helpers import (
     _strip_ts_comments,
     scan_code,
 )
-from desloppify.utils import colorize, print_table
+from desloppify.core.output_api import colorize, print_table
 
 MAX_EFFECT_BODY = 1000  # max characters to scan for brace-matching a useEffect callback
 MAX_FUNC_SCAN = 2000  # max lines to scan for function body extent

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from desloppify import scoring as scoring_mod
-from desloppify import utils as utils_mod
-from desloppify.app.commands.helpers.subjective import print_subjective_followup
 from desloppify.app.commands.scan.scan_reporting_subjective import (
     build_subjective_followup,
 )
-from desloppify.app.output.scorecard_parts.projection import (
+from desloppify.engine.planning.scorecard_projection import (
     scorecard_subjective_entries,
 )
 from desloppify.engine.work_queue import ATTEST_EXAMPLE, group_queue_items
@@ -17,7 +15,8 @@ from desloppify.intelligence.integrity import (
     subjective_review_open_breakdown,
     unassessed_subjective_dimensions,
 )
-from desloppify.utils import colorize
+from desloppify.core.output_api import colorize
+from desloppify.core.paths_api import read_code_snippet
 
 
 def scorecard_subjective(
@@ -69,8 +68,10 @@ def _render_grouped(items: list[dict], group: str) -> None:
         print(colorize(f"\n  {key} ({len(grouped_items)})", "cyan"))
         for item in grouped_items:
             tier = int(item.get("effective_tier", item.get("tier", 3)))
+            tag = _effort_tag(item)
+            tag_str = f" {tag}" if tag else ""
             print(
-                f"    {_tier_label(tier)} [{item.get('confidence', 'medium')}] {item.get('summary', '')}"
+                f"    {_tier_label(tier)} [{item.get('confidence', 'medium')}]{tag_str} {item.get('summary', '')}"
             )
 
 
@@ -79,14 +80,30 @@ def is_auto_fix_command(command: str | None) -> bool:
     return cmd.startswith("desloppify fix ") and "--dry-run" in cmd
 
 
+def _effort_tag(item: dict) -> str:
+    """Return a short effort/type tag for a queue item."""
+    if item.get("detector") == "review":
+        return "[review]"
+    if is_auto_fix_command(item.get("primary_command")):
+        return "[auto]"
+    return ""
+
+
 def _render_item(
-    item: dict, dim_scores: dict, findings_scoped: dict, explain: bool
+    item: dict, dim_scores: dict, findings_scoped: dict, explain: bool,
+    potentials: dict | None = None,
 ) -> None:
     tier = int(item.get("effective_tier", item.get("tier", 3)))
     confidence = item.get("confidence", "medium")
     print(colorize(f"  (Tier {tier}, {confidence} confidence)", "bold"))
     print(colorize("  " + "─" * 60, "dim"))
     print(f"  {colorize(item.get('summary', ''), 'yellow')}")
+
+    # Effort/type label
+    if item.get("detector") == "review":
+        print(colorize("  Type: Design review (requires judgment)", "dim"))
+    elif is_auto_fix_command(item.get("primary_command")):
+        print(colorize("  Type: Auto-fixable", "dim"))
 
     kind = item.get("kind", "finding")
     if kind == "subjective_dimension":
@@ -102,6 +119,10 @@ def _render_item(
                 "cyan",
             )
         )
+        print(colorize(
+            "  Note: re-review scores what it finds — scores can go down if issues are discovered.",
+            "dim",
+        ))
         if explain:
             reason = item.get("explain", {}).get(
                 "policy",
@@ -125,7 +146,7 @@ def _render_item(
 
     target_line = detail.get("line") or (detail.get("lines", [None]) or [None])[0]
     if target_line and item.get("file") not in (".", ""):
-        snippet = utils_mod.read_code_snippet(item["file"], target_line)
+        snippet = read_code_snippet(item["file"], target_line)
         if snippet:
             print(colorize("\n  Code:", "dim"))
             print(snippet)
@@ -144,6 +165,50 @@ def _render_item(
                     "dim",
                 )
             )
+
+    # Score impact estimate
+    detector = item.get("detector", "")
+    if potentials and detector and dim_scores:
+        try:
+            from desloppify.scoring import compute_score_impact
+            impact = compute_score_impact(dim_scores, potentials, detector, issues_to_fix=1)
+            if impact > 0:
+                print(colorize(f"  Impact: fixing this is worth ~+{impact:.1f} pts on overall score", "cyan"))
+            else:
+                # Single-item impact rounds to 0 — try bulk impact for all issues in detector
+                dimension = scoring_mod.get_dimension_for_detector(detector)
+                if dimension and dimension.name in dim_scores:
+                    issues = dim_scores[dimension.name].get("issues", 0)
+                    if issues > 1:
+                        bulk = compute_score_impact(dim_scores, potentials, detector, issues_to_fix=issues)
+                        if bulk > 0:
+                            print(colorize(
+                                f"  Impact: fixing all {issues} {detector} issues → ~+{bulk:.1f} pts",
+                                "cyan",
+                            ))
+        except (ImportError, TypeError, ValueError, KeyError):
+            pass
+    elif detector == "review" and dim_scores:
+        # Review findings: show dimension drag from breakdown
+        try:
+            from desloppify.scoring import compute_health_breakdown
+            dim_key = item.get("detail", {}).get("dimension", "")
+            if dim_key:
+                breakdown = compute_health_breakdown(dim_scores)
+                for entry in breakdown.get("entries", []):
+                    if not isinstance(entry, dict):
+                        continue
+                    entry_key = str(entry.get("name", "")).lower().replace(" ", "_")
+                    if entry_key == dim_key.lower().replace(" ", "_"):
+                        drag = float(entry.get("overall_drag", 0) or 0)
+                        if drag > 0.01:
+                            print(colorize(
+                                f"  Dimension drag: {entry['name']} costs -{drag:.2f} pts on overall score",
+                                "cyan",
+                            ))
+                        break
+        except (ImportError, TypeError, ValueError, KeyError):
+            pass
 
     detector_name = item.get("detector", "")
     auto_fix_command = item.get("primary_command")
@@ -168,6 +233,28 @@ def _render_item(
             f"ranked by tier={tier}, confidence={confidence}, "
             f"count={count_weight}, id={item.get('id', '')}"
         )
+
+        # Add dimension context for mechanical detectors
+        if dim_scores and detector:
+            dimension = scoring_mod.get_dimension_for_detector(detector)
+            if dimension and dimension.name in dim_scores:
+                ds = dim_scores[dimension.name]
+                base += (
+                    f". Dimension: {dimension.name} at {ds['score']:.1f}% "
+                    f"({ds['issues']} open issues)"
+                )
+
+        # For review findings, show subjective dimension context
+        if item.get("detector") == "review" and dim_scores:
+            dim_key = item.get("detail", {}).get("dimension", "")
+            if dim_key:
+                for ds_name, ds_data in dim_scores.items():
+                    if ds_name.lower().replace(" ", "_") == dim_key.lower().replace(" ", "_"):
+                        score_val = ds_data.get("score", "?")
+                        score_str = f"{score_val:.1f}" if isinstance(score_val, (int, float)) else str(score_val)
+                        base += f". Subjective dimension: {ds_name} at {score_str}%"
+                        break
+
         policy = explanation.get("policy")
         if policy:
             base = f"{base}. {policy}"
@@ -210,6 +297,7 @@ def render_terminal_items(
     *,
     group: str,
     explain: bool,
+    potentials: dict | None = None,
 ) -> None:
     if group != "item":
         _render_grouped(items, group)
@@ -219,7 +307,7 @@ def render_terminal_items(
             print()
         label = f"  [{idx + 1}/{len(items)}]" if len(items) > 1 else "  Next item"
         print(colorize(label, "bold"))
-        _render_item(item, dim_scores, findings_scoped, explain=explain)
+        _render_item(item, dim_scores, findings_scoped, explain=explain, potentials=potentials)
 
 
 def render_single_item_resolution_hint(items: list[dict]) -> None:
@@ -230,7 +318,7 @@ def render_single_item_resolution_hint(items: list[dict]) -> None:
     if detector_name == "subjective_review":
         print(colorize("\n  Review with:", "dim"))
         primary = item.get(
-            "primary_command", "desloppify show subjective_review --status open"
+            "primary_command", "desloppify show subjective"
         )
         print(f"    {primary}")
         if is_holistic_subjective_finding(item):
@@ -290,97 +378,36 @@ def render_followup_nudges(
                     "green",
                 )
             )
-    print_subjective_followup(followup, leading_newline=True)
+    # Integrity penalty/warn lines preserved (anti-gaming safeguard, must remain visible).
+    for style, message in followup.integrity_lines:
+        print(colorize(f"\n  {message}", style))
 
-    coverage_open, coverage_reasons, holistic_reasons = subjective_coverage_breakdown(
+    # Collapsed subjective summary.
+    coverage_open, _coverage_reasons, _holistic_reasons = subjective_coverage_breakdown(
         findings_scoped
     )
-    holistic_open = sum(holistic_reasons.values())
-    if unassessed_subjective or holistic_open > 0:
-        bits: list[str] = []
-        if unassessed_subjective:
-            bits.append("unassessed subjective dimensions")
-        if holistic_open > 0:
-            bits.append("holistic review stale/missing")
-        gap_label = " + ".join(bits)
-        print(colorize(f"\n  Subjective integrity gap: {gap_label}", "yellow"))
-        print(
-            colorize(
-                "  Priority: `desloppify review --prepare`", "dim"
-            )
-        )
-        print(
-            colorize(
-                "  Then import and rerun `desloppify scan` to refresh strict score.",
-                "dim",
-            )
-        )
-        if unassessed_subjective:
-            rendered = ", ".join(name for name in unassessed_subjective[:3])
-            if len(unassessed_subjective) > 3:
-                rendered = f"{rendered}, +{len(unassessed_subjective) - 3} more"
-            print(colorize(f"  Unassessed (0% placeholder): {rendered}", "dim"))
-
+    parts: list[str] = []
+    low_dims = len(followup.low_assessed)
+    unassessed_count = len(unassessed_subjective)
+    stale_count = sum(1 for e in subjective_entries if e.get("stale"))
     open_review = [
-        finding
-        for finding in findings_scoped.values()
-        if finding.get("status") == "open" and finding.get("detector") == "review"
+        f for f in findings_scoped.values()
+        if f.get("status") == "open" and f.get("detector") == "review"
     ]
-    if low_assessed and open_review:
-        print(
-            colorize(
-                "  Subjective bottleneck: prioritize `desloppify issues` to move elegance scores.",
-                "yellow",
-            )
-        )
-
+    if low_dims:
+        parts.append(f"{low_dims} dimension{'s' if low_dims != 1 else ''} below target")
+    if stale_count:
+        parts.append(f"{stale_count} stale")
+    if unassessed_count:
+        parts.append(f"{unassessed_count} unassessed")
+    if len(open_review):
+        parts.append(f"{len(open_review)} review finding{'s' if len(open_review) != 1 else ''} open")
     if coverage_open > 0:
-        reason_parts = []
-        if coverage_reasons.get("changed", 0) > 0:
-            reason_parts.append(f"{coverage_reasons['changed']} changed")
-        if coverage_reasons.get("unreviewed", 0) > 0:
-            reason_parts.append(f"{coverage_reasons['unreviewed']} unreviewed")
-        reason_text = ", ".join(reason_parts) if reason_parts else "stale/unreviewed"
-        suffix = "file" if coverage_open == 1 else "files"
-        print(
-            colorize(
-                f"  Subjective coverage debt: {coverage_open} {suffix} ({reason_text})",
-                "cyan",
-            )
-        )
-        if holistic_open > 0:
-            print(
-                colorize(
-                    f"  Includes {holistic_open} holistic stale/missing signal(s).",
-                    "yellow",
-                )
-            )
-        print(
-            colorize(
-                "  Triage: `desloppify show subjective_review --status open`", "dim"
-            )
-        )
+        parts.append(f"{coverage_open} file{'s' if coverage_open != 1 else ''} need review")
 
-    if open_review:
-        uninvestigated = sum(
-            1
-            for finding in open_review
-            if not finding.get("detail", {}).get("investigation")
-        )
-        suffix = f" ({uninvestigated} uninvestigated)" if uninvestigated else ""
-        print(
-            colorize(
-                f"  Also: {len(open_review)} review findings open{suffix}. Run `desloppify issues`.",
-                "cyan",
-            )
-        )
-    elif low_assessed or unassessed_subjective or coverage_open > 0:
-        print(
-            colorize(
-                "  Then import review output and rerun `desloppify scan` to refresh subjective scores.",
-                "dim",
-            )
-        )
+    if parts:
+        print(colorize(f"\n  Subjective: {', '.join(parts)}.", "cyan"))
+        print(colorize("  Run `desloppify show subjective` for details.", "dim"))
 
 
 __all__ = [

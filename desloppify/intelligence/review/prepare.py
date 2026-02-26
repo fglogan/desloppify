@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from desloppify.file_discovery import (
+from desloppify.core.discovery_api import (
     disable_file_cache,
     enable_file_cache,
     is_file_cache_enabled,
@@ -272,6 +272,7 @@ def prepare_holistic_review(
         concerns_batch = _batch_concerns(
             concerns,
             max_files=resolved_options.max_files_per_batch,
+            active_dimensions=dims,
         )
         if concerns_batch:
             batches.append(concerns_batch)

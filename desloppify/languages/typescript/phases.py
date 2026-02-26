@@ -20,7 +20,7 @@ from desloppify.engine.detectors import signature as signature_detector_mod
 from desloppify.engine.detectors import single_use as single_use_detector_mod
 from desloppify.engine.detectors.base import ComplexitySignal, GodRule
 from desloppify.engine.policy.zones import adjust_potential, filter_entries
-from desloppify.file_discovery import rel
+from desloppify.core.discovery_api import rel
 from desloppify.languages._framework.base.structural import (
     add_structural_signal,
     merge_structural_signals,
@@ -52,7 +52,8 @@ from desloppify.languages.typescript.extractors_components import (
     extract_ts_components,
 )
 from desloppify.state import Finding, make_finding
-from desloppify.utils import SRC_PATH, log
+from desloppify.core.output_api import log
+from desloppify.core.paths_api import get_src_path
 
 # ── Helper computations for complexity signals ─────────────
 
@@ -276,6 +277,8 @@ def phase_structural(
         path, file_finder=lang.file_finder
     )
     for e in flat_entries:
+        child_dir_count = int(e.get("child_dir_count", 0))
+        combined_score = int(e.get("combined_score", e.get("file_count", 0)))
         results.append(
             make_finding(
                 "flat_dirs",
@@ -283,12 +286,27 @@ def phase_structural(
                 "",
                 tier=3,
                 confidence="medium",
-                summary=f"Flat directory: {e['file_count']} files — consider grouping by domain",
-                detail={"file_count": e["file_count"]},
+                summary=flat_dirs_detector_mod.format_flat_dir_summary(e),
+                detail={
+                    "file_count": e["file_count"],
+                    "child_dir_count": child_dir_count,
+                    "combined_score": combined_score,
+                    "kind": e.get("kind", "overload"),
+                    "parent_sibling_count": int(e.get("parent_sibling_count", 0)),
+                    "wrapper_item_count": int(e.get("wrapper_item_count", 0)),
+                    "sparse_child_count": int(e.get("sparse_child_count", 0)),
+                    "sparse_child_ratio": float(e.get("sparse_child_ratio", 0.0)),
+                    "sparse_child_file_threshold": int(
+                        e.get("sparse_child_file_threshold", 0)
+                    ),
+                },
             )
         )
     if flat_entries:
-        log(f"         flat dirs: {len(flat_entries)} directories with 20+ files")
+        log(
+            f"         flat dirs: {len(flat_entries)} overloaded directories "
+            "(files/subdirs/combined)"
+        )
 
     # TS-specific: props bloat
     props_thresh = lang.props_threshold
@@ -420,9 +438,10 @@ def phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
             single_entries, lang.get_area, skip_dir_names={"commands"}, stderr_fn=log
         )
     )
-    shared_prefix = f"{SRC_PATH}/shared/"
-    tools_prefix = f"{SRC_PATH}/tools/"
-    coupling_entries, coupling_edges = coupling_detector_mod.detect_coupling_violations(
+    src_path = get_src_path()
+    shared_prefix = f"{src_path}/shared/"
+    tools_prefix = f"{src_path}/tools/"
+    coupling_entries, coupling_edge_counts = coupling_detector_mod.detect_coupling_violations(
         path, graph, shared_prefix=shared_prefix, tools_prefix=tools_prefix
     )
     coupling_entries = filter_entries(zm, coupling_entries, "coupling")
@@ -450,7 +469,7 @@ def phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
     results.extend(boundary_findings)
 
     # TS-specific: cross-tool imports
-    cross_tool, cross_edges = coupling_detector_mod.detect_cross_tool_imports(
+    cross_tool, cross_edge_counts = coupling_detector_mod.detect_cross_tool_imports(
         path, graph, tools_prefix=tools_prefix
     )
     cross_tool = filter_entries(zm, cross_tool, "coupling")
@@ -546,6 +565,8 @@ def phase_coupling(path: Path, lang: LangRun) -> tuple[list[Finding], dict[str, 
             )
         )
     log(f"         → {len(results)} coupling/structural findings total")
+    coupling_edges = coupling_edge_counts.eligible_edges
+    cross_edges = cross_edge_counts.eligible_edges
     potentials = {
         "single_use": adjust_potential(zm, single_candidates),
         "coupling": coupling_edges + cross_edges,

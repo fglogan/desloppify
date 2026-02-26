@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from desloppify.languages.python.detectors.smells_ast._node_detectors import (
     _detect_dead_functions,
     _detect_deferred_imports,
+    _detect_high_cyclomatic_complexity,
     _detect_inline_classes,
     _detect_lru_cache_mutable,
     _detect_monster_functions,
+    _detect_mutable_ref_hack,
+    _detect_nested_closures,
 )
 from desloppify.languages.python.detectors.smells_ast._tree_context_detectors import (
     _detect_callback_logging,
@@ -72,6 +75,18 @@ NODE_DETECTORS: tuple[_NodeDetectorSpec, ...] = (
     _NodeDetectorSpec(
         "lru_cache_mutable",
         lambda filepath, node, tree: _detect_lru_cache_mutable(filepath, node, tree),
+    ),
+    _NodeDetectorSpec(
+        "nested_closure",
+        lambda filepath, node, tree: _detect_nested_closures(filepath, node),
+    ),
+    _NodeDetectorSpec(
+        "mutable_ref_hack",
+        lambda filepath, node, tree: _detect_mutable_ref_hack(filepath, node),
+    ),
+    _NodeDetectorSpec(
+        "high_cyclomatic_complexity",
+        lambda filepath, node, tree: _detect_high_cyclomatic_complexity(filepath, node),
     ),
 )
 
