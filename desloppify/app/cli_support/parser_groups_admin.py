@@ -291,8 +291,8 @@ def _add_review_parser(sub) -> None:
     p_review.add_argument(
         "--batch-timeout-seconds",
         type=int,
-        default=2 * 60 * 60,
-        help="Per-batch runner timeout in seconds (default: 7200)",
+        default=20 * 60,
+        help="Per-batch runner timeout in seconds (default: 1200)",
     )
     p_review.add_argument(
         "--batch-max-retries",
@@ -328,6 +328,15 @@ def _add_review_parser(sub) -> None:
         help=(
             "Emit warning when a running batch exceeds this elapsed time "
             "(0 disables warnings; does not terminate the batch)"
+        ),
+    )
+    p_review.add_argument(
+        "--batch-stall-kill-seconds",
+        type=int,
+        default=120,
+        help=(
+            "Terminate a batch when output file is stable and runner streams are idle "
+            "for this many seconds (default: 120; 0 disables kill recovery)"
         ),
     )
     p_review.add_argument(

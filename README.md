@@ -106,7 +106,7 @@ If you'd like to join a community of vibe engineers who want to build beautiful 
   `dimension`, `identifier`, `summary`, `related_files`, `evidence`, `suggestion`, `confidence`.
 - Score/feedback consistency is enforced:
   - scores below `100.0` require explicit same-dimension feedback (finding suggestion or `dimension_notes` evidence)
-  - scores below `95.0` require at least one same-dimension finding
+  - scores below `85.0` require at least one same-dimension finding
 - `desloppify review --import` is fail-closed: if any finding is invalid/skipped, the import aborts and state is not saved.
 - Use `--allow-partial` only when you explicitly want to accept skipped findings.
 

@@ -26,7 +26,8 @@ from .runtime import setup_lang_concrete as _setup_lang
 
 REVIEW_PACKET_DIR = PROJECT_ROOT / ".desloppify" / "review_packets"
 SUBAGENT_RUNS_DIR = PROJECT_ROOT / ".desloppify" / "subagents" / "runs"
-CODEX_BATCH_TIMEOUT_SECONDS = 2 * 60 * 60
+CODEX_BATCH_TIMEOUT_SECONDS = 20 * 60
+CODEX_BATCH_STALL_KILL_SECONDS = 120
 FOLLOWUP_SCAN_TIMEOUT_SECONDS = 45 * 60
 ABSTRACTION_SUB_AXES = (
     "abstraction_leverage",
@@ -75,6 +76,19 @@ def _coerce_non_negative_float(value: object, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= 0.0 else default
+
+
+def _coerce_non_negative_int(value: object, *, default: int) -> int:
+    """Parse non-negative integer CLI/config inputs with safe defaults."""
+    if value is None:
+        return default
+    if not isinstance(value, int | float | str):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
 
 
 def _merge_batch_results(batch_results: list[object]) -> dict[str, object]:
@@ -195,6 +209,19 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
         getattr(args, "batch_retry_backoff_seconds", None),
         default=2.0,
     )
+    batch_heartbeat_seconds = _coerce_non_negative_float(
+        getattr(args, "batch_heartbeat_seconds", None),
+        default=15.0,
+    )
+    batch_live_log_interval_seconds = (
+        max(1.0, min(batch_heartbeat_seconds, 10.0))
+        if batch_heartbeat_seconds > 0
+        else 5.0
+    )
+    batch_stall_kill_seconds = _coerce_non_negative_int(
+        getattr(args, "batch_stall_kill_seconds", None),
+        default=CODEX_BATCH_STALL_KILL_SECONDS,
+    )
 
     def _prepare_run_artifacts(*, stamp, selected_indexes, batches, packet_path, run_root, repo_root):
         return runner_helpers_mod.prepare_run_artifacts(
@@ -251,6 +278,10 @@ def _do_run_batches(args, state, lang, state_file, config: dict | None = None) -
                 subprocess_run=subprocess.run,
                 timeout_error=subprocess.TimeoutExpired,
                 safe_write_text_fn=safe_write_text,
+                use_popen_runner=(getattr(subprocess.run, "__module__", "") == "subprocess"),
+                subprocess_popen=subprocess.Popen,
+                live_log_interval_seconds=batch_live_log_interval_seconds,
+                stall_after_output_seconds=batch_stall_kill_seconds,
                 max_retries=batch_max_retries,
                 retry_backoff_seconds=batch_retry_backoff_seconds,
             ),

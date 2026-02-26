@@ -269,7 +269,10 @@ def prepare_holistic_review(
         from desloppify.engine.concerns import generate_concerns
 
         concerns = generate_concerns(state, lang_name=lang.name)
-        concerns_batch = _batch_concerns(concerns)
+        concerns_batch = _batch_concerns(
+            concerns,
+            max_files=resolved_options.max_files_per_batch,
+        )
         if concerns_batch:
             batches.append(concerns_batch)
     except (ImportError, AttributeError, TypeError, ValueError) as exc:

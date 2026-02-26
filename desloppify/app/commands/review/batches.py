@@ -359,6 +359,14 @@ def do_run_batches(
         except (TypeError, ValueError):
             parsed_stall_warning = 0
         stall_warning_seconds = parsed_stall_warning if parsed_stall_warning > 0 else 0
+    raw_stall_kill = getattr(args, "batch_stall_kill_seconds", None)
+    stall_kill_seconds = 0
+    if isinstance(raw_stall_kill, int | float | str):
+        try:
+            parsed_stall_kill = int(raw_stall_kill)
+        except (TypeError, ValueError):
+            parsed_stall_kill = 0
+        stall_kill_seconds = parsed_stall_kill if parsed_stall_kill > 0 else 0
 
     stamp = run_stamp_fn()
     packet, immutable_packet_path, prompt_packet_path = load_or_prepare_packet_fn(
@@ -434,7 +442,8 @@ def do_run_batches(
         "run-start "
         f"runner={runner} parallel={run_parallel} max_parallel={max_parallel_batches} "
         f"timeout={batch_timeout_seconds}s heartbeat={heartbeat_seconds:.1f}s "
-        f"stall_warning={stall_warning_seconds}s retries={batch_max_retries} "
+        f"stall_warning={stall_warning_seconds}s stall_kill={stall_kill_seconds}s "
+        f"retries={batch_max_retries} "
         f"retry_backoff={batch_retry_backoff_seconds:.1f}s upper_bound={worst_case_minutes}m "
         f"selected={[idx + 1 for idx in selected_indexes]}"
     )
@@ -666,6 +675,7 @@ def do_run_batches(
         "batch_retry_backoff_seconds": batch_retry_backoff_seconds,
         "batch_heartbeat_seconds": heartbeat_seconds if run_parallel else None,
         "batch_stall_warning_seconds": stall_warning_seconds if run_parallel else None,
+        "batch_stall_kill_seconds": stall_kill_seconds,
         "immutable_packet": str(immutable_packet_path),
         "blind_packet": str(prompt_packet_path),
         "run_dir": str(run_dir),

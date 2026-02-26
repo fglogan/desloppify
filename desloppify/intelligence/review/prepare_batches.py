@@ -472,7 +472,11 @@ def filter_batches_to_dimensions(
     return filtered
 
 
-def batch_concerns(concerns: list) -> dict | None:
+def batch_concerns(
+    concerns: list,
+    *,
+    max_files: int | None = None,
+) -> dict | None:
     """Build investigation batch from mechanical concern signals.
 
     *concerns* should be a list of Concern dataclass instances from
@@ -484,11 +488,33 @@ def batch_concerns(concerns: list) -> dict | None:
     why_parts = ["mechanical detectors identified structural patterns needing judgment"]
     if types:
         why_parts.append(f"concern types: {', '.join(types)}")
+    files: list[str] = []
+    seen: set[str] = set()
+    for concern in concerns:
+        candidate = _normalize_file_path(getattr(concern, "file", ""))
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        files.append(candidate)
+
+    total_candidate_files = len(files)
+    if (
+        max_files is not None
+        and isinstance(max_files, int)
+        and max_files > 0
+        and total_candidate_files > max_files
+    ):
+        files = files[:max_files]
+        why_parts.append(
+            f"truncated to {max_files} files from {total_candidate_files} candidates"
+        )
+
     return {
         "name": "Design coherence — Mechanical Concern Signals",
         "dimensions": ["design_coherence"],
-        "files_to_read": sorted({c.file for c in concerns if c.file}),
+        "files_to_read": files,
         "why": "; ".join(why_parts),
+        "total_candidate_files": total_candidate_files,
     }
 
 

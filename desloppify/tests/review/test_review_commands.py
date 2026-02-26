@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -187,6 +189,57 @@ class TestCmdReviewPrepare:
         out = capsys.readouterr().out
         assert "Holistic review prepared" in out
         assert captured_kwargs["context"].command == "review"
+
+    def test_do_prepare_uses_configured_batch_file_limit(
+        self, mock_lang_with_zones, empty_state, tmp_path
+    ):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "foo.ts").write_text("export function foo() {}\n" * 25)
+        file_list = [str(src / "foo.ts")]
+
+        args = MagicMock()
+        args.path = str(tmp_path)
+        args.max_files = 50
+        args.max_age = 30
+        args.refresh = False
+        args.dimensions = None
+        args.retrospective = False
+        args.retrospective_max_issues = None
+        args.retrospective_max_batch_items = None
+
+        captured_limit = {"max_files_per_batch": None}
+
+        def _fake_prepare_holistic_review(_path, _lang_run, _state, *, options):
+            captured_limit["max_files_per_batch"] = options.max_files_per_batch
+            return {
+                "command": "review",
+                "mode": "holistic",
+                "total_files": 1,
+                "investigation_batches": [],
+                "workflow": [],
+            }
+
+        with (
+            patch(
+                "desloppify.app.commands.review.runtime.setup_lang_concrete",
+                return_value=(mock_lang_with_zones, file_list),
+            ),
+            patch(
+                "desloppify.app.commands.review.prepare.review_mod.prepare_holistic_review",
+                side_effect=_fake_prepare_holistic_review,
+            ),
+            patch("desloppify.app.commands.review.prepare.write_query", lambda _data: None),
+        ):
+            _do_prepare(
+                args,
+                empty_state,
+                mock_lang_with_zones,
+                None,
+                config={"review_batch_max_files": 17},
+            )
+
+        assert captured_limit["max_files_per_batch"] == 17
 
     def test_do_import_untrusted_assessment_only_payload_imports_findings_only(self, empty_state, tmp_path):
         from unittest.mock import MagicMock
@@ -1043,6 +1096,135 @@ class TestCmdReviewPrepare:
 
         assert captured["kwargs"]["allow_partial"] is True
 
+    def test_do_run_batches_recovers_missing_raw_output_from_log(
+        self, empty_state, tmp_path
+    ):
+        packet = {
+            "command": "review",
+            "mode": "holistic",
+            "language": "typescript",
+            "dimensions": ["mid_level_elegance"],
+            "investigation_batches": [
+                {
+                    "name": "Batch A",
+                    "dimensions": ["mid_level_elegance"],
+                    "files_to_read": ["src/a.ts", "src/b.ts"],
+                    "why": "A",
+                }
+            ],
+        }
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_text(json.dumps(packet))
+
+        args = MagicMock()
+        args.path = str(tmp_path)
+        args.dimensions = None
+        args.runner = "codex"
+        args.parallel = False
+        args.dry_run = False
+        args.packet = str(packet_path)
+        args.only_batches = None
+        args.scan_after_import = False
+        args.allow_partial = False
+
+        review_packet_dir = tmp_path / ".desloppify" / "review_packets"
+        runs_dir = tmp_path / ".desloppify" / "subagents" / "runs"
+
+        raw_payload = {
+            "assessments": {"mid_level_elegance": 72.0},
+            "dimension_notes": {
+                "mid_level_elegance": {
+                    "evidence": ["domain seams are split across sibling hooks"],
+                    "impact_scope": "module",
+                    "fix_scope": "single_edit",
+                    "confidence": "high",
+                }
+            },
+            "findings": [
+                {
+                    "dimension": "mid_level_elegance",
+                    "identifier": "seam_split_between_siblings",
+                    "summary": "Sibling hooks own overlapping orchestration seams",
+                    "related_files": ["src/a.ts", "src/b.ts"],
+                    "evidence": ["sibling hooks both coordinate the same operation sequence"],
+                    "suggestion": "extract one seam coordinator and reuse it across siblings",
+                    "confidence": "high",
+                    "impact_scope": "module",
+                    "fix_scope": "single_edit",
+                }
+            ],
+        }
+
+        def fake_subprocess_run(
+            _cmd,
+            capture_output=False,
+            text=False,
+            timeout=None,
+            cwd=None,
+        ):
+            _ = capture_output, text, timeout, cwd
+            # Simulate Codex occasionally returning JSON on stdout while failing
+            # to write the -o output file. collect_batch_results should recover
+            # from the batch log and persist the recovered raw payload.
+            return MagicMock(returncode=0, stdout=json.dumps(raw_payload), stderr="")
+
+        captured: dict[str, object] = {}
+
+        def fake_import(import_file, _state, _lang, _sp, holistic=True, config=None, **kwargs):
+            captured["holistic"] = holistic
+            captured["config"] = config
+            captured["kwargs"] = kwargs
+            captured["payload"] = json.loads(Path(import_file).read_text())
+
+        lang = MagicMock()
+        lang.name = "typescript"
+
+        with (
+            patch(
+                "desloppify.app.commands.review.batch.subprocess.run",
+                side_effect=fake_subprocess_run,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.PROJECT_ROOT",
+                tmp_path,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.REVIEW_PACKET_DIR",
+                review_packet_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch.SUBAGENT_RUNS_DIR",
+                runs_dir,
+            ),
+            patch(
+                "desloppify.app.commands.review.batch._do_import",
+                side_effect=fake_import,
+            ),
+        ):
+            _do_run_batches(args, empty_state, lang, "fake_sp", config={})
+
+        assert "payload" in captured
+        merged_payload = captured["payload"]
+        assert isinstance(merged_payload, dict)
+        assert "findings" in merged_payload
+        assert any(
+            finding.get("identifier") == "seam_split_between_siblings"
+            for finding in merged_payload.get("findings", [])
+            if isinstance(finding, dict)
+        )
+
+        recovered_results = sorted(runs_dir.glob("*/results/batch-1.raw.txt"))
+        assert len(recovered_results) == 1
+        recovered_payload = json.loads(recovered_results[0].read_text())
+        assert recovered_payload["assessments"]["mid_level_elegance"] == pytest.approx(72.0)
+        assert recovered_payload["findings"][0]["identifier"] == "seam_split_between_siblings"
+
+        summary_files = sorted(runs_dir.glob("*/run_summary.json"))
+        assert len(summary_files) == 1
+        summary_payload = json.loads(summary_files[0].read_text())
+        assert summary_payload["failed_batches"] == []
+        assert summary_payload["successful_batches"] == [1]
+
     def test_do_run_batches_allow_partial_imports_successful_batches_when_one_fails(
         self, empty_state, tmp_path
     ):
@@ -1451,6 +1633,172 @@ class TestCmdReviewPrepare:
         assert "ATTEMPT 1/1" in live_snapshot["text"]
         assert "STDOUT:" in log_file.read_text()
 
+    def test_run_codex_batch_stall_recovery_from_output_file(self, tmp_path):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        log_file = tmp_path / "batch.log"
+        output_file = tmp_path / "out.json"
+
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib,sys,time;"
+                "path=pathlib.Path(sys.argv[1]);"
+                "path.write_text('{\"assessments\":{\"logic_clarity\":91.0},\"findings\":[]}');"
+                "print('written', flush=True);"
+                "time.sleep(5)"
+            ),
+            str(output_file),
+        ]
+
+        with patch(
+            "desloppify.app.commands.review.runner_helpers.codex_batch_command",
+            return_value=command,
+        ):
+            code = runner_helpers_mod.run_codex_batch(
+                prompt="test prompt",
+                repo_root=tmp_path,
+                output_file=output_file,
+                log_file=log_file,
+                deps=runner_helpers_mod.CodexBatchRunnerDeps(
+                    timeout_seconds=30,
+                    subprocess_run=subprocess.run,
+                    timeout_error=TimeoutError,
+                    safe_write_text_fn=lambda p, t: p.write_text(t),
+                    use_popen_runner=True,
+                    subprocess_popen=subprocess.Popen,
+                    live_log_interval_seconds=0.2,
+                    stall_after_output_seconds=1,
+                ),
+            )
+
+        assert code == 0
+        log_text = log_file.read_text()
+        assert "STALL RECOVERY" in log_text
+        assert "Recovered stalled batch from JSON output file" in log_text
+
+    def test_collect_batch_results_recovers_execution_failure_with_valid_output(
+        self, tmp_path
+    ):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        output_file = tmp_path / "batch-1.raw.txt"
+        output_file.write_text(
+            json.dumps(
+                {
+                    "assessments": {"logic_clarity": 88.0},
+                    "dimension_notes": {
+                        "logic_clarity": {
+                            "evidence": ["flow has one avoidable branch detour"],
+                            "impact_scope": "module",
+                            "fix_scope": "single_edit",
+                            "confidence": "medium",
+                        }
+                    },
+                    "findings": [],
+                }
+            )
+        )
+
+        def normalize_result(payload, _allowed_dims):
+            notes = payload.get("dimension_notes", {})
+            return payload.get("assessments", {}), payload.get("findings", []), notes, {}
+
+        batch_results, failures = runner_helpers_mod.collect_batch_results(
+            selected_indexes=[0],
+            failures=[0],
+            output_files={0: output_file},
+            allowed_dims={"logic_clarity"},
+            extract_payload_fn=lambda raw: json.loads(raw),
+            normalize_result_fn=normalize_result,
+        )
+
+        assert failures == []
+        assert len(batch_results) == 1
+        assert batch_results[0].assessments["logic_clarity"] == pytest.approx(88.0)
+
+    def test_collect_batch_results_skips_full_log_fallback_when_stdout_empty(
+        self, tmp_path
+    ):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        results_dir = tmp_path / "results"
+        logs_dir = tmp_path / "logs"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        raw_path = results_dir / "batch-1.raw.txt"
+        log_path = logs_dir / "batch-1.log"
+        log_path.write_text(
+            "\n".join(
+                [
+                    "ATTEMPT 1/1",
+                    "$ codex exec ...",
+                    "Output schema:",
+                    "{",
+                    '  "assessments": {"logic_clarity": 91.0},',
+                    '  "findings": []',
+                    "}",
+                    "",
+                    "STDOUT:",
+                    "",
+                    "STDERR:",
+                    "ERROR: stream disconnected before completion",
+                ]
+            )
+        )
+
+        seen_inputs: list[str] = []
+
+        def extract_payload(raw: str) -> dict[str, object] | None:
+            seen_inputs.append(raw)
+            return None
+
+        batch_results, failures = runner_helpers_mod.collect_batch_results(
+            selected_indexes=[0],
+            failures=[],
+            output_files={0: raw_path},
+            allowed_dims={"logic_clarity"},
+            extract_payload_fn=extract_payload,
+            normalize_result_fn=lambda payload, _allowed: (  # noqa: ARG005
+                payload.get("assessments", {}),
+                payload.get("findings", []),
+                payload.get("dimension_notes", {}),
+                {},
+            ),
+        )
+
+        assert batch_results == []
+        assert failures == [0]
+        assert len(seen_inputs) == 1
+        assert "Output schema:" not in seen_inputs[0]
+
+    def test_execute_batches_ignores_progress_callback_exceptions(self, tmp_path):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        prompt_file = tmp_path / "batch-1.md"
+        prompt_file.write_text("review prompt")
+        output_file = tmp_path / "batch-1.raw.txt"
+        log_file = tmp_path / "batch-1.log"
+
+        def _broken_progress(*_args, **_kwargs):
+            raise RuntimeError("progress callback failed")
+
+        failures = runner_helpers_mod.execute_batches(
+            selected_indexes=[0],
+            prompt_files={0: prompt_file},
+            output_files={0: output_file},
+            log_files={0: log_file},
+            run_parallel=True,
+            run_batch_fn=lambda *, prompt, output_file, log_file: 0,  # noqa: ARG005
+            safe_write_text_fn=lambda path, text: path.write_text(text),
+            progress_fn=_broken_progress,
+            max_parallel_workers=1,
+            heartbeat_seconds=0.05,
+        )
+
+        assert failures == []
+
     def test_print_failures_and_exit_shows_codex_missing_hint(self, tmp_path, capsys):
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
 
@@ -1532,6 +1880,35 @@ class TestCmdReviewPrepare:
         assert "Failure categories:" in err
         assert "stream disconnect=1" in err
         assert "Connectivity tuning:" in err
+
+    def test_print_failures_reports_codex_backend_connectivity_hint(
+        self, tmp_path, capsys
+    ):
+        from desloppify.app.commands.review import runner_helpers as runner_helpers_mod
+
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / "batch-1.log").write_text(
+            "\n".join(
+                [
+                    "$ codex ...",
+                    "STDERR:",
+                    "ERROR: stream disconnected before completion:",
+                    "error sending request for url (https://chatgpt.com/backend-api/codex/responses)",
+                ]
+            )
+        )
+
+        runner_helpers_mod.print_failures(
+            failures=[0],
+            packet_path=tmp_path / "packet.json",
+            logs_dir=logs_dir,
+            colorize_fn=lambda text, _style: text,
+        )
+        err = capsys.readouterr().err
+        assert "Environment hints:" in err
+        assert "cannot reach chatgpt.com backend" in err
+        assert "--external-start --external-runner claude" in err
 
     def test_run_followup_scan_returns_nonzero_code(self, tmp_path):
         from desloppify.app.commands.review import runner_helpers as runner_helpers_mod

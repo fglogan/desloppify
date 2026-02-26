@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +37,7 @@ from desloppify.intelligence.review._prepare.helpers import (
 from desloppify.intelligence.review.context import file_excerpt
 from desloppify.intelligence.review.prepare import HolisticReviewPrepareOptions
 from desloppify.intelligence.review.prepare_batches import (
+    batch_concerns as _batch_concerns,
     build_investigation_batches as _build_investigation_batches,
 )
 from desloppify.intelligence.review.prepare_batches import filter_batches_to_dimensions
@@ -343,6 +345,66 @@ class TestPrepareHolisticReview:
         )
 
         assert data["dimensions"] == ["cross_module_architecture", "dependency_health"]
+
+    def test_concern_batch_respects_max_files(self):
+        concerns = [
+            SimpleNamespace(type="design_concern", file=f"src/file_{idx}.ts")
+            for idx in range(6)
+        ]
+        batch = _batch_concerns(concerns, max_files=3)
+
+        assert batch is not None
+        assert batch["name"] == "Design coherence — Mechanical Concern Signals"
+        assert batch["dimensions"] == ["design_coherence"]
+        assert batch["files_to_read"] == [
+            "src/file_0.ts",
+            "src/file_1.ts",
+            "src/file_2.ts",
+        ]
+        assert batch["total_candidate_files"] == 6
+        assert "truncated to 3 files from 6 candidates" in batch["why"]
+
+    def test_prepare_holistic_review_applies_max_files_to_concern_batch(
+        self, tmp_path, monkeypatch
+    ):
+        tracked_files = [
+            _make_file(str(tmp_path), f"src/file_{idx}.ts", lines=30)
+            for idx in range(6)
+        ]
+        lang = _mock_lang(tracked_files)
+        lang.name = "typescript"
+        state = empty_state()
+
+        concerns = [
+            SimpleNamespace(type="design_concern", file=f"src/file_{idx}.ts")
+            for idx in range(6)
+        ]
+        monkeypatch.setattr(
+            "desloppify.engine.concerns.generate_concerns",
+            lambda *_args, **_kwargs: concerns,
+        )
+
+        data = _prepare_holistic_review_impl(
+            tmp_path,
+            lang,
+            state,
+            options=HolisticReviewPrepareOptions(
+                dimensions=["design_coherence"],
+                files=tracked_files,
+                include_full_sweep=False,
+                max_files_per_batch=2,
+            ),
+        )
+
+        concern_batches = [
+            batch
+            for batch in data["investigation_batches"]
+            if batch.get("name") == "Design coherence — Mechanical Concern Signals"
+        ]
+        assert len(concern_batches) == 1
+        concern_batch = concern_batches[0]
+        assert concern_batch["files_to_read"] == ["src/file_0.ts", "src/file_1.ts"]
+        assert concern_batch["total_candidate_files"] == 6
 
 
 # ===================================================================

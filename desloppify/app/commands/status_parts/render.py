@@ -183,6 +183,30 @@ def _find_lowest_dimension(
     return lowest_name
 
 
+def _open_review_issue_counts(state: dict) -> dict[str, int]:
+    """Count open review findings grouped by subjective dimension key."""
+    findings = state.get("findings", {})
+    if not isinstance(findings, dict):
+        return {}
+
+    counts: dict[str, int] = {}
+    for finding in findings.values():
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("status") != "open" or finding.get("detector") != "review":
+            continue
+        detail = finding.get("detail", {})
+        dimension = ""
+        if isinstance(detail, dict):
+            dimension = str(detail.get("dimension", "")).strip()
+        if not dimension:
+            dimension = str(finding.get("dimension", "")).strip()
+        if not dimension:
+            continue
+        counts[dimension] = counts.get(dimension, 0) + 1
+    return counts
+
+
 def _render_objective_dimensions(
     dim_scores: dict, *, lowest_name: str | None, bar_len: int
 ) -> None:
@@ -206,7 +230,11 @@ def _render_objective_dimensions(
 
 
 def _render_subjective_dimensions(
-    scorecard_subjective: list[dict], *, lowest_name: str | None, bar_len: int
+    scorecard_subjective: list[dict],
+    *,
+    lowest_name: str | None,
+    bar_len: int,
+    review_issue_counts: dict[str, int],
 ) -> None:
     """Print rows for subjective (review-based) dimensions."""
     if not scorecard_subjective:
@@ -231,9 +259,23 @@ def _render_subjective_dimensions(
         placeholder_tag = (
             colorize(" [unassessed]", "yellow") if entry.get("placeholder") else ""
         )
+        dim_key = str(entry.get("dimension_key", "")).strip()
+        cli_keys = [
+            str(key).strip()
+            for key in entry.get("cli_keys", [])
+            if isinstance(key, str) and str(key).strip()
+        ]
+        if dim_key:
+            issue_count = int(review_issue_counts.get(dim_key, 0))
+        elif cli_keys:
+            issue_count = int(sum(review_issue_counts.get(key, 0) for key in cli_keys))
+        else:
+            issue_count = 0
+        issue_style = "yellow" if strict_val < 95.0 and issue_count == 0 else "dim"
+        issue_tag = colorize(f" [open issues: {issue_count}]", issue_style)
         print(
             f"  {name:<22} {checks_str}  {score_val:5.1f}%  {strict_val:5.1f}%  {bar}  T{tier}  {'review'}{focus}{stale_tag}"
-            f"{placeholder_tag}"
+            f"{placeholder_tag}{issue_tag}"
         )
 
 
@@ -279,10 +321,14 @@ def show_dimension_table(state: dict, dim_scores: dict) -> None:
 
     scorecard_subjective = _scorecard_subjective_entries(state, dim_scores)
     lowest_name = _find_lowest_dimension(dim_scores, scorecard_subjective)
+    review_issue_counts = _open_review_issue_counts(state)
 
     _render_objective_dimensions(dim_scores, lowest_name=lowest_name, bar_len=bar_len)
     _render_subjective_dimensions(
-        scorecard_subjective, lowest_name=lowest_name, bar_len=bar_len
+        scorecard_subjective,
+        lowest_name=lowest_name,
+        bar_len=bar_len,
+        review_issue_counts=review_issue_counts,
     )
     _render_dimension_legend(scorecard_subjective)
     print()

@@ -399,6 +399,8 @@ class TestCLI:
                 "2.5",
                 "--batch-stall-warning-seconds",
                 "45",
+                "--batch-stall-kill-seconds",
+                "75",
                 "--save-run-log",
                 "--run-log-file",
                 ".desloppify/subagents/runs/custom.log",
@@ -416,6 +418,7 @@ class TestCLI:
         assert args.batch_retry_backoff_seconds == 1.5
         assert args.batch_heartbeat_seconds == 2.5
         assert args.batch_stall_warning_seconds == 45
+        assert args.batch_stall_kill_seconds == 75
         assert args.save_run_log is True
         assert args.run_log_file == ".desloppify/subagents/runs/custom.log"
         assert args.dry_run is True

@@ -11,6 +11,8 @@ from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.utils import colorize
 
+DEFAULT_REVIEW_BATCH_MAX_FILES = 80
+
 
 def _redacted_review_config(config: dict | None) -> dict:
     """Return review packet config with target score removed for blind assessment."""
@@ -29,6 +31,16 @@ def _coerce_positive_int(value: object, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _coerce_review_batch_file_limit(config: dict | None) -> int | None:
+    """Resolve per-batch review file cap from config (0/negative => unlimited)."""
+    raw = (config or {}).get("review_batch_max_files", DEFAULT_REVIEW_BATCH_MAX_FILES)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REVIEW_BATCH_MAX_FILES
+    return value if value > 0 else None
 
 
 def do_prepare(
@@ -67,6 +79,7 @@ def do_prepare(
         options=review_mod.HolisticReviewPrepareOptions(
             dimensions=dimensions,
             files=found_files or None,
+            max_files_per_batch=_coerce_review_batch_file_limit(config),
             include_issue_history=retrospective,
             issue_history_max_issues=retrospective_max_issues,
             issue_history_max_batch_items=retrospective_max_batch_items,

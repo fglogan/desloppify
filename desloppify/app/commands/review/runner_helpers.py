@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import threading
@@ -46,6 +47,8 @@ _TRANSIENT_RUNNER_PHRASES = (
     "timed out while",
     "no last agent message; wrote empty content",
 )
+_CODEX_BACKEND_PATH_HINT = "/backend-api/codex/responses"
+_CODEX_BACKEND_HOST_HINT = "chatgpt.com"
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,10 @@ class CodexBatchRunnerDeps:
     subprocess_run: object
     timeout_error: type[BaseException]
     safe_write_text_fn: object
+    use_popen_runner: bool = False
+    subprocess_popen: object | None = None
+    live_log_interval_seconds: float = 5.0
+    stall_after_output_seconds: int = 90
     max_retries: int = 0
     retry_backoff_seconds: float = 0.0
     sleep_fn: object = time.sleep
@@ -136,52 +143,303 @@ def run_codex_batch(
         else 0.0
     )
     retry_backoff_seconds = max(0.0, backoff_raw)
+    live_log_interval_seconds = (
+        float(deps.live_log_interval_seconds)
+        if isinstance(deps.live_log_interval_seconds, int | float)
+        and float(deps.live_log_interval_seconds) > 0
+        else 5.0
+    )
+    stall_after_output_seconds = (
+        int(deps.stall_after_output_seconds)
+        if isinstance(deps.stall_after_output_seconds, int | float)
+        and int(deps.stall_after_output_seconds) > 0
+        else 0
+    )
     log_sections: list[str] = []
+
+    def _output_file_status_text() -> str:
+        if not output_file.exists():
+            return f"{output_file} (missing)"
+        try:
+            stat = output_file.stat()
+        except OSError as exc:
+            return f"{output_file} (exists; stat failed: {exc})"
+        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(
+            timespec="seconds"
+        )
+        return (
+            f"{output_file} (exists; bytes={stat.st_size}; "
+            f"modified={modified_at})"
+        )
+
+    def _output_file_has_json_payload() -> bool:
+        if not output_file.exists():
+            return False
+        try:
+            payload = json.loads(output_file.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        return isinstance(payload, dict)
+
+    def _terminate_process(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+            return
+        except Exception:
+            pass
+        try:
+            process.kill()
+            process.wait(timeout=3)
+        except Exception:
+            return
 
     for attempt in range(1, max_attempts + 1):
         header = f"ATTEMPT {attempt}/{max_attempts}\n$ {' '.join(cmd)}"
-        live_started_at = datetime.now(UTC).isoformat(timespec="seconds")
-        deps.safe_write_text_fn(
-            log_file,
-            "\n\n".join(
-                log_sections
-                + [
-                    (
-                        f"{header}\n\n"
-                        "STATUS: running\n"
-                        f"STARTED AT: {live_started_at}\n"
-                    )
-                ]
-            ),
-        )
-        try:
-            result = deps.subprocess_run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=deps.timeout_seconds,
-            )
-        except deps.timeout_error as exc:
-            log_sections.append(
-                f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n{exc}\n"
-            )
-            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-            return 124
-        except OSError as exc:
-            log_sections.append(f"{header}\n\nRUNNER ERROR:\n{exc}\n")
-            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-            return 127
-        except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive boundary
-            log_sections.append(f"{header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
-            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-            return 1
+        started_at_iso = datetime.now(UTC).isoformat(timespec="seconds")
+        started_monotonic = time.monotonic()
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        state_lock = threading.Lock()
+        stop_live_writer = threading.Event()
+        runner_note: list[str] = []
+        last_stream_activity = [started_monotonic]
 
-        stdout_text = result.stdout or ""
-        stderr_text = result.stderr or ""
-        log_sections.append(
-            f"{header}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+        def _write_live_snapshot() -> None:
+            elapsed_seconds = int(max(0.0, time.monotonic() - started_monotonic))
+            with state_lock:
+                stdout_preview = "".join(stdout_chunks)
+                stderr_preview = "".join(stderr_chunks)
+                note = runner_note[0] if runner_note else ""
+            note_block = f"\nRUNNER NOTE: {note}" if note else ""
+            deps.safe_write_text_fn(
+                log_file,
+                "\n\n".join(
+                    log_sections
+                    + [
+                        (
+                            f"{header}\n\n"
+                            "STATUS: running\n"
+                            f"STARTED AT: {started_at_iso}\n"
+                            f"ELAPSED: {elapsed_seconds}s\n"
+                            f"OUTPUT FILE: {_output_file_status_text()}"
+                            f"{note_block}\n\n"
+                            f"STDOUT (live):\n{stdout_preview}\n\n"
+                            f"STDERR (live):\n{stderr_preview}\n"
+                        )
+                    ]
+                ),
+            )
+
+        def _start_live_writer() -> threading.Thread:
+            def _loop() -> None:
+                while not stop_live_writer.wait(live_log_interval_seconds):
+                    _write_live_snapshot()
+
+            thread = threading.Thread(target=_loop, daemon=True)
+            thread.start()
+            return thread
+
+        _write_live_snapshot()
+
+        # Preferred path: Popen allows live stream capture + stall recovery.
+        # Compatibility path stays available for injected test runners.
+        use_popen_runner = bool(deps.use_popen_runner) and callable(
+            getattr(deps, "subprocess_popen", None)
         )
-        code = int(result.returncode)
+        if use_popen_runner:
+            writer_thread = _start_live_writer()
+            process: subprocess.Popen[str] | None = None
+            stdout_thread: threading.Thread | None = None
+            stderr_thread: threading.Thread | None = None
+            timed_out = False
+            recovered_from_stall = False
+            output_signature: tuple[int, int] | None = None
+            output_stable_since: float | None = None
+            try:
+                process = deps.subprocess_popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+            except OSError as exc:
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+                log_sections.append(f"{header}\n\nRUNNER ERROR:\n{exc}\n")
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 127
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+                log_sections.append(f"{header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 1
+
+            def _drain_stream(stream, sink: list[str]) -> None:
+                if stream is None:
+                    return
+                try:
+                    for chunk in iter(stream.readline, ""):
+                        if not chunk:
+                            break
+                        with state_lock:
+                            sink.append(chunk)
+                            last_stream_activity[0] = time.monotonic()
+                except Exception as exc:  # pragma: no cover - defensive boundary
+                    with state_lock:
+                        sink.append(f"\n[stream read error: {exc}]\n")
+                finally:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+
+            stdout_thread = threading.Thread(
+                target=_drain_stream,
+                args=(process.stdout, stdout_chunks),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=_drain_stream,
+                args=(process.stderr, stderr_chunks),
+                daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+
+            while process.poll() is None:
+                now_monotonic = time.monotonic()
+                elapsed = int(max(0.0, now_monotonic - started_monotonic))
+                if elapsed >= deps.timeout_seconds:
+                    with state_lock:
+                        runner_note[:] = [f"timeout after {deps.timeout_seconds}s"]
+                    timed_out = True
+                    _terminate_process(process)
+                    break
+                if stall_after_output_seconds > 0:
+                    current_signature: tuple[int, int] | None = None
+                    try:
+                        stat = output_file.stat()
+                        current_signature = (int(stat.st_size), int(stat.st_mtime))
+                    except OSError:
+                        current_signature = None
+                    if current_signature is None:
+                        output_signature = None
+                        output_stable_since = None
+                    elif current_signature != output_signature:
+                        output_signature = current_signature
+                        output_stable_since = now_monotonic
+                    elif output_stable_since is not None:
+                        output_age = now_monotonic - output_stable_since
+                        stream_idle = now_monotonic - last_stream_activity[0]
+                        if (
+                            output_age >= stall_after_output_seconds
+                            and stream_idle >= stall_after_output_seconds
+                        ):
+                            with state_lock:
+                                runner_note[:] = [
+                                    (
+                                        "stall recovery triggered after "
+                                        f"{stall_after_output_seconds}s "
+                                        "with stable output file"
+                                    )
+                                ]
+                            recovered_from_stall = _output_file_has_json_payload()
+                            _terminate_process(process)
+                            break
+                deps.sleep_fn(min(live_log_interval_seconds, 1.0))
+
+            if process.poll() is None:
+                _terminate_process(process)
+            if stdout_thread is not None:
+                stdout_thread.join(timeout=2)
+            if stderr_thread is not None:
+                stderr_thread.join(timeout=2)
+            stop_live_writer.set()
+            writer_thread.join(timeout=2)
+            _write_live_snapshot()
+
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks)
+            if timed_out:
+                log_sections.append(
+                    f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n\n"
+                    f"STDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+                )
+                if _output_file_has_json_payload():
+                    log_sections.append(
+                        "Recovered timed-out batch from JSON output file; "
+                        "continuing as success."
+                    )
+                    deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                    return 0
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 124
+            if recovered_from_stall:
+                log_sections.append(
+                    f"{header}\n\nSTALL RECOVERY after {stall_after_output_seconds}s "
+                    "of stable output and no stream activity.\n\n"
+                    f"STDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+                )
+                if _output_file_has_json_payload():
+                    log_sections.append(
+                        "Recovered stalled batch from JSON output file; "
+                        "continuing as success."
+                    )
+                    deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                    return 0
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 124
+
+            code = int(process.returncode or 0)
+            log_sections.append(
+                f"{header}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+            )
+        else:
+            # Compatibility path used by tests/injected runners.
+            writer_thread = _start_live_writer()
+            try:
+                result = deps.subprocess_run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=deps.timeout_seconds,
+                )
+            except deps.timeout_error as exc:
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+                log_sections.append(
+                    f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n{exc}\n"
+                )
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 124
+            except OSError as exc:
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+                log_sections.append(f"{header}\n\nRUNNER ERROR:\n{exc}\n")
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 127
+            except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive boundary
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+                log_sections.append(f"{header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 1
+            finally:
+                stop_live_writer.set()
+                writer_thread.join(timeout=2)
+
+            stdout_text = result.stdout or ""
+            stderr_text = result.stderr or ""
+            log_sections.append(
+                f"{header}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+            )
+            code = int(result.returncode)
+
         if code == 0:
             deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
             return 0
@@ -431,7 +689,12 @@ def execute_batches(
         try:
             progress_fn(batch_index, event, code, **payload)
         except TypeError:
-            progress_fn(batch_index, event, code)
+            try:
+                progress_fn(batch_index, event, code)
+            except Exception:
+                return
+        except Exception:
+            return
 
     failures: list[int] = []
     if run_parallel:
@@ -577,19 +840,66 @@ def collect_batch_results(
     normalize_result_fn,
 ) -> tuple[list[BatchResult], list[int]]:
     """Parse and normalize batch outputs, preserving prior failures."""
+    def _extract_payload_from_log(idx: int, raw_path: Path) -> dict[str, object] | None:
+        log_path = raw_path.parent.parent / "logs" / f"batch-{idx + 1}.log"
+        if not log_path.exists():
+            return None
+        try:
+            log_text = log_path.read_text()
+        except OSError:
+            return None
+
+        # Prefer the final STDOUT section for the attempt; if that fails, scan the full log.
+        stdout_marker = "\nSTDOUT:\n"
+        stderr_marker = "\n\nSTDERR:\n"
+        stdout_start = log_text.rfind(stdout_marker)
+        if stdout_start == -1 and log_text.startswith("STDOUT:\n"):
+            stdout_start = 0
+            stdout_offset = len("STDOUT:\n")
+        elif stdout_start >= 0:
+            stdout_offset = len(stdout_marker)
+        else:
+            stdout_offset = 0
+        if stdout_start >= 0:
+            start_idx = stdout_start + stdout_offset
+            stdout_end = log_text.find(stderr_marker, start_idx)
+            stdout_text = (
+                log_text[start_idx:] if stdout_end == -1 else log_text[start_idx:stdout_end]
+            )
+            payload = extract_payload_fn(stdout_text)
+            if payload is not None:
+                return payload
+            # If the batch log has a concrete STDOUT section but it contains no parseable
+            # payload, do not fallback to parsing the whole log. Full logs include the
+            # prompt template (often with JSON examples), which can generate misleading
+            # decode errors and hide the true runner failure in STDERR.
+            return None
+
+        return extract_payload_fn(log_text)
+
     batch_results: list[BatchResult] = []
     failure_set = set(failures)
     for idx in selected_indexes:
-        if idx in failure_set:
-            continue
+        had_execution_failure = idx in failure_set
         raw_path = output_files[idx]
-        if not raw_path.exists():
-            failure_set.add(idx)
-            continue
-        payload = extract_payload_fn(raw_path.read_text())
+        payload = None
+        parsed_from_log = False
+        if raw_path.exists():
+            try:
+                payload = extract_payload_fn(raw_path.read_text())
+            except OSError:
+                payload = None
+        if payload is None:
+            payload = _extract_payload_from_log(idx, raw_path)
+            parsed_from_log = payload is not None
         if payload is None:
             failure_set.add(idx)
             continue
+        if parsed_from_log:
+            try:
+                raw_path.write_text(json.dumps(payload, indent=2) + "\n")
+            except OSError:
+                pass
         try:
             assessments, findings, dimension_notes, quality = normalize_result_fn(
                 payload,
@@ -598,6 +908,8 @@ def collect_batch_results(
         except ValueError:
             failure_set.add(idx)
             continue
+        if had_execution_failure:
+            failure_set.discard(idx)
         batch_results.append(
             BatchResult(
                 batch_index=idx + 1,
@@ -639,6 +951,20 @@ def _classify_runner_failure(log_text: str) -> str:
     if "runner exception" in text:
         return "runner_exception"
     return "unknown"
+
+
+def _has_codex_backend_connectivity_issue(log_text: str) -> bool:
+    """Return True when logs indicate Codex backend URL is unreachable."""
+    text = log_text.lower()
+    if "error sending request for url" not in text:
+        return False
+    return (
+        _CODEX_BACKEND_PATH_HINT in text
+        or _CODEX_BACKEND_HOST_HINT in text
+        or "nodename nor servname provided" in text
+        or "name or service not known" in text
+        or "temporary failure in name resolution" in text
+    )
 
 
 def _summarize_failure_categories(*, failures: list[int], logs_dir: Path) -> dict[str, int]:
@@ -697,6 +1023,14 @@ def _runner_failure_hints(*, failures: list[int], logs_dir: Path) -> list[str]:
                 "Transient Codex connectivity issue detected. Retry with "
                 "`--batch-max-retries 2 --batch-retry-backoff-seconds 2` and, if needed, "
                 "lower concurrency via `--max-parallel-batches 1`."
+            )
+            if hint not in hints:
+                hints.append(hint)
+        if _has_codex_backend_connectivity_issue(text):
+            hint = (
+                "Codex runner cannot reach chatgpt.com backend from this environment. "
+                "Check outbound HTTPS/DNS/proxy access, or use cloud fallback: "
+                "`desloppify review --external-start --external-runner claude`."
             )
             if hint not in hints:
                 hints.append(hint)

@@ -501,7 +501,7 @@ def test_import_trusted_internal_rejects_low_score_without_finding(tmp_path, cap
                 "confidence": "high",
             }
         },
-        "assessments": {"naming_quality": 90},
+        "assessments": {"naming_quality": 80},
     }
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
@@ -515,7 +515,7 @@ def test_import_trusted_internal_rejects_low_score_without_finding(tmp_path, cap
         )
     assert exc.value.code == 1
     err = capsys.readouterr().err
-    assert "assessments below 95.0 must include at least one finding" in err
+    assert "assessments below 85.0 must include at least one finding" in err
 
 
 def test_import_trusted_internal_accepts_low_score_with_finding(tmp_path):
@@ -531,7 +531,7 @@ def test_import_trusted_internal_accepts_low_score_with_finding(tmp_path):
                 "confidence": "high",
             }
         ],
-        "assessments": {"naming_quality": 90},
+        "assessments": {"naming_quality": 80},
     }
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(json.dumps(payload))
@@ -542,7 +542,7 @@ def test_import_trusted_internal_accepts_low_score_with_finding(tmp_path):
         trusted_assessment_source=True,
         trusted_assessment_label="internal batch import test",
     )
-    assert parsed["assessments"]["naming_quality"] == 90
+    assert parsed["assessments"]["naming_quality"] == 80
 
 
 def test_write_packet_snapshot_redacts_target_from_blind_packet(tmp_path):
