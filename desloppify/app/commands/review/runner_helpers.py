@@ -11,7 +11,7 @@ import threading
 from hashlib import sha256
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -96,6 +96,43 @@ class BatchResult:
         }
 
 
+@dataclass
+class _RunnerState:
+    """Mutable state shared between threads during a batch run."""
+
+    stdout_chunks: list[str] = field(default_factory=list)
+    stderr_chunks: list[str] = field(default_factory=list)
+    runner_note: str = ""
+    last_stream_activity: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    stop_event: threading.Event = field(default_factory=threading.Event)
+
+
+@dataclass(frozen=True)
+class _AttemptContext:
+    """Immutable per-attempt context bundling values that closures captured."""
+
+    header: str
+    started_at_iso: str
+    started_monotonic: float
+    output_file: Path
+    log_file: Path
+    log_sections: list[str]
+    safe_write_text_fn: object
+
+
+@dataclass
+class _ExecutionResult:
+    """Unified return from both execution paths."""
+
+    code: int
+    stdout_text: str
+    stderr_text: str
+    timed_out: bool = False
+    recovered_from_stall: bool = False
+    early_return: int | None = None
+
+
 def run_stamp() -> str:
     """Stable UTC run stamp for artifact paths."""
     return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -124,6 +161,284 @@ def codex_batch_command(*, prompt: str, repo_root: Path, output_file: Path) -> l
     ]
 
 
+def _output_file_status_text(output_file: Path) -> str:
+    """Describe output file state for live log snapshots."""
+    if not output_file.exists():
+        return f"{output_file} (missing)"
+    try:
+        stat = output_file.stat()
+    except OSError as exc:
+        return f"{output_file} (exists; stat failed: {exc})"
+    modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(
+        timespec="seconds"
+    )
+    return (
+        f"{output_file} (exists; bytes={stat.st_size}; "
+        f"modified={modified_at})"
+    )
+
+
+def _output_file_has_json_payload(output_file: Path) -> bool:
+    """Return True when the output file contains a valid JSON object."""
+    if not output_file.exists():
+        return False
+    try:
+        payload = json.loads(output_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict)
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    """Terminate (then kill) a subprocess that may still be running."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=3)
+        return
+    except Exception:
+        pass
+    try:
+        process.kill()
+        process.wait(timeout=3)
+    except Exception:
+        return
+
+
+def _drain_stream(stream, sink: list[str], state: _RunnerState) -> None:
+    """Read lines from *stream* into *sink*, updating activity timestamp."""
+    if stream is None:
+        return
+    try:
+        for chunk in iter(stream.readline, ""):
+            if not chunk:
+                break
+            with state.lock:
+                sink.append(chunk)
+                state.last_stream_activity = time.monotonic()
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        with state.lock:
+            sink.append(f"\n[stream read error: {exc}]\n")
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
+def _write_live_snapshot(state: _RunnerState, ctx: _AttemptContext) -> None:
+    """Write a point-in-time log snapshot while the runner is active."""
+    elapsed_seconds = int(max(0.0, time.monotonic() - ctx.started_monotonic))
+    with state.lock:
+        stdout_preview = "".join(state.stdout_chunks)
+        stderr_preview = "".join(state.stderr_chunks)
+        note = state.runner_note
+    note_block = f"\nRUNNER NOTE: {note}" if note else ""
+    ctx.safe_write_text_fn(
+        ctx.log_file,
+        "\n\n".join(
+            ctx.log_sections
+            + [
+                (
+                    f"{ctx.header}\n\n"
+                    "STATUS: running\n"
+                    f"STARTED AT: {ctx.started_at_iso}\n"
+                    f"ELAPSED: {elapsed_seconds}s\n"
+                    f"OUTPUT FILE: {_output_file_status_text(ctx.output_file)}"
+                    f"{note_block}\n\n"
+                    f"STDOUT (live):\n{stdout_preview}\n\n"
+                    f"STDERR (live):\n{stderr_preview}\n"
+                )
+            ]
+        ),
+    )
+
+
+def _start_live_writer(
+    state: _RunnerState, ctx: _AttemptContext, interval: float,
+) -> threading.Thread:
+    """Spawn a daemon thread that periodically writes live log snapshots."""
+    def _loop() -> None:
+        while not state.stop_event.wait(interval):
+            _write_live_snapshot(state, ctx)
+
+    thread = threading.Thread(target=_loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def _check_stall(
+    output_file: Path,
+    prev_sig: tuple[int, int] | None,
+    prev_stable: float | None,
+    now: float,
+    last_activity: float,
+    threshold: int,
+) -> tuple[bool, tuple[int, int] | None, float | None]:
+    """Check for output file stall. Returns (stalled, new_sig, new_stable_since)."""
+    try:
+        stat = output_file.stat()
+        current_signature: tuple[int, int] | None = (int(stat.st_size), int(stat.st_mtime))
+    except OSError:
+        current_signature = None
+    if current_signature is None:
+        return False, None, None
+    if current_signature != prev_sig:
+        return False, current_signature, now
+    if prev_stable is None:
+        return False, prev_sig, prev_stable
+    output_age = now - prev_stable
+    stream_idle = now - last_activity
+    if output_age >= threshold and stream_idle >= threshold:
+        return True, prev_sig, prev_stable
+    return False, prev_sig, prev_stable
+
+
+def _run_via_popen(
+    cmd: list[str],
+    deps: CodexBatchRunnerDeps,
+    state: _RunnerState,
+    ctx: _AttemptContext,
+    interval: float,
+    stall_seconds: int,
+) -> _ExecutionResult:
+    """Execute batch via Popen with live streaming and stall recovery."""
+    writer_thread = _start_live_writer(state, ctx, interval)
+    try:
+        process = deps.subprocess_popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as exc:
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+        ctx.log_sections.append(f"{ctx.header}\n\nRUNNER ERROR:\n{exc}\n")
+        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
+        return _ExecutionResult(code=127, stdout_text="", stderr_text="", early_return=127)
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+        ctx.log_sections.append(f"{ctx.header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
+        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
+        return _ExecutionResult(code=1, stdout_text="", stderr_text="", early_return=1)
+
+    stdout_thread = threading.Thread(
+        target=_drain_stream,
+        args=(process.stdout, state.stdout_chunks, state),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_drain_stream,
+        args=(process.stderr, state.stderr_chunks, state),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    timed_out = False
+    recovered_from_stall = False
+    output_signature: tuple[int, int] | None = None
+    output_stable_since: float | None = None
+
+    while process.poll() is None:
+        now_monotonic = time.monotonic()
+        elapsed = int(max(0.0, now_monotonic - ctx.started_monotonic))
+        if elapsed >= deps.timeout_seconds:
+            with state.lock:
+                state.runner_note = f"timeout after {deps.timeout_seconds}s"
+            timed_out = True
+            _terminate_process(process)
+            break
+        if stall_seconds > 0:
+            with state.lock:
+                last_activity = state.last_stream_activity
+            stalled, output_signature, output_stable_since = _check_stall(
+                ctx.output_file,
+                output_signature,
+                output_stable_since,
+                now_monotonic,
+                last_activity,
+                stall_seconds,
+            )
+            if stalled:
+                with state.lock:
+                    state.runner_note = (
+                        f"stall recovery triggered after {stall_seconds}s "
+                        "with stable output file"
+                    )
+                recovered_from_stall = _output_file_has_json_payload(ctx.output_file)
+                _terminate_process(process)
+                break
+        deps.sleep_fn(min(interval, 1.0))
+
+    if process.poll() is None:
+        _terminate_process(process)
+    stdout_thread.join(timeout=2)
+    stderr_thread.join(timeout=2)
+    state.stop_event.set()
+    writer_thread.join(timeout=2)
+    _write_live_snapshot(state, ctx)
+
+    return _ExecutionResult(
+        code=int(process.returncode or 0),
+        stdout_text="".join(state.stdout_chunks),
+        stderr_text="".join(state.stderr_chunks),
+        timed_out=timed_out,
+        recovered_from_stall=recovered_from_stall,
+    )
+
+
+def _run_via_subprocess(
+    cmd: list[str],
+    deps: CodexBatchRunnerDeps,
+    state: _RunnerState,
+    ctx: _AttemptContext,
+    interval: float,
+) -> _ExecutionResult:
+    """Execute batch via subprocess.run (compatibility path for tests)."""
+    writer_thread = _start_live_writer(state, ctx, interval)
+    try:
+        result = deps.subprocess_run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=deps.timeout_seconds,
+        )
+    except deps.timeout_error as exc:
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+        ctx.log_sections.append(
+            f"{ctx.header}\n\nTIMEOUT after {deps.timeout_seconds}s\n{exc}\n"
+        )
+        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
+        return _ExecutionResult(code=124, stdout_text="", stderr_text="", early_return=124)
+    except OSError as exc:
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+        ctx.log_sections.append(f"{ctx.header}\n\nRUNNER ERROR:\n{exc}\n")
+        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
+        return _ExecutionResult(code=127, stdout_text="", stderr_text="", early_return=127)
+    except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive boundary
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+        ctx.log_sections.append(f"{ctx.header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
+        ctx.safe_write_text_fn(ctx.log_file, "\n\n".join(ctx.log_sections))
+        return _ExecutionResult(code=1, stdout_text="", stderr_text="", early_return=1)
+    finally:
+        state.stop_event.set()
+        writer_thread.join(timeout=2)
+
+    return _ExecutionResult(
+        code=int(result.returncode),
+        stdout_text=result.stdout or "",
+        stderr_text=result.stderr or "",
+    )
+
+
 def run_codex_batch(
     *,
     prompt: str,
@@ -143,312 +458,90 @@ def run_codex_batch(
         else 0.0
     )
     retry_backoff_seconds = max(0.0, backoff_raw)
-    live_log_interval_seconds = (
+    live_log_interval = (
         float(deps.live_log_interval_seconds)
         if isinstance(deps.live_log_interval_seconds, int | float)
         and float(deps.live_log_interval_seconds) > 0
         else 5.0
     )
-    stall_after_output_seconds = (
+    stall_seconds = (
         int(deps.stall_after_output_seconds)
         if isinstance(deps.stall_after_output_seconds, int | float)
         and int(deps.stall_after_output_seconds) > 0
         else 0
     )
     log_sections: list[str] = []
-
-    def _output_file_status_text() -> str:
-        if not output_file.exists():
-            return f"{output_file} (missing)"
-        try:
-            stat = output_file.stat()
-        except OSError as exc:
-            return f"{output_file} (exists; stat failed: {exc})"
-        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(
-            timespec="seconds"
-        )
-        return (
-            f"{output_file} (exists; bytes={stat.st_size}; "
-            f"modified={modified_at})"
-        )
-
-    def _output_file_has_json_payload() -> bool:
-        if not output_file.exists():
-            return False
-        try:
-            payload = json.loads(output_file.read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        return isinstance(payload, dict)
-
-    def _terminate_process(process: subprocess.Popen[str]) -> None:
-        if process.poll() is not None:
-            return
-        try:
-            process.terminate()
-            process.wait(timeout=3)
-            return
-        except Exception:
-            pass
-        try:
-            process.kill()
-            process.wait(timeout=3)
-        except Exception:
-            return
+    use_popen = bool(deps.use_popen_runner) and callable(
+        getattr(deps, "subprocess_popen", None)
+    )
 
     for attempt in range(1, max_attempts + 1):
         header = f"ATTEMPT {attempt}/{max_attempts}\n$ {' '.join(cmd)}"
-        started_at_iso = datetime.now(UTC).isoformat(timespec="seconds")
         started_monotonic = time.monotonic()
-        stdout_chunks: list[str] = []
-        stderr_chunks: list[str] = []
-        state_lock = threading.Lock()
-        stop_live_writer = threading.Event()
-        runner_note: list[str] = []
-        last_stream_activity = [started_monotonic]
-
-        def _write_live_snapshot() -> None:
-            elapsed_seconds = int(max(0.0, time.monotonic() - started_monotonic))
-            with state_lock:
-                stdout_preview = "".join(stdout_chunks)
-                stderr_preview = "".join(stderr_chunks)
-                note = runner_note[0] if runner_note else ""
-            note_block = f"\nRUNNER NOTE: {note}" if note else ""
-            deps.safe_write_text_fn(
-                log_file,
-                "\n\n".join(
-                    log_sections
-                    + [
-                        (
-                            f"{header}\n\n"
-                            "STATUS: running\n"
-                            f"STARTED AT: {started_at_iso}\n"
-                            f"ELAPSED: {elapsed_seconds}s\n"
-                            f"OUTPUT FILE: {_output_file_status_text()}"
-                            f"{note_block}\n\n"
-                            f"STDOUT (live):\n{stdout_preview}\n\n"
-                            f"STDERR (live):\n{stderr_preview}\n"
-                        )
-                    ]
-                ),
-            )
-
-        def _start_live_writer() -> threading.Thread:
-            def _loop() -> None:
-                while not stop_live_writer.wait(live_log_interval_seconds):
-                    _write_live_snapshot()
-
-            thread = threading.Thread(target=_loop, daemon=True)
-            thread.start()
-            return thread
-
-        _write_live_snapshot()
-
-        # Preferred path: Popen allows live stream capture + stall recovery.
-        # Compatibility path stays available for injected test runners.
-        use_popen_runner = bool(deps.use_popen_runner) and callable(
-            getattr(deps, "subprocess_popen", None)
+        state = _RunnerState(last_stream_activity=started_monotonic)
+        ctx = _AttemptContext(
+            header=header,
+            started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
+            started_monotonic=started_monotonic,
+            output_file=output_file,
+            log_file=log_file,
+            log_sections=log_sections,
+            safe_write_text_fn=deps.safe_write_text_fn,
         )
-        if use_popen_runner:
-            writer_thread = _start_live_writer()
-            process: subprocess.Popen[str] | None = None
-            stdout_thread: threading.Thread | None = None
-            stderr_thread: threading.Thread | None = None
-            timed_out = False
-            recovered_from_stall = False
-            output_signature: tuple[int, int] | None = None
-            output_stable_since: float | None = None
-            try:
-                process = deps.subprocess_popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                )
-            except OSError as exc:
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
-                log_sections.append(f"{header}\n\nRUNNER ERROR:\n{exc}\n")
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 127
-            except Exception as exc:  # pragma: no cover - defensive boundary
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
-                log_sections.append(f"{header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 1
+        _write_live_snapshot(state, ctx)
 
-            def _drain_stream(stream, sink: list[str]) -> None:
-                if stream is None:
-                    return
-                try:
-                    for chunk in iter(stream.readline, ""):
-                        if not chunk:
-                            break
-                        with state_lock:
-                            sink.append(chunk)
-                            last_stream_activity[0] = time.monotonic()
-                except Exception as exc:  # pragma: no cover - defensive boundary
-                    with state_lock:
-                        sink.append(f"\n[stream read error: {exc}]\n")
-                finally:
-                    try:
-                        stream.close()
-                    except Exception:
-                        pass
-
-            stdout_thread = threading.Thread(
-                target=_drain_stream,
-                args=(process.stdout, stdout_chunks),
-                daemon=True,
-            )
-            stderr_thread = threading.Thread(
-                target=_drain_stream,
-                args=(process.stderr, stderr_chunks),
-                daemon=True,
-            )
-            stdout_thread.start()
-            stderr_thread.start()
-
-            while process.poll() is None:
-                now_monotonic = time.monotonic()
-                elapsed = int(max(0.0, now_monotonic - started_monotonic))
-                if elapsed >= deps.timeout_seconds:
-                    with state_lock:
-                        runner_note[:] = [f"timeout after {deps.timeout_seconds}s"]
-                    timed_out = True
-                    _terminate_process(process)
-                    break
-                if stall_after_output_seconds > 0:
-                    current_signature: tuple[int, int] | None = None
-                    try:
-                        stat = output_file.stat()
-                        current_signature = (int(stat.st_size), int(stat.st_mtime))
-                    except OSError:
-                        current_signature = None
-                    if current_signature is None:
-                        output_signature = None
-                        output_stable_since = None
-                    elif current_signature != output_signature:
-                        output_signature = current_signature
-                        output_stable_since = now_monotonic
-                    elif output_stable_since is not None:
-                        output_age = now_monotonic - output_stable_since
-                        stream_idle = now_monotonic - last_stream_activity[0]
-                        if (
-                            output_age >= stall_after_output_seconds
-                            and stream_idle >= stall_after_output_seconds
-                        ):
-                            with state_lock:
-                                runner_note[:] = [
-                                    (
-                                        "stall recovery triggered after "
-                                        f"{stall_after_output_seconds}s "
-                                        "with stable output file"
-                                    )
-                                ]
-                            recovered_from_stall = _output_file_has_json_payload()
-                            _terminate_process(process)
-                            break
-                deps.sleep_fn(min(live_log_interval_seconds, 1.0))
-
-            if process.poll() is None:
-                _terminate_process(process)
-            if stdout_thread is not None:
-                stdout_thread.join(timeout=2)
-            if stderr_thread is not None:
-                stderr_thread.join(timeout=2)
-            stop_live_writer.set()
-            writer_thread.join(timeout=2)
-            _write_live_snapshot()
-
-            stdout_text = "".join(stdout_chunks)
-            stderr_text = "".join(stderr_chunks)
-            if timed_out:
-                log_sections.append(
-                    f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n\n"
-                    f"STDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
-                )
-                if _output_file_has_json_payload():
-                    log_sections.append(
-                        "Recovered timed-out batch from JSON output file; "
-                        "continuing as success."
-                    )
-                    deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                    return 0
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 124
-            if recovered_from_stall:
-                log_sections.append(
-                    f"{header}\n\nSTALL RECOVERY after {stall_after_output_seconds}s "
-                    "of stable output and no stream activity.\n\n"
-                    f"STDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
-                )
-                if _output_file_has_json_payload():
-                    log_sections.append(
-                        "Recovered stalled batch from JSON output file; "
-                        "continuing as success."
-                    )
-                    deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                    return 0
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 124
-
-            code = int(process.returncode or 0)
-            log_sections.append(
-                f"{header}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
-            )
+        if use_popen:
+            result = _run_via_popen(cmd, deps, state, ctx, live_log_interval, stall_seconds)
         else:
-            # Compatibility path used by tests/injected runners.
-            writer_thread = _start_live_writer()
-            try:
-                result = deps.subprocess_run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=deps.timeout_seconds,
-                )
-            except deps.timeout_error as exc:
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
-                log_sections.append(
-                    f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n{exc}\n"
-                )
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 124
-            except OSError as exc:
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
-                log_sections.append(f"{header}\n\nRUNNER ERROR:\n{exc}\n")
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 127
-            except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive boundary
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
-                log_sections.append(f"{header}\n\nUNEXPECTED RUNNER ERROR:\n{exc}\n")
-                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-                return 1
-            finally:
-                stop_live_writer.set()
-                writer_thread.join(timeout=2)
+            result = _run_via_subprocess(cmd, deps, state, ctx, live_log_interval)
 
-            stdout_text = result.stdout or ""
-            stderr_text = result.stderr or ""
+        if result.early_return is not None:
+            return result.early_return
+
+        if result.timed_out:
             log_sections.append(
-                f"{header}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n"
+                f"{header}\n\nTIMEOUT after {deps.timeout_seconds}s\n\n"
+                f"STDOUT:\n{result.stdout_text}\n\nSTDERR:\n{result.stderr_text}\n"
             )
-            code = int(result.returncode)
+            if _output_file_has_json_payload(output_file):
+                log_sections.append(
+                    "Recovered timed-out batch from JSON output file; "
+                    "continuing as success."
+                )
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 0
+            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+            return 124
 
-        if code == 0:
+        if result.recovered_from_stall:
+            log_sections.append(
+                f"{header}\n\nSTALL RECOVERY after {stall_seconds}s "
+                "of stable output and no stream activity.\n\n"
+                f"STDOUT:\n{result.stdout_text}\n\nSTDERR:\n{result.stderr_text}\n"
+            )
+            if _output_file_has_json_payload(output_file):
+                log_sections.append(
+                    "Recovered stalled batch from JSON output file; "
+                    "continuing as success."
+                )
+                deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+                return 0
+            deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
+            return 124
+
+        log_sections.append(
+            f"{header}\n\nSTDOUT:\n{result.stdout_text}\n\nSTDERR:\n{result.stderr_text}\n"
+        )
+
+        if result.code == 0:
             deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
             return 0
 
-        combined = f"{stdout_text}\n{stderr_text}".lower()
+        combined = f"{result.stdout_text}\n{result.stderr_text}".lower()
         is_transient = any(needle in combined for needle in _TRANSIENT_RUNNER_PHRASES)
         if not is_transient or attempt >= max_attempts:
             deps.safe_write_text_fn(log_file, "\n\n".join(log_sections))
-            return code
+            return result.code
 
         delay_seconds = retry_backoff_seconds * (2 ** (attempt - 1))
         log_sections.append(
@@ -830,6 +923,47 @@ def execute_batches(
     return failures
 
 
+def _extract_payload_from_log(
+    batch_index: int, raw_path: Path, extract_fn,
+) -> dict[str, object] | None:
+    """Try to recover a batch payload from the runner log file."""
+    log_path = raw_path.parent.parent / "logs" / f"batch-{batch_index + 1}.log"
+    if not log_path.exists():
+        return None
+    try:
+        log_text = log_path.read_text()
+    except OSError:
+        return None
+
+    # Prefer the final STDOUT section for the attempt; if that fails, scan the full log.
+    stdout_marker = "\nSTDOUT:\n"
+    stderr_marker = "\n\nSTDERR:\n"
+    stdout_start = log_text.rfind(stdout_marker)
+    if stdout_start == -1 and log_text.startswith("STDOUT:\n"):
+        stdout_start = 0
+        stdout_offset = len("STDOUT:\n")
+    elif stdout_start >= 0:
+        stdout_offset = len(stdout_marker)
+    else:
+        stdout_offset = 0
+    if stdout_start >= 0:
+        start_idx = stdout_start + stdout_offset
+        stdout_end = log_text.find(stderr_marker, start_idx)
+        stdout_text = (
+            log_text[start_idx:] if stdout_end == -1 else log_text[start_idx:stdout_end]
+        )
+        payload = extract_fn(stdout_text)
+        if payload is not None:
+            return payload
+        # If the batch log has a concrete STDOUT section but it contains no parseable
+        # payload, do not fallback to parsing the whole log. Full logs include the
+        # prompt template (often with JSON examples), which can generate misleading
+        # decode errors and hide the true runner failure in STDERR.
+        return None
+
+    return extract_fn(log_text)
+
+
 def collect_batch_results(
     *,
     selected_indexes: list[int],
@@ -840,43 +974,6 @@ def collect_batch_results(
     normalize_result_fn,
 ) -> tuple[list[BatchResult], list[int]]:
     """Parse and normalize batch outputs, preserving prior failures."""
-    def _extract_payload_from_log(idx: int, raw_path: Path) -> dict[str, object] | None:
-        log_path = raw_path.parent.parent / "logs" / f"batch-{idx + 1}.log"
-        if not log_path.exists():
-            return None
-        try:
-            log_text = log_path.read_text()
-        except OSError:
-            return None
-
-        # Prefer the final STDOUT section for the attempt; if that fails, scan the full log.
-        stdout_marker = "\nSTDOUT:\n"
-        stderr_marker = "\n\nSTDERR:\n"
-        stdout_start = log_text.rfind(stdout_marker)
-        if stdout_start == -1 and log_text.startswith("STDOUT:\n"):
-            stdout_start = 0
-            stdout_offset = len("STDOUT:\n")
-        elif stdout_start >= 0:
-            stdout_offset = len(stdout_marker)
-        else:
-            stdout_offset = 0
-        if stdout_start >= 0:
-            start_idx = stdout_start + stdout_offset
-            stdout_end = log_text.find(stderr_marker, start_idx)
-            stdout_text = (
-                log_text[start_idx:] if stdout_end == -1 else log_text[start_idx:stdout_end]
-            )
-            payload = extract_payload_fn(stdout_text)
-            if payload is not None:
-                return payload
-            # If the batch log has a concrete STDOUT section but it contains no parseable
-            # payload, do not fallback to parsing the whole log. Full logs include the
-            # prompt template (often with JSON examples), which can generate misleading
-            # decode errors and hide the true runner failure in STDERR.
-            return None
-
-        return extract_payload_fn(log_text)
-
     batch_results: list[BatchResult] = []
     failure_set = set(failures)
     for idx in selected_indexes:
@@ -890,7 +987,7 @@ def collect_batch_results(
             except OSError:
                 payload = None
         if payload is None:
-            payload = _extract_payload_from_log(idx, raw_path)
+            payload = _extract_payload_from_log(idx, raw_path, extract_payload_fn)
             parsed_from_log = payload is not None
         if payload is None:
             failure_set.add(idx)
