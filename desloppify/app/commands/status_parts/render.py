@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from desloppify import state as state_mod
 from desloppify.app.commands.helpers.query import write_query
-from desloppify.app.commands.helpers.rendering import print_ranked_actions
+from desloppify.app.commands.helpers.rendering import print_agent_plan, print_ranked_actions
 from desloppify.app.commands.helpers.subjective import print_subjective_followup
 from desloppify.app.commands.scan import (
     scan_reporting_dimensions as reporting_dimensions_mod,
@@ -85,6 +85,7 @@ def write_status_query(
     objective_score: float | None,
     strict_score: float | None,
     verified_strict_score: float | None,
+    plan: dict | None = None,
 ) -> None:
     findings = state.get("findings", {})
     open_scope = (
@@ -114,6 +115,14 @@ def write_status_query(
             "score_breakdown": compute_health_breakdown(dim_scores) if dim_scores else None,
             "next_command": _status_next_command(narrative),
             "narrative": narrative,
+            **({"plan": {
+                "active": True,
+                "focus": plan.get("active_cluster"),
+                "total_ordered": len(plan.get("queue_order", [])),
+                "total_skipped": len(plan.get("skipped", {})) + len(plan.get("deferred", [])),
+                "total_deferred": len(plan.get("skipped", {})) + len(plan.get("deferred", [])),  # backwards compat
+                "plan_overrides_narrative": True,
+            }} if plan and (plan.get("queue_order") or plan.get("clusters") or plan.get("skipped")) else {}),
         }
     )
 
@@ -279,7 +288,7 @@ def _render_subjective_dimensions(
         )
 
 
-def _render_dimension_legend(scorecard_subjective: list[dict]) -> None:
+def _render_dimension_legend(scorecard_subjective: list[dict], state: dict | None = None) -> None:
     """Print the legend footer and stale-dimension re-review hint."""
     print(
         colorize("  Health = open penalized | Strict = open + wontfix penalized", "dim")
@@ -300,8 +309,15 @@ def _render_dimension_legend(scorecard_subjective: list[dict]) -> None:
         dims_arg = ",".join(stale_keys)
         print(
             colorize(
-                f"  {n} stale subjective dimension{'s' if n != 1 else ''}"
-                f" — run `desloppify review --prepare --dimensions {dims_arg}` to re-review",
+                f"  [stale] = subjective assessment outdated, not an unresolved finding"
+                f" — re-review to refresh",
+                "yellow",
+            )
+        )
+        print(
+            colorize(
+                f"  {n} stale dimension{'s' if n != 1 else ''}"
+                f": `desloppify review --prepare --dimensions {dims_arg}`",
                 "yellow",
             )
         )
@@ -330,12 +346,30 @@ def show_dimension_table(state: dict, dim_scores: dict) -> None:
         bar_len=bar_len,
         review_issue_counts=review_issue_counts,
     )
-    _render_dimension_legend(scorecard_subjective)
+    _render_dimension_legend(scorecard_subjective, state=state)
     print()
 
 
-def show_focus_suggestion(dim_scores: dict, state: dict) -> None:
+def show_focus_suggestion(
+    dim_scores: dict, state: dict, *, plan: dict | None = None
+) -> None:
     """Show the lowest-scoring dimension as the focus area."""
+    # When plan has an active focus cluster, show that instead
+    if plan and plan.get("active_cluster"):
+        cluster_name = plan["active_cluster"]
+        cluster = plan.get("clusters", {}).get(cluster_name, {})
+        remaining = len(cluster.get("finding_ids", []))
+        desc = cluster.get("description") or ""
+        desc_str = f" — {desc}" if desc else ""
+        print(
+            colorize(
+                f"  Focus: {cluster_name} ({remaining} items remaining){desc_str}",
+                "cyan",
+            )
+        )
+        print()
+        return
+
     scorecard_subjective = _scorecard_subjective_entries(state, dim_scores)
     lowest_name = _find_lowest_dimension(dim_scores, scorecard_subjective)
     if not lowest_name:
@@ -427,8 +461,19 @@ def show_subjective_followup(
         print()
 
 
-def show_agent_plan(narrative: dict) -> None:
-    """Show concise action plan derived from narrative.actions."""
+def show_agent_plan(narrative: dict, *, plan: dict | None = None) -> None:
+    """Show concise action plan derived from narrative.actions.
+
+    When a living *plan* is active, renders plan focus/progress instead.
+    """
+    if plan and (plan.get("queue_order") or plan.get("clusters")):
+        print_agent_plan(
+            [],
+            plan=plan,
+            header="  AGENT PLAN (use `desloppify next` to see your next task):",
+        )
+        return
+
     actions = narrative.get("actions", [])
     if not actions:
         return

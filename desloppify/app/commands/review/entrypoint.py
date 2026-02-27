@@ -12,6 +12,7 @@ from desloppify.core.output_api import colorize
 from .batch import _do_run_batches
 from .external import do_external_start, do_external_submit
 from .import_cmd import do_import, do_validate_import
+from .preflight import review_rerun_preflight
 from .prepare import do_prepare
 
 
@@ -97,6 +98,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         return
 
     if run_batches:
+        review_rerun_preflight(state, args, state_file=state_file)
         _do_run_batches(
             args,
             state,
@@ -107,6 +109,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         return
 
     if external_start:
+        review_rerun_preflight(state, args, state_file=state_file)
         do_external_start(
             args,
             state,
@@ -154,4 +157,5 @@ def cmd_review(args: argparse.Namespace) -> None:
             manual_attest=getattr(args, "attest", None),
         )
     else:
+        review_rerun_preflight(state, args, state_file=state_file)
         do_prepare(args, state, lang, state_file, config=runtime.config)

@@ -85,8 +85,29 @@ def _get_items(args, state: dict, config: dict) -> None:
     output_format = getattr(args, "format", "terminal")
     explain = bool(getattr(args, "explain", False))
     no_tier_fallback = bool(getattr(args, "no_tier_fallback", False))
+    cluster_arg = getattr(args, "cluster", None)
+    include_deferred = bool(getattr(args, "include_deferred", False))
 
     target_strict = target_strict_score_from_config(config, fallback=95.0)
+
+    # Load the living plan
+    from desloppify.engine.plan import load_plan
+    plan = load_plan()
+    plan_data: dict | None = None
+    if (
+        plan.get("queue_order")
+        or plan.get("deferred")
+        or plan.get("overrides")
+        or plan.get("clusters")
+    ):
+        plan_data = plan
+
+    # Auto-scope to focus cluster if set and no explicit scope/cluster
+    effective_cluster = cluster_arg
+    if plan_data and not cluster_arg and not scope:
+        active_cluster = plan_data.get("active_cluster")
+        if active_cluster:
+            effective_cluster = active_cluster
 
     queue = build_work_queue(
         state,
@@ -100,6 +121,9 @@ def _get_items(args, state: dict, config: dict) -> None:
             subjective_threshold=target_strict,
             no_tier_fallback=no_tier_fallback,
             explain=explain,
+            plan=plan_data,
+            include_deferred=include_deferred,
+            cluster=effective_cluster,
         ),
     )
     items = queue.get("items", [])
@@ -112,7 +136,7 @@ def _get_items(args, state: dict, config: dict) -> None:
     )
 
     payload = next_output_mod.build_query_payload(
-        queue, items, command="next", narrative=narrative
+        queue, items, command="next", narrative=narrative, plan=plan_data
     )
     payload["overall_score"] = state_mod.get_overall_score(state)
     payload["objective_score"] = state_mod.get_objective_score(state)
@@ -159,7 +183,7 @@ def _get_items(args, state: dict, config: dict) -> None:
         potentials = raw_potentials or None
     next_render_mod.render_terminal_items(
         items, dim_scores, findings_scoped, group=group, explain=explain,
-        potentials=potentials,
+        potentials=potentials, plan=plan_data,
     )
     next_render_mod.render_single_item_resolution_hint(items)
     next_render_mod.render_followup_nudges(

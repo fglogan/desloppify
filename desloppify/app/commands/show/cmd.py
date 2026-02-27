@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from desloppify import scoring as scoring_mod
 from desloppify.app.commands.helpers.lang import resolve_lang
 from desloppify.app.commands.helpers.query import write_query
 from desloppify.app.commands.helpers.runtime import command_runtime
@@ -24,8 +23,9 @@ from .render import (
 )
 from .scope import (
     _detector_names_hint,
+    _lookup_dimension_score,
     load_matches,
-    load_matches_for_dimension,
+    resolve_entity,
     resolve_noise,
     resolve_show_scope,
 )
@@ -59,6 +59,139 @@ def _show_concerns(state: dict, lang_name: str | None) -> None:
         print()
 
 
+def _print_dimension_score(dim_data: dict, display_name: str) -> None:
+    """Print the health/strict score line for a dimension if available."""
+    score_val = dim_data.get("score") if isinstance(dim_data, dict) else None
+    strict_val = (
+        dim_data.get("strict", score_val) if isinstance(dim_data, dict) else None
+    )
+    if score_val is not None:
+        print(
+            colorize(
+                f"  {display_name}: {score_val:.1f}% health (strict: {strict_val:.1f}%)",
+                "bold",
+            )
+        )
+
+
+def _render_subjective_dimension(
+    state: dict,
+    config: dict,
+    entity,
+    pattern_raw: str,
+) -> None:
+    """Show score + subjective explanation for a subjective dimension."""
+    lowered = pattern_raw.strip().lower().replace(" ", "_") if pattern_raw else ""
+    dim_data, display_name = _lookup_dimension_score(state, entity.display_name)
+    _print_dimension_score(dim_data, display_name)
+    print(
+        colorize(
+            f"  '{pattern_raw.strip()}' is a subjective dimension "
+            "— its score comes from design reviews, not code findings.",
+            "yellow",
+        )
+    )
+    # Count open review findings tagged with this dimension
+    dim_reviews = [
+        f
+        for f in (state.get("findings") or {}).values()
+        if f.get("detector") == "review"
+        and f.get("status") == "open"
+        and lowered
+        in str(f.get("detail", {}).get("dimension", "")).lower().replace(" ", "_")
+    ]
+    if dim_reviews:
+        print(
+            colorize(
+                f"  {len(dim_reviews)} open review finding(s). "
+                "Run `show review --status open`.",
+                "dim",
+            )
+        )
+    show_subjective_followup(
+        state,
+        target_strict_score_from_config(config, fallback=95.0),
+    )
+
+
+def _render_clean_mechanical_dimension(state: dict, entity) -> None:
+    """Show score + 'no open findings' for a mechanical dimension with zero findings."""
+    dim_data, display_name = _lookup_dimension_score(state, entity.display_name)
+    _print_dimension_score(dim_data, display_name)
+    det_list = ", ".join(entity.detectors) if entity.detectors else "none"
+    print(
+        colorize(
+            f"  No open findings for {entity.display_name}. Detectors: {det_list}",
+            "green",
+        )
+    )
+
+
+def _load_dimension_findings(
+    state: dict,
+    entity,
+    status_filter: str,
+) -> list[dict]:
+    """Load findings for all detectors in a mechanical dimension."""
+    all_matches: list[dict] = []
+    for detector in entity.detectors:
+        matches = load_matches(
+            state, scope=detector, status_filter=status_filter, chronic=False
+        )
+        all_matches.extend(matches)
+    # Deduplicate by finding ID
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for item in all_matches:
+        fid = item.get("id", "")
+        if fid not in seen:
+            seen.add(fid)
+            unique.append(item)
+    return unique
+
+
+def _render_no_matches(entity, pattern, status_filter, narrative, state, config):
+    """Handle the no-findings case: subjective views show dashboard, others show hint."""
+    print(
+        colorize(f"No {status_filter} findings matching: {pattern}", "yellow")
+    )
+    write_query(
+        {
+            "command": "show",
+            "query": pattern,
+            "status_filter": status_filter,
+            "total": 0,
+            "findings": [],
+            "narrative": narrative,
+        }
+    )
+    if entity.kind == "special_view":
+        show_subjective_followup(
+            state,
+            target_strict_score_from_config(config, fallback=95.0),
+        )
+    else:
+        hint = _detector_names_hint()
+        print(
+            colorize(
+                f"  Try: show <detector>, show <file>, or show subjective. "
+                f"Detectors: {hint}",
+                "dim",
+            )
+        )
+
+
+def _render_subjective_views_guide(entity) -> None:
+    """Print 'Related views' hint after subjective/subjective_review output."""
+    if entity.kind == "special_view" and entity.pattern.strip().lower() in (
+        "subjective",
+        "subjective_review",
+    ):
+        print(colorize("  Related views:", "dim"))
+        print(colorize("    `show review --status open`            Per-file design review findings", "dim"))
+        print(colorize("    `show subjective_review --status open`  Files needing re-review", "dim"))
+
+
 def cmd_show(args: argparse.Namespace) -> None:
     """Show all findings for a file, directory, detector, or pattern."""
     runtime = command_runtime(args)
@@ -75,20 +208,13 @@ def cmd_show(args: argparse.Namespace) -> None:
     if skill_warning:
         print(colorize(f"  {skill_warning}", "yellow"))
 
-    # Handle "show concerns" as a special view.
     pattern_raw = getattr(args, "pattern", "")
-    if pattern_raw and pattern_raw.strip().lower() == "concerns":
-        lang = resolve_lang(args)
-        _show_concerns(state, lang.name if lang else None)
-        return
-
     show_code = getattr(args, "code", False)
     chronic = getattr(args, "chronic", False)
     ok, pattern, status_filter, scope = resolve_show_scope(args)
     if not ok or pattern is None:
         return
 
-    matches = load_matches(state, scope=scope, status_filter=status_filter, chronic=chronic)
     lang = resolve_lang(args)
     lang_name = lang.name if lang else None
     narrative = compute_narrative(
@@ -96,121 +222,35 @@ def cmd_show(args: argparse.Namespace) -> None:
         context=NarrativeContext(lang=lang_name, command="show"),
     )
 
-    if not matches:
-        # Try interpreting the pattern as a dimension name/key
-        dim_matches, dim_display = load_matches_for_dimension(
-            state, pattern, status_filter=status_filter
-        )
-        if dim_matches:
-            matches = dim_matches
-            pattern = dim_display or pattern
-        else:
-            # Check if this is a subjective dimension (via DISPLAY_NAMES or dimension_scores)
-            lowered = pattern_raw.strip().lower().replace(" ", "_") if pattern_raw else ""
-            if lowered:
-                # 1. Check mechanical dimensions (DIMENSIONS list)
-                dim_lookup = {dim.name.lower().replace(" ", "_"): dim for dim in scoring_mod.DIMENSIONS}
-                matched_dim = dim_lookup.get(lowered)
-                if matched_dim and hasattr(matched_dim, "detectors"):
-                    subjective_detectors = {"subjective_assessment", "subjective_review"}
-                    if subjective_detectors & set(matched_dim.detectors):
-                        matched_dim = None  # fall through to subjective handling below
+    # --- Entity resolution: classify what the user asked for ---
+    entity = resolve_entity(pattern, state)
 
-                # 2. Check DISPLAY_NAMES for subjective dimension keys
-                display_name = scoring_mod.DISPLAY_NAMES.get(lowered)
-                if not display_name:
-                    # Also try matching state dimension_scores keys directly
-                    for key in (state.get("dimension_scores") or {}):
-                        if key.lower().replace(" ", "_") == lowered:
-                            display_name = key
-                            break
+    # Dispatch: concerns special view
+    if entity.kind == "special_view" and entity.pattern.strip().lower() == "concerns":
+        _show_concerns(state, lang_name)
+        return
 
-                if display_name or (matched_dim and hasattr(matched_dim, "detectors")
-                                    and {"subjective_assessment", "subjective_review"} & set(matched_dim.detectors)):
-                    # Show dimension score if available
-                    dim_data = (state.get("dimension_scores") or {}).get(display_name or "", {})
-                    if not dim_data and display_name:
-                        # Try case-insensitive match on dimension_scores
-                        for ds_key, ds_val in (state.get("dimension_scores") or {}).items():
-                            if ds_key.lower().replace(" ", "_") == lowered:
-                                dim_data = ds_val
-                                display_name = ds_key
-                                break
-                    score_val = dim_data.get("score") if isinstance(dim_data, dict) else None
-                    strict_val = dim_data.get("strict", score_val) if isinstance(dim_data, dict) else None
-                    if score_val is not None:
-                        print(colorize(
-                            f"  {display_name}: {score_val:.1f}% health (strict: {strict_val:.1f}%)",
-                            "bold",
-                        ))
-                    print(colorize(
-                        f"  '{pattern_raw.strip()}' is a subjective dimension — its score comes from design reviews, not code findings.",
-                        "yellow",
-                    ))
-                    # Count open review findings tagged with this dimension
-                    dim_reviews = [
-                        f for f in (state.get("findings") or {}).values()
-                        if f.get("detector") == "review" and f.get("status") == "open"
-                        and lowered in str(f.get("detail", {}).get("dimension", "")).lower().replace(" ", "_")
-                    ]
-                    if dim_reviews:
-                        print(colorize(
-                            f"  {len(dim_reviews)} open review finding(s). Run `show review --status open`.",
-                            "dim",
-                        ))
-                    show_subjective_followup(
-                        state,
-                        target_strict_score_from_config(config, fallback=95.0),
-                    )
-                    return
+    # Dispatch: subjective dimension
+    if entity.kind == "dimension" and entity.is_subjective:
+        _render_subjective_dimension(state, config, entity, pattern_raw)
+        return
 
-            # "show subjective" with no findings still shows the subjective dashboard
-            is_subjective_view = pattern_raw and pattern_raw.strip().lower() in (
-                "subjective", "subjective_review",
-            )
-            if is_subjective_view:
-                print(colorize(f"No {status_filter} findings matching: {pattern}", "yellow"))
-                write_query(
-                    {
-                        "command": "show",
-                        "query": pattern,
-                        "status_filter": status_filter,
-                        "total": 0,
-                        "findings": [],
-                        "narrative": narrative,
-                    }
-                )
-                show_subjective_followup(
-                    state,
-                    target_strict_score_from_config(config, fallback=95.0),
-                )
-                return
-
-            hint = _detector_names_hint()
-            print(
-                colorize(
-                    f"No {status_filter} findings matching: {pattern}",
-                    "yellow",
-                )
-            )
-            print(
-                colorize(
-                    f"  Try: show <detector>, show <file>, or show subjective. "
-                    f"Detectors: {hint}",
-                    "dim",
-                )
-            )
-            write_query(
-                {
-                    "command": "show",
-                    "query": pattern,
-                    "status_filter": status_filter,
-                    "total": 0,
-                    "findings": [],
-                    "narrative": narrative,
-                }
-            )
+    # Dispatch: mechanical dimension
+    if entity.kind == "dimension" and not entity.is_subjective:
+        matches = _load_dimension_findings(state, entity, status_filter)
+        if not matches:
+            _render_clean_mechanical_dimension(state, entity)
             return
+        pattern = entity.display_name
+    else:
+        # All other kinds: existing load_matches path
+        matches = load_matches(
+            state, scope=scope, status_filter=status_filter, chronic=chronic
+        )
+
+    if not matches:
+        _render_no_matches(entity, pattern, status_filter, narrative, state, config)
+        return
 
     (
         surfaced_matches,
@@ -256,17 +296,19 @@ def cmd_show(args: argparse.Namespace) -> None:
         global_noise_budget=global_noise_budget,
         budget_warning=budget_warning,
     )
-    show_agent_plan(narrative, surfaced_matches)
+    try:
+        from desloppify.engine.plan import load_plan as _load_plan
+        _plan = _load_plan()
+        _plan_active = _plan if (_plan.get("queue_order") or _plan.get("clusters")) else None
+    except Exception:
+        _plan_active = None
+    show_agent_plan(narrative, surfaced_matches, plan=_plan_active)
     show_subjective_followup(
         state,
         target_strict_score_from_config(config, fallback=95.0),
     )
 
-    # Phase 5: naming guide for subjective views
-    if pattern_raw and pattern_raw.strip().lower() in ("subjective", "subjective_review"):
-        print(colorize("  Related views:", "dim"))
-        print(colorize("    `show review --status open`            Per-file design review findings", "dim"))
-        print(colorize("    `show subjective_review --status open`  Files needing re-review", "dim"))
+    _render_subjective_views_guide(entity)
 
 
 __all__ = ["cmd_show"]

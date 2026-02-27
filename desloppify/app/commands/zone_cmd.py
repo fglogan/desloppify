@@ -98,14 +98,15 @@ def _zone_set(args):
         )
         sys.exit(1)
 
+    normalized = rel(filepath)
     config = command_runtime(args).config
-    config.setdefault("zone_overrides", {})[filepath] = zone_value
+    config.setdefault("zone_overrides", {})[normalized] = zone_value
     try:
         config_mod.save_config(config)
     except OSError as e:
         print_error(f"could not save config: {e}")
         sys.exit(1)
-    print(f"  Set {filepath} → {zone_value}")
+    print(f"  Set {normalized} → {zone_value}")
     print(colorize("  Run `desloppify scan` to apply.", "dim"))
     print(colorize("  Next command: `desloppify scan`", "dim"))
 
@@ -114,17 +115,18 @@ def _zone_clear(args):
     """Clear a zone override for a file."""
     filepath = args.zone_path
 
+    normalized = rel(filepath)
     config = command_runtime(args).config
     overrides = config.get("zone_overrides", {})
-    if filepath in overrides:
-        del overrides[filepath]
+    if normalized in overrides:
+        del overrides[normalized]
         try:
             config_mod.save_config(config)
         except OSError as e:
             print_error(f"could not save config: {e}")
             sys.exit(1)
-        print(f"  Cleared override for {filepath}")
+        print(f"  Cleared override for {normalized}")
         print(colorize("  Run `desloppify scan` to apply.", "dim"))
         print(colorize("  Next command: `desloppify scan`", "dim"))
     else:
-        print(colorize(f"  No override found for {filepath}", "yellow"))
+        print(colorize(f"  No override found for {normalized}", "yellow"))

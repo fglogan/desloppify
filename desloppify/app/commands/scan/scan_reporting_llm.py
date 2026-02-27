@@ -289,6 +289,31 @@ def _print_llm_summary(
     print("AND all subjective dimension scores in a markdown table.")
     print("The goal is to maximize strict scores. Never skip the scores.\n")
 
+    # Check for living plan
+    try:
+        from desloppify.engine.plan import load_plan
+        _plan = load_plan()
+        _has_plan = bool(
+            _plan.get("queue_order") or _plan.get("clusters")
+            or _plan.get("skipped") or _plan.get("deferred")
+        )
+    except Exception:
+        _plan = {}
+        _has_plan = False
+
+    if _has_plan:
+        ordered = len(_plan.get("queue_order", []))
+        skipped = len(_plan.get("skipped", {})) + len(_plan.get("deferred", []))
+        active = _plan.get("active_cluster")
+        print(f"LIVING PLAN ACTIVE: {ordered} ordered, {skipped} skipped.")
+        if active:
+            cluster = _plan.get("clusters", {}).get(active, {})
+            remaining = len(cluster.get("finding_ids", []))
+            print(f"Focused on: {active} ({remaining} items remaining).")
+        print("The plan is the single source of truth for work order.")
+        print("Use `desloppify next` which respects the plan.")
+        print("Use `desloppify plan` to view and update it.\n")
+
     _print_score_lines(
         overall_score=scores.overall,
         objective_score=scores.objective,
@@ -303,7 +328,11 @@ def _print_llm_summary(
         overall_score=scores.overall,
         strict_score=scores.strict,
     )
-    _print_workflow_guide()
+    if _has_plan:
+        print("\nFollow the living plan: `desloppify next` for your next task,")
+        print("`desloppify plan` to view the full queue.")
+    else:
+        _print_workflow_guide()
     _print_narrative_status(narrative)
     _print_badge_hint(badge_path)
     print("─" * 60)

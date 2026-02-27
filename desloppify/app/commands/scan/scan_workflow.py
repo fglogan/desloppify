@@ -414,6 +414,56 @@ def merge_scan_results(
         subjective_integrity_target=target_score,
     )
 
+    # Reconcile living plan + sync stale subjective dimensions
+    try:
+        from desloppify.engine.plan import (
+            load_plan,
+            reconcile_plan_after_scan,
+            save_plan,
+            sync_stale_dimensions,
+        )
+
+        plan_path = runtime.state_path.parent / "plan.json"
+        plan = load_plan(plan_path)
+        dirty = False
+
+        # Standard reconciliation (only if plan has user content)
+        if (
+            plan.get("queue_order")
+            or plan.get("overrides")
+            or plan.get("clusters")
+            or plan.get("skipped")
+            or plan.get("deferred")
+        ):
+            recon = reconcile_plan_after_scan(plan, runtime.state)
+            if recon.changes:
+                dirty = True
+            if recon.resurfaced:
+                print(colorize(
+                    f"  Plan: {len(recon.resurfaced)} skipped item(s) re-surfaced after review period.",
+                    "cyan",
+                ))
+
+        # Stale dimension sync (always — handles both cleanup and injection)
+        dim_sync = sync_stale_dimensions(plan, runtime.state)
+        if dim_sync.changes:
+            dirty = True
+        if dim_sync.pruned:
+            print(colorize(
+                f"  Plan: {len(dim_sync.pruned)} refreshed subjective dimension(s) removed from queue.",
+                "cyan",
+            ))
+        if dim_sync.injected:
+            print(colorize(
+                f"  Plan: {len(dim_sync.injected)} stale subjective dimension(s) queued for refresh.",
+                "cyan",
+            ))
+
+        if dirty:
+            save_plan(plan, plan_path)
+    except Exception:
+        pass  # Plan reconciliation is best-effort
+
     return ScanMergeResult(
         diff=diff,
         prev_overall=prev.overall,

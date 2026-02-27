@@ -7,6 +7,7 @@ import desloppify.app.commands.show.scope as show_scope_mod
 import desloppify.state as state_mod
 from desloppify.app.commands.helpers.runtime import CommandRuntime
 from desloppify.app.commands.show.cmd import cmd_show
+from desloppify.app.commands.show.scope import ResolvedEntity, resolve_entity
 from desloppify.app.commands.show.formatting import (
     DETAIL_DISPLAY,
     format_detail,
@@ -473,3 +474,165 @@ class TestCmdShowBackendIntegration:
         assert "90.0%" in out
         assert "subjective dimension" in out
         assert "No open findings matching" not in out
+
+    def test_show_mechanical_dimension_not_labeled_subjective(
+        self, monkeypatch, capsys
+    ):
+        """show security with no open findings prints score + 'No open findings',
+        NOT 'subjective dimension'."""
+        self._patch_common(
+            monkeypatch,
+            state={
+                "last_scan": "2026-01-01",
+                "findings": {},
+                "scan_path": ".",
+                "dimension_scores": {
+                    "Security": {
+                        "score": 100.0,
+                        "strict": 100.0,
+                        "issues": 0,
+                        "detectors": {"security": {}, "cycles": {}},
+                    },
+                },
+            },
+        )
+        monkeypatch.setattr(show_cmd_mod, "write_query", lambda _payload: None)
+        monkeypatch.setattr(show_cmd_mod, "check_skill_version", lambda: None)
+
+        def fake_queue(_state, **kwargs):
+            return {"items": []}
+
+        monkeypatch.setattr(show_scope_mod, "build_work_queue", fake_queue)
+        args = SimpleNamespace(
+            pattern="security",
+            status="open",
+            chronic=False,
+            code=False,
+            top=20,
+            output=None,
+            lang=None,
+            path=".",
+        )
+        cmd_show(args)
+        out = capsys.readouterr().out
+        assert "Security: 100.0% health" in out
+        assert "No open findings for Security" in out
+        assert "subjective dimension" not in out
+
+    def test_show_mechanical_dimension_with_findings(self, monkeypatch, capsys):
+        """show security with open findings from security AND cycles detectors shows both."""
+        security_finding = {
+            "id": "security::src/a.py::xss",
+            "kind": "finding",
+            "detector": "security",
+            "file": "src/a.py",
+            "tier": 4,
+            "confidence": "high",
+            "summary": "XSS vulnerability",
+            "detail": {},
+            "status": "open",
+        }
+        cycles_finding = {
+            "id": "cycles::src/b.py::cycle",
+            "kind": "finding",
+            "detector": "cycles",
+            "file": "src/b.py",
+            "tier": 4,
+            "confidence": "medium",
+            "summary": "Dependency cycle",
+            "detail": {},
+            "status": "open",
+        }
+        self._patch_common(
+            monkeypatch,
+            state={
+                "last_scan": "2026-01-01",
+                "findings": {
+                    "security::src/a.py::xss": security_finding,
+                    "cycles::src/b.py::cycle": cycles_finding,
+                },
+                "scan_path": ".",
+            },
+        )
+        monkeypatch.setattr(show_cmd_mod, "write_query", lambda _payload: None)
+        monkeypatch.setattr(show_cmd_mod, "check_skill_version", lambda: None)
+
+        call_count = {"n": 0}
+
+        def fake_queue(_state, **kwargs):
+            call_count["n"] += 1
+            scope = kwargs.get("options", kwargs).scope
+            if scope == "security":
+                return {"items": [security_finding]}
+            if scope == "cycles":
+                return {"items": [cycles_finding]}
+            return {"items": []}
+
+        monkeypatch.setattr(show_scope_mod, "build_work_queue", fake_queue)
+        args = SimpleNamespace(
+            pattern="security",
+            status="open",
+            chronic=False,
+            code=False,
+            top=20,
+            output=None,
+            lang=None,
+            path=".",
+        )
+        cmd_show(args)
+        out = capsys.readouterr().out
+        # Should render findings from both detectors
+        assert "2 open findings matching 'Security'" in out
+        assert "subjective dimension" not in out
+
+
+class TestResolveEntity:
+    """Unit tests for resolve_entity()."""
+
+    def test_security_is_mechanical_dimension(self):
+        entity = resolve_entity("security", {})
+        assert entity.kind == "dimension"
+        assert entity.is_subjective is False
+        assert "security" in entity.detectors
+        assert "cycles" in entity.detectors
+
+    def test_naming_quality_is_subjective_dimension(self):
+        state = {
+            "dimension_scores": {
+                "Naming quality": {
+                    "score": 90.0,
+                    "strict": 88.0,
+                    "detectors": {"subjective_assessment": {}},
+                },
+            },
+        }
+        entity = resolve_entity("naming_quality", state)
+        assert entity.kind == "dimension"
+        assert entity.is_subjective is True
+        assert entity.display_name == "Naming quality"
+
+    def test_file_path_is_passthrough(self):
+        entity = resolve_entity("src/foo.py", {})
+        assert entity.kind == "file_or_pattern"
+        assert entity.display_name == "src/foo.py"
+        assert entity.is_subjective is False
+
+    def test_subjective_is_special_view(self):
+        entity = resolve_entity("subjective", {})
+        assert entity.kind == "special_view"
+
+    def test_concerns_is_special_view(self):
+        entity = resolve_entity("concerns", {})
+        assert entity.kind == "special_view"
+
+    def test_file_health_is_mechanical_dimension(self):
+        entity = resolve_entity("file_health", {})
+        assert entity.kind == "dimension"
+        assert entity.is_subjective is False
+        assert "structural" in entity.detectors
+
+    def test_duplication_is_mechanical_dimension(self):
+        entity = resolve_entity("duplication", {})
+        assert entity.kind == "dimension"
+        assert entity.is_subjective is False
+        assert "dupes" in entity.detectors

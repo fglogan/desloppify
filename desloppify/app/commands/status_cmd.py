@@ -108,8 +108,18 @@ def cmd_status(args: argparse.Namespace) -> None:
     else:
         show_tier_progress_table(by_tier)
 
+    # Load living plan for plan-aware rendering
+    try:
+        from desloppify.engine.plan import load_plan
+        _plan = load_plan()
+        _plan_active = _plan if (
+            _plan.get("queue_order") or _plan.get("clusters")
+        ) else None
+    except Exception:
+        _plan_active = None
+
     if dim_scores:
-        show_focus_suggestion(dim_scores, state)
+        show_focus_suggestion(dim_scores, state, plan=_plan_active)
         show_subjective_followup(
             state,
             dim_scores,
@@ -118,7 +128,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     show_review_summary(state)
     show_structural_areas(state)
-    show_agent_plan(narrative)
+    show_agent_plan(narrative, plan=_plan_active)
 
     if narrative.get("headline"):
         print(colorize(f"  -> {narrative['headline']}", "cyan"))
@@ -147,6 +157,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         objective_score=scores.objective,
         strict_score=scores.strict,
         verified_strict_score=scores.verified,
+        plan=_plan_active,
     )
 
 

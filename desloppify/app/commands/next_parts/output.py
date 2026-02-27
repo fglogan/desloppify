@@ -27,6 +27,25 @@ def serialize_item(item: Mapping[str, Any]) -> dict[str, Any]:
     explain = item.get("explain")
     if explain is not None:
         serialized["explain"] = explain
+
+    # Plan metadata
+    if item.get("queue_position"):
+        serialized["queue_position"] = item["queue_position"]
+    if item.get("plan_description"):
+        serialized["plan_description"] = item["plan_description"]
+    if item.get("plan_note"):
+        serialized["plan_note"] = item["plan_note"]
+    if item.get("plan_cluster"):
+        serialized["plan_cluster"] = item["plan_cluster"]
+    if item.get("plan_skipped"):
+        serialized["plan_skipped"] = True
+        serialized["plan_skip_kind"] = item.get("plan_skip_kind", "temporary")
+        if item.get("plan_skip_reason"):
+            serialized["plan_skip_reason"] = item["plan_skip_reason"]
+    # Backwards compat
+    if item.get("plan_deferred"):
+        serialized["plan_deferred"] = True
+
     return serialized
 
 
@@ -36,10 +55,11 @@ def build_query_payload(
     *,
     command: str,
     narrative: Mapping[str, Any] | None,
+    plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build JSON payload for query.json and non-terminal output modes."""
     serialized = [serialize_item(item) for item in items]
-    return {
+    payload: dict[str, Any] = {
         "command": command,
         "items": serialized,
         "queue": {
@@ -52,6 +72,33 @@ def build_query_payload(
         },
         "narrative": narrative,
     }
+
+    if plan and (
+        plan.get("queue_order")
+        or plan.get("skipped")
+        or plan.get("deferred")
+        or plan.get("clusters")
+    ):
+        clusters_summary = []
+        for name, cluster in plan.get("clusters", {}).items():
+            member_ids = set(cluster.get("finding_ids", []))
+            clusters_summary.append({
+                "name": name,
+                "description": cluster.get("description"),
+                "item_count": len(member_ids),
+            })
+        total_skipped = len(plan.get("skipped", {}))
+        payload["plan"] = {
+            "active": True,
+            "focus": plan.get("active_cluster"),
+            "clusters": clusters_summary,
+            "total_ordered": len(plan.get("queue_order", [])),
+            "total_skipped": total_skipped,
+            "total_deferred": total_skipped,  # backwards compat
+            "plan_overrides_narrative": True,
+        }
+
+    return payload
 
 
 def render_markdown(items: Sequence[Mapping[str, Any]]) -> str:

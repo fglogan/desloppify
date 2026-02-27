@@ -1,0 +1,130 @@
+"""plan command: dispatcher for plan subcommands."""
+
+from __future__ import annotations
+
+import argparse
+
+from desloppify.core.output_api import colorize
+from desloppify.engine.plan import load_plan, save_plan
+
+
+def _cmd_plan_generate(args: argparse.Namespace) -> None:
+    """Generate the prioritized markdown plan (existing behavior)."""
+    from desloppify.app.commands.plan_cmd import cmd_plan_output
+
+    cmd_plan_output(args)
+
+
+def _cmd_plan_show(args: argparse.Namespace) -> None:
+    """Show plan metadata summary."""
+    plan = load_plan()
+    ordered = len(plan.get("queue_order", []))
+    skipped = plan.get("skipped", {})
+    total_skipped = len(skipped)
+    temp_count = sum(1 for e in skipped.values() if e.get("kind") == "temporary")
+    perm_count = sum(1 for e in skipped.values() if e.get("kind") == "permanent")
+    fp_count = sum(1 for e in skipped.values() if e.get("kind") == "false_positive")
+    clusters = plan.get("clusters", {})
+    overrides = plan.get("overrides", {})
+    active = plan.get("active_cluster")
+    superseded = len(plan.get("superseded", {}))
+
+    print(colorize("  Living Plan Status", "bold"))
+    print(colorize("  " + "─" * 40, "dim"))
+    print(f"  Ordered items:    {ordered}")
+    if total_skipped:
+        print(f"  Skipped:          {total_skipped} (temp: {temp_count}, wontfix: {perm_count}, fp: {fp_count})")
+    else:
+        print(f"  Skipped:          0")
+    print(f"  Clusters:         {len(clusters)}")
+    if clusters:
+        for name, cluster in clusters.items():
+            desc = cluster.get("description") or ""
+            member_count = len(cluster.get("finding_ids", []))
+            marker = " (focused)" if name == active else ""
+            desc_str = f" — {desc}" if desc else ""
+            print(f"    {name}: {member_count} items{desc_str}{marker}")
+    print(f"  Overrides:        {len(overrides)}")
+    if active:
+        print(f"  Focus:            {active}")
+    if superseded:
+        print(f"  Superseded:       {superseded}")
+
+
+def _cmd_plan_reset(args: argparse.Namespace) -> None:
+    """Reset the plan to empty."""
+    from desloppify.engine.plan import reset_plan
+
+    plan = load_plan()
+    reset_plan(plan)
+    save_plan(plan)
+    print(colorize("  Plan reset to empty.", "green"))
+
+
+def cmd_plan(args: argparse.Namespace) -> None:
+    """Dispatch plan subcommand or generate markdown output."""
+    plan_action = getattr(args, "plan_action", None)
+
+    if plan_action is None:
+        _cmd_plan_generate(args)
+        return
+
+    if plan_action == "show":
+        _cmd_plan_show(args)
+        return
+
+    if plan_action == "reset":
+        _cmd_plan_reset(args)
+        return
+
+    if plan_action == "move":
+        from desloppify.app.commands.plan.move_handlers import cmd_plan_move
+
+        cmd_plan_move(args)
+        return
+
+    if plan_action in (
+        "describe", "annotate", "defer", "undefer", "wontfix", "focus",
+        "skip", "unskip", "done", "reopen",
+    ):
+        from desloppify.app.commands.plan.override_handlers import (
+            cmd_plan_annotate,
+            cmd_plan_defer,
+            cmd_plan_describe,
+            cmd_plan_done,
+            cmd_plan_focus,
+            cmd_plan_reopen,
+            cmd_plan_skip,
+            cmd_plan_undefer,
+            cmd_plan_unskip,
+            cmd_plan_wontfix,
+        )
+
+        dispatch = {
+            "describe": cmd_plan_describe,
+            "annotate": cmd_plan_annotate,
+            "defer": cmd_plan_defer,
+            "undefer": cmd_plan_undefer,
+            "wontfix": cmd_plan_wontfix,
+            "focus": cmd_plan_focus,
+            "skip": cmd_plan_skip,
+            "unskip": cmd_plan_unskip,
+            "done": cmd_plan_done,
+            "reopen": cmd_plan_reopen,
+        }
+        dispatch[plan_action](args)
+        return
+
+    if plan_action == "cluster":
+        from desloppify.app.commands.plan.cluster_handlers import cmd_cluster_dispatch
+
+        cmd_cluster_dispatch(args)
+        return
+
+    print(f"Unknown plan action: {plan_action}")
+
+
+# Backwards-compatible alias
+cmd_plan_output = cmd_plan
+
+__all__ = ["cmd_plan", "cmd_plan_output"]

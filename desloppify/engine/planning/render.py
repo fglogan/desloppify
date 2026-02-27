@@ -288,15 +288,228 @@ def _addressed_section(findings: dict) -> list[str]:
     return lines
 
 
-def generate_plan_md(state: PlanState) -> str:
-    """Generate a prioritized markdown plan from state."""
+def _plan_user_ordered_section(
+    items: list[dict],
+    plan: dict,
+) -> list[str]:
+    """Render the user-ordered queue section, grouped by cluster."""
+    queue_order: list[str] = plan.get("queue_order", [])
+    skipped_ids: set[str] = set(plan.get("skipped", {}).keys()) | set(plan.get("deferred", []))
+    overrides: dict = plan.get("overrides", {})
+    clusters: dict = plan.get("clusters", {})
+
+    ordered_ids = set(queue_order) - skipped_ids
+    if not ordered_ids:
+        return []
+
+    by_id = {item.get("id"): item for item in items}
+
+    lines: list[str] = [
+        "---",
+        f"## User-Ordered Queue ({len(ordered_ids)} items)",
+        "",
+    ]
+
+    # Group by cluster: clustered items first, then unclustered
+    emitted: set[str] = set()
+    for cluster_name, cluster in clusters.items():
+        member_ids = [
+            fid for fid in cluster.get("finding_ids", [])
+            if fid in ordered_ids and fid in by_id
+        ]
+        if not member_ids:
+            continue
+        desc = cluster.get("description") or ""
+        lines.append(f"### Cluster: {cluster_name}")
+        if desc:
+            lines.append(f"> {desc}")
+        lines.append("")
+        for fid in member_ids:
+            item = by_id.get(fid)
+            if item:
+                lines.extend(_render_plan_item(item, overrides.get(fid, {})))
+                emitted.add(fid)
+        lines.append("")
+
+    # Unclustered ordered items
+    unclustered = [
+        fid for fid in queue_order
+        if fid in ordered_ids and fid not in emitted and fid in by_id
+    ]
+    if unclustered:
+        if any(c.get("finding_ids") for c in clusters.values()):
+            lines.append("### (unclustered ordered items)")
+            lines.append("")
+        for fid in unclustered:
+            item = by_id.get(fid)
+            if item:
+                lines.extend(_render_plan_item(item, overrides.get(fid, {})))
+        lines.append("")
+
+    return lines
+
+
+def _plan_skipped_section(items: list[dict], plan: dict) -> list[str]:
+    """Render the skipped items section, grouped by kind."""
+    skipped = plan.get("skipped", {})
+    if not skipped:
+        return []
+
+    by_id = {item.get("id"): item for item in items}
+    overrides = plan.get("overrides", {})
+
+    # Group by kind
+    by_kind: dict[str, list[str]] = {"temporary": [], "permanent": [], "false_positive": []}
+    for fid, entry in skipped.items():
+        kind = entry.get("kind", "temporary")
+        by_kind.setdefault(kind, []).append(fid)
+
+    kind_labels = {
+        "temporary": "Skipped Temporarily",
+        "permanent": "Wontfix (permanent)",
+        "false_positive": "False Positives",
+    }
+
+    lines: list[str] = [
+        "---",
+        f"## Skipped ({len(skipped)} items)",
+        "",
+    ]
+
+    for kind in ("temporary", "permanent", "false_positive"):
+        ids = by_kind.get(kind, [])
+        if not ids:
+            continue
+        lines.append(f"### {kind_labels[kind]} ({len(ids)})")
+        lines.append("")
+        for fid in ids:
+            entry = skipped.get(fid, {})
+            item = by_id.get(fid)
+            if item:
+                lines.extend(_render_plan_item(item, overrides.get(fid, {})))
+            else:
+                lines.append(f"- ~~{fid}~~ (not in current queue)")
+            reason = entry.get("reason")
+            if reason:
+                lines.append(f"      Reason: {reason}")
+            note = entry.get("note")
+            if note and not overrides.get(fid, {}).get("note"):
+                lines.append(f"      Note: {note}")
+            review_after = entry.get("review_after")
+            if review_after:
+                skipped_at = entry.get("skipped_at_scan", 0)
+                lines.append(f"      Review after: scan {skipped_at + review_after}")
+        lines.append("")
+
+    return lines
+
+
+def _plan_superseded_section(plan: dict) -> list[str]:
+    """Render the superseded items section."""
+    superseded = plan.get("superseded", {})
+    if not superseded:
+        return []
+
+    lines: list[str] = [
+        "---",
+        f"## Superseded ({len(superseded)} items — may need remap)",
+        "",
+    ]
+    for fid, entry in superseded.items():
+        summary = entry.get("original_summary", "")
+        summary_str = f" — {summary}" if summary else ""
+        lines.append(f"- ~~{fid}~~{summary_str}")
+        candidates = entry.get("candidates", [])
+        if candidates:
+            lines.append(f"  Candidates: {', '.join(candidates[:3])}")
+        note = entry.get("note")
+        if note:
+            lines.append(f"  Note: {note}")
+    lines.append("")
+    return lines
+
+
+def _render_plan_item(item: dict, override: dict) -> list[str]:
+    """Render a single plan item as markdown lines."""
+    tier = int(item.get("effective_tier", item.get("tier", 3)))
+    confidence = item.get("confidence", "medium")
+    summary = item.get("summary", "")
+    item_id = item.get("id", "")
+
+    lines = [f"- [ ] [T{tier}/{confidence}] {summary}"]
+    desc = override.get("description")
+    if desc:
+        lines.append(f"      → {desc}")
+    lines.append(f"      `{item_id}`")
+    note = override.get("note")
+    if note:
+        lines.append(f"      Note: {note}")
+    return lines
+
+
+def generate_plan_md(state: PlanState, plan: dict | None = None) -> str:
+    """Generate a prioritized markdown plan from state.
+
+    When *plan* is provided (or auto-loaded from disk), user-ordered
+    items, clusters, deferred, and superseded sections are rendered.
+    When no plan exists, output is identical to the previous behavior.
+    """
     findings = state["findings"]
     stats = state.get("stats", {})
+
+    # Auto-load plan if not provided
+    if plan is None:
+        try:
+            from desloppify.engine.plan import load_plan
+            plan = load_plan()
+        except Exception:
+            plan = {}
+
+    has_plan = bool(
+        plan
+        and (
+            plan.get("queue_order")
+            or plan.get("skipped")
+            or plan.get("deferred")
+            or plan.get("clusters")
+        )
+    )
 
     lines = _plan_header(state, stats)
     lines.extend(_plan_dimension_table(state))
     lines.extend(_tier_summary_lines(stats))
-    lines.extend(_plan_tier_sections(findings, state=state))
+
+    if has_plan:
+        # Build full queue for item lookup
+        queue = build_work_queue(
+            state,
+            options=QueueBuildOptions(
+                count=None,
+                scan_path=state.get("scan_path"),
+                status="open",
+                include_subjective=True,
+                no_tier_fallback=True,
+            ),
+        )
+        all_items = queue.get("items", [])
+        lines.extend(_plan_user_ordered_section(all_items, plan))
+
+        # Remaining: items NOT in queue_order or skipped
+        ordered_ids = set(plan.get("queue_order", []))
+        skipped_ids = set(plan.get("skipped", {}).keys()) | set(plan.get("deferred", []))
+        plan_ids = ordered_ids | skipped_ids
+        remaining = [item for item in all_items if item.get("id") not in plan_ids]
+        if remaining:
+            lines.append("---")
+            lines.append(f"## Remaining (mechanical order, {len(remaining)} items)")
+            lines.append("")
+
+        lines.extend(_plan_tier_sections(findings, state=state))
+        lines.extend(_plan_skipped_section(all_items, plan))
+        lines.extend(_plan_superseded_section(plan))
+    else:
+        lines.extend(_plan_tier_sections(findings, state=state))
+
     lines.extend(_addressed_section(findings))
 
     return "\n".join(lines)

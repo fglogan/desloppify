@@ -393,7 +393,8 @@ class TestUpsertFindings:
 
     def _call(self, existing, current, *, ignore=None, lang=None):
         now = "2025-06-01T00:00:00+00:00"
-        return upsert_findings(existing, current, ignore or [], now, lang=lang)
+        result = upsert_findings(existing, current, ignore or [], now, lang=lang)
+        return result[:5]  # backward compat — omit changed_detectors
 
     # -- new findings --
 
@@ -518,6 +519,82 @@ class TestUpsertFindings:
         f3 = _make_raw_finding("det_b::c.py::z", detector="det_b", file="c.py")
         _, _, _, by_det, _ign = self._call({}, [f1, f2, f3])
         assert by_det == {"det_a": 2, "det_b": 1}
+
+    # -- subjective_review reopen guard (#158 / #156) --
+
+    def test_subjective_review_auto_resolved_by_import_not_reopened(self):
+        """subjective_review with auto_resolved + agent_import stays resolved."""
+        old = _make_raw_finding(
+            "subjective_review::a.py::holistic_stale",
+            detector="subjective_review",
+            file="a.py",
+            status="auto_resolved",
+        )
+        old["resolution_attestation"] = {
+            "kind": "agent_import",
+            "text": "Resolved by holistic import",
+            "attested_at": "2025-05-01T00:00:00+00:00",
+            "scan_verified": False,
+        }
+        existing = {"subjective_review::a.py::holistic_stale": old}
+
+        current = _make_raw_finding(
+            "subjective_review::a.py::holistic_stale",
+            detector="subjective_review",
+            file="a.py",
+        )
+        _, new, reopened, _, _ign = self._call(existing, [current])
+        assert reopened == 0
+        assert existing["subjective_review::a.py::holistic_stale"]["status"] == "auto_resolved"
+
+    def test_subjective_review_fixed_by_user_still_reopened(self):
+        """subjective_review manually fixed DOES reopen (condition persists)."""
+        old = _make_raw_finding(
+            "subjective_review::a.py::holistic_stale",
+            detector="subjective_review",
+            file="a.py",
+            status="fixed",
+        )
+        old["resolution_attestation"] = {
+            "kind": "manual",
+            "text": "User fixed",
+            "attested_at": "2025-05-01T00:00:00+00:00",
+        }
+        existing = {"subjective_review::a.py::holistic_stale": old}
+
+        current = _make_raw_finding(
+            "subjective_review::a.py::holistic_stale",
+            detector="subjective_review",
+            file="a.py",
+        )
+        _, new, reopened, _, _ign = self._call(existing, [current])
+        assert reopened == 1
+        assert existing["subjective_review::a.py::holistic_stale"]["status"] == "open"
+
+    def test_mechanical_auto_resolved_still_reopened(self):
+        """Non-subjective auto_resolved finding still reopens normally."""
+        old = _make_raw_finding(
+            "unused::a.py::x",
+            detector="unused",
+            file="a.py",
+            status="auto_resolved",
+        )
+        old["resolution_attestation"] = {
+            "kind": "scan_verified",
+            "text": "Disappeared from scan",
+            "attested_at": "2025-05-01T00:00:00+00:00",
+            "scan_verified": True,
+        }
+        existing = {"unused::a.py::x": old}
+
+        current = _make_raw_finding(
+            "unused::a.py::x",
+            detector="unused",
+            file="a.py",
+        )
+        _, new, reopened, _, _ign = self._call(existing, [current])
+        assert reopened == 1
+        assert existing["unused::a.py::x"]["status"] == "open"
 
 
 # ---------------------------------------------------------------------------

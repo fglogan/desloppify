@@ -55,12 +55,13 @@ def auto_resolve_disappeared(
     lang: str | None,
     scan_path: str | None,
     exclude: tuple[str, ...] = (),
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, set[str]]:
     """Auto-resolve open/wontfix/fixed/false_positive findings absent from scan.
 
-    Returns (resolved, skipped_other_lang, skipped_out_of_scope).
+    Returns (resolved, skipped_other_lang, skipped_out_of_scope, resolved_detectors).
     """
     resolved = skipped_other_lang = skipped_out_of_scope = 0
+    resolved_detectors: set[str] = set()
 
     for finding_id, previous in existing.items():
         if finding_id in current_ids or previous["status"] not in (
@@ -107,9 +108,10 @@ def auto_resolve_disappeared(
             if previous_status == "wontfix"
             else "Disappeared from scan — likely fixed"
         )
+        resolved_detectors.add(previous.get("detector", "unknown"))
         resolved += 1
 
-    return resolved, skipped_other_lang, skipped_out_of_scope
+    return resolved, skipped_other_lang, skipped_out_of_scope, resolved_detectors
 
 
 def upsert_findings(
@@ -119,14 +121,15 @@ def upsert_findings(
     now: str,
     *,
     lang: str | None,
-) -> tuple[set[str], int, int, dict[str, int], int]:
+) -> tuple[set[str], int, int, dict[str, int], int, set[str]]:
     """Insert new findings and update existing ones.
 
-    Returns (current_ids, new_count, reopened_count, by_detector, ignored_count).
+    Returns (current_ids, new_count, reopened_count, by_detector, ignored_count, changed_detectors).
     """
     current_ids: set[str] = set()
     new_count = reopened_count = ignored_count = 0
     by_detector: dict[str, int] = {}
+    changed_detectors: set[str] = set()
 
     for finding in current_findings:
         finding_id = finding["id"]
@@ -148,6 +151,7 @@ def upsert_findings(
                 existing[finding_id]["suppression_pattern"] = matched_ignore
                 continue
             new_count += 1
+            changed_detectors.add(detector)
             continue
 
         previous = existing[finding_id]
@@ -180,6 +184,15 @@ def upsert_findings(
         previous["suppression_pattern"] = None
 
         if previous["status"] in ("fixed", "auto_resolved"):
+            # subjective_review findings are condition-based.  When just
+            # auto-resolved by an agent import, skip reopening to avoid a
+            # resolve-then-reopen loop on the same scan cycle.
+            if (
+                detector == "subjective_review"
+                and previous["status"] == "auto_resolved"
+                and (previous.get("resolution_attestation") or {}).get("kind") == "agent_import"
+            ):
+                continue
             previous_status = previous["status"]
             previous["reopen_count"] = previous.get("reopen_count", 0) + 1
             previous.pop("resolution_attestation", None)
@@ -192,8 +205,9 @@ def upsert_findings(
                 ),
             )
             reopened_count += 1
+            changed_detectors.add(detector)
 
-    return current_ids, new_count, reopened_count, by_detector, ignored_count
+    return current_ids, new_count, reopened_count, by_detector, ignored_count, changed_detectors
 
 
 __all__ = [

@@ -202,8 +202,22 @@ def render_findings(
     print()
 
 
-def show_agent_plan(narrative: dict, matches: list[dict]) -> None:
-    """Render a compact plan from current findings and narrative actions."""
+def show_agent_plan(
+    narrative: dict, matches: list[dict], *, plan: dict | None = None
+) -> None:
+    """Render a compact plan from current findings and narrative actions.
+
+    When a living *plan* is active, renders plan focus/progress instead.
+    """
+    if plan and (plan.get("queue_order") or plan.get("clusters")):
+        from desloppify.app.commands.helpers.rendering import print_agent_plan as _pap
+        _pap(
+            [],
+            plan=plan,
+            header="  AGENT PLAN (use `desloppify next` to see your next task):",
+        )
+        return
+
     actions = narrative.get("actions", [])
     if not actions and not matches:
         return

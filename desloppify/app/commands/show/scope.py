@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from desloppify import scoring as scoring_mod
 from desloppify import state as state_mod
 from desloppify.engine.work_queue import (
@@ -9,6 +11,83 @@ from desloppify.engine.work_queue import (
     build_work_queue,
 )
 from desloppify.core.output_api import colorize
+
+
+@dataclass(frozen=True)
+class ResolvedEntity:
+    """Classifies what the user's show pattern refers to."""
+
+    kind: str  # "dimension", "special_view", "file_or_pattern"
+    pattern: str  # Original user pattern
+    display_name: str  # Human-readable label
+    detectors: tuple[str, ...] = ()  # Detector names (for dimension kind)
+    is_subjective: bool = False  # Whether this is a subjective dimension
+
+
+def resolve_entity(pattern: str, state: dict) -> ResolvedEntity:
+    """Classify a user pattern as a dimension, special view, or passthrough.
+
+    Resolution priority:
+    1. Special views: "concerns", "subjective", "subjective_review"
+    2. Mechanical dimension name (from DIMENSIONS)
+    3. Subjective dimension name (from DISPLAY_NAMES / dimension_scores)
+    4. Everything else: file_or_pattern passthrough
+    """
+    lowered = pattern.strip().lower().replace(" ", "_")
+
+    # 1. Special views
+    if lowered in ("concerns", "subjective", "subjective_review"):
+        return ResolvedEntity(
+            kind="special_view",
+            pattern=pattern,
+            display_name=pattern,
+        )
+
+    # 2. Mechanical dimension (via DIMENSIONS list)
+    lookup = _build_dimension_lookup()
+    detectors = lookup.get(lowered)
+    if not detectors:
+        detectors = lookup.get(pattern.lower())
+    if detectors:
+        dim_display = pattern
+        for dim in scoring_mod.DIMENSIONS:
+            if dim.name.lower() == lowered or dim.name.lower().replace(" ", "_") == lowered:
+                dim_display = dim.name
+                break
+        return ResolvedEntity(
+            kind="dimension",
+            pattern=pattern,
+            display_name=dim_display,
+            detectors=tuple(detectors),
+            is_subjective=False,
+        )
+
+    # 3. Subjective dimension (via DISPLAY_NAMES or dimension_scores)
+    display_name = scoring_mod.DISPLAY_NAMES.get(lowered)
+    if not display_name:
+        for key in state.get("dimension_scores") or {}:
+            if key.lower().replace(" ", "_") == lowered:
+                display_name = key
+                break
+    if display_name:
+        dim_data, display_name = _lookup_dimension_score(state, display_name)
+        is_subj = "subjective_assessment" in (
+            dim_data.get("detectors", {}) if isinstance(dim_data, dict) else {}
+        )
+        return ResolvedEntity(
+            kind="dimension",
+            pattern=pattern,
+            display_name=display_name,
+            detectors=(),
+            is_subjective=is_subj,
+        )
+
+    # 4. Everything else
+    return ResolvedEntity(
+        kind="file_or_pattern",
+        pattern=pattern,
+        display_name=pattern,
+    )
 
 
 def _build_dimension_lookup() -> dict[str, list[str]]:
@@ -37,62 +116,22 @@ def _build_dimension_lookup() -> dict[str, list[str]]:
     return lookup
 
 
-def try_dimension_rewrite(pattern: str) -> str | None:
-    """If pattern matches a dimension name/key, return a detector scope. Otherwise None."""
-    lookup = _build_dimension_lookup()
-    lowered = pattern.lower().replace(" ", "_")
-    detectors = lookup.get(lowered)
-    if not detectors:
-        # Try display name form (with spaces)
-        detectors = lookup.get(pattern.lower())
-    if not detectors:
-        return None
-    # Return first detector as scope — the work queue will match on detector name.
-    # For multi-detector dimensions, we can't pass multiple scopes through the current
-    # interface, but most dimensions have one primary detector. Use glob pattern.
-    if len(detectors) == 1:
-        return detectors[0]
-    # For multi-detector dimensions, use wildcard pattern that scope_matches handles
-    return None  # Fall through to load_matches_for_dimension
+def _lookup_dimension_score(
+    state: dict, display_name: str,
+) -> tuple[dict, str]:
+    """Find dimension_scores entry with case-insensitive fallback.
 
-
-def load_matches_for_dimension(
-    state: dict,
-    pattern: str,
-    *,
-    status_filter: str,
-) -> tuple[list[dict], str | None]:
-    """Try to load findings matching a dimension name. Returns (matches, rewritten_pattern)."""
-    lookup = _build_dimension_lookup()
-    lowered = pattern.lower().replace(" ", "_")
-    detectors = lookup.get(lowered) or lookup.get(pattern.lower())
-    if not detectors:
-        return [], None
-
-    # Load findings for each detector in this dimension
-    all_matches: list[dict] = []
-    for detector in detectors:
-        matches = load_matches(
-            state, scope=detector, status_filter=status_filter, chronic=False
-        )
-        all_matches.extend(matches)
-    # Deduplicate by finding ID
-    seen: set[str] = set()
-    unique: list[dict] = []
-    for item in all_matches:
-        fid = item.get("id", "")
-        if fid not in seen:
-            seen.add(fid)
-            unique.append(item)
-
-    # Find the display name for the dimension
-    dim_display = pattern
-    for dim in scoring_mod.DIMENSIONS:
-        if dim.name.lower() == lowered or dim.name.lower().replace(" ", "_") == lowered:
-            dim_display = dim.name
-            break
-
-    return unique, dim_display
+    Returns (dim_data_dict, resolved_display_name).
+    """
+    lowered = display_name.lower().replace(" ", "_")
+    dim_data = (state.get("dimension_scores") or {}).get(display_name, {})
+    if not dim_data:
+        for ds_key, ds_val in (state.get("dimension_scores") or {}).items():
+            if ds_key.lower().replace(" ", "_") == lowered:
+                dim_data = ds_val
+                display_name = ds_key
+                break
+    return dim_data, display_name
 
 
 def _detector_names_hint() -> str:
@@ -167,9 +206,11 @@ def resolve_noise(config: dict, matches: list[dict]):
 
 
 __all__ = [
+    "ResolvedEntity",
     "_detector_names_hint",
+    "_lookup_dimension_score",
     "load_matches",
-    "load_matches_for_dimension",
+    "resolve_entity",
     "resolve_noise",
     "resolve_show_scope",
 ]

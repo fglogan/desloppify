@@ -136,7 +136,7 @@ def merge_scan(
         if resolved_options.ignore is not None
         else state.get("config", {}).get("ignore", [])
     )
-    current_ids, new_count, reopened_count, current_by_detector, ignored_count = (
+    current_ids, new_count, reopened_count, current_by_detector, ignored_count, upsert_changed = (
         upsert_findings(
             existing,
             current_findings,
@@ -160,7 +160,7 @@ def merge_scan(
         resolved_options.force_resolve,
         ran_detectors,
     )
-    auto_resolved, skipped_other_lang, skipped_out_of_scope = auto_resolve_disappeared(
+    auto_resolved, skipped_other_lang, skipped_out_of_scope, resolve_changed = auto_resolve_disappeared(
         existing,
         current_ids,
         suspect_detectors,
@@ -171,8 +171,8 @@ def merge_scan(
     )
 
     # Mark subjective assessments stale when mechanical findings changed.
-    if new_count > 0 or auto_resolved > 0 or reopened_count > 0:
-        changed_detectors = set(current_by_detector.keys())
+    changed_detectors = upsert_changed | resolve_changed
+    if changed_detectors:
         _mark_stale_on_mechanical_change(
             state, changed_detectors=changed_detectors, now=now,
         )

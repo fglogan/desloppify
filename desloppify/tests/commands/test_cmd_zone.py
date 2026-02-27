@@ -140,6 +140,9 @@ class TestZoneSet:
         monkeypatch.setattr(
             config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg))
         )
+        monkeypatch.setattr(
+            "desloppify.app.commands.zone_cmd.rel", lambda p: p,
+        )
 
         class FakeArgs:
             zone_path = "src/foo.ts"
@@ -174,6 +177,9 @@ class TestZoneClear:
         monkeypatch.setattr(
             config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg))
         )
+        monkeypatch.setattr(
+            "desloppify.app.commands.zone_cmd.rel", lambda p: p,
+        )
 
         class FakeArgs:
             zone_path = "src/foo.ts"
@@ -193,6 +199,9 @@ class TestZoneClear:
 
     def test_clear_nonexistent_override(self, monkeypatch, capsys):
         fake_config = {"zone_overrides": {}}
+        monkeypatch.setattr(
+            "desloppify.app.commands.zone_cmd.rel", lambda p: p,
+        )
 
         class FakeArgs:
             zone_path = "src/bar.ts"
@@ -207,3 +216,69 @@ class TestZoneClear:
         _zone_clear(FakeArgs())
         out = capsys.readouterr().out
         assert "No override found" in out
+
+
+# ---------------------------------------------------------------------------
+# Zone path normalization (#159)
+# ---------------------------------------------------------------------------
+
+
+class TestZonePathNormalization:
+    """_zone_set and _zone_clear normalize paths with rel() before storing."""
+
+    def test_zone_set_stores_normalized_key(self, monkeypatch, capsys):
+        """_zone_set uses rel() to normalize the path before storing."""
+        saved = []
+        fake_config = {"zone_overrides": {}}
+        monkeypatch.setattr(
+            config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg))
+        )
+        # rel() normalizes the absolute path to relative form
+        monkeypatch.setattr(
+            "desloppify.app.commands.zone_cmd.rel",
+            lambda p: "src/file.py",
+        )
+
+        class FakeArgs:
+            zone_path = "/absolute/project/src/file.py"
+            zone_value = "production"
+            lang = None
+            path = "."
+            runtime = CommandRuntime(
+                config=fake_config,
+                state={},
+                state_path=None,
+            )
+
+        _zone_set(FakeArgs())
+        assert len(saved) == 1
+        # Key should be the normalized form, not the raw input
+        assert "src/file.py" in saved[0]["zone_overrides"]
+        assert "/absolute/project/src/file.py" not in saved[0]["zone_overrides"]
+
+    def test_zone_clear_uses_normalized_key(self, monkeypatch, capsys):
+        """_zone_clear uses rel() to normalize path for lookup."""
+        saved = []
+        fake_config = {"zone_overrides": {"src/file.py": "test"}}
+        monkeypatch.setattr(
+            config_mod, "save_config", lambda cfg, path=None: saved.append(dict(cfg))
+        )
+        monkeypatch.setattr(
+            "desloppify.app.commands.zone_cmd.rel",
+            lambda p: "src/file.py",
+        )
+
+        class FakeArgs:
+            zone_path = "/absolute/project/src/file.py"
+            lang = None
+            path = "."
+            runtime = CommandRuntime(
+                config=fake_config,
+                state={},
+                state_path=None,
+            )
+
+        _zone_clear(FakeArgs())
+        out = capsys.readouterr().out
+        assert "Cleared" in out
+        assert "src/file.py" not in fake_config["zone_overrides"]

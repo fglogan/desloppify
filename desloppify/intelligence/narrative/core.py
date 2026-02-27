@@ -116,7 +116,7 @@ def _count_open_by_detector(findings: dict) -> dict[str, int]:
     """
     by_detector: dict[str, int] = {}
     for f in findings.values():
-        if f["status"] != "open":
+        if f["status"] != "open" or f.get("suppressed"):
             continue
         detector = f.get("detector", "unknown")
         if detector in STRUCTURAL_MERGE:
@@ -131,6 +131,7 @@ def _count_open_by_detector(findings: dict) -> dict[str, int]:
             1
             for f in findings.values()
             if f.get("status") == "open"
+            and not f.get("suppressed")
             and f.get("detector") == "review"
             and not f.get("detail", {}).get("investigation")
         )

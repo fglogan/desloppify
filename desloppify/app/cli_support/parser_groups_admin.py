@@ -346,6 +346,11 @@ def _add_review_parser(sub) -> None:
         help="Run `scan` after successful merged import",
     )
     p_review.add_argument(
+        "--force-review-rerun",
+        action="store_true",
+        help="Bypass the objective-plan-drained gate for review reruns",
+    )
+    p_review.add_argument(
         "--merge",
         action="store_true",
         help="Merge conceptually duplicate open review findings",
@@ -417,12 +422,180 @@ def _add_fix_parser(sub, langs: list[str]) -> None:
 
 def _add_plan_parser(sub) -> None:
     p_plan = sub.add_parser(
-        "plan", help="Generate prioritized markdown plan from state"
+        "plan", help="Living plan: generate, reorder, cluster, annotate, defer"
     )
     p_plan.add_argument("--state", type=str, default=None)
     p_plan.add_argument(
         "--output", type=str, metavar="FILE", help="Write to file instead of stdout"
     )
+
+    plan_sub = p_plan.add_subparsers(dest="plan_action")
+
+    # plan show
+    plan_sub.add_parser("show", help="Show plan metadata summary")
+
+    # plan reset
+    plan_sub.add_parser("reset", help="Reset plan to empty")
+
+    # plan move <patterns> <position> [target|N]
+    p_move = plan_sub.add_parser("move", help="Move findings in the queue")
+    p_move.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_move.add_argument(
+        "position", choices=["top", "bottom", "before", "after", "up", "down"],
+        help="Where to move (top, bottom, before, after, up N, down N)",
+    )
+    p_move.add_argument(
+        "target", nargs="?", default=None,
+        help="Target finding ID (for before/after) or offset (for up/down)",
+    )
+
+    # plan describe <patterns> "<text>"
+    p_describe = plan_sub.add_parser("describe", help="Set augmented description")
+    p_describe.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_describe.add_argument("text", type=str, help="Description text")
+
+    # plan annotate <patterns> --note "<text>"
+    p_annotate = plan_sub.add_parser("annotate", help="Set note on findings")
+    p_annotate.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_annotate.add_argument("--note", type=str, required=True, help="Note text")
+
+    # plan skip <patterns> [--reason] [--review-after N] [--permanent] [--false-positive] [--note] [--attest]
+    p_skip = plan_sub.add_parser(
+        "skip",
+        help="Skip findings: temporary (default), --permanent (wontfix), or --false-positive",
+    )
+    p_skip.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_skip.add_argument("--reason", type=str, default=None, help="Why this is being skipped")
+    p_skip.add_argument(
+        "--review-after", type=int, default=None, metavar="N",
+        help="Re-surface after N scans (temporary only)",
+    )
+    p_skip.add_argument(
+        "--permanent", action="store_true",
+        help="Mark as wontfix (score-affecting, requires --note and --attest)",
+    )
+    p_skip.add_argument(
+        "--false-positive", action="store_true",
+        help="Mark as false positive (requires --attest)",
+    )
+    p_skip.add_argument("--note", type=str, default=None, help="Explanation (required for --permanent)")
+    p_skip.add_argument(
+        "--attest", type=str, default=None,
+        help="Attestation (required for --permanent and --false-positive)",
+    )
+
+    # plan unskip <patterns>
+    p_unskip = plan_sub.add_parser(
+        "unskip", help="Bring skipped findings back to queue (reopens permanent/fp in state)"
+    )
+    p_unskip.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+
+    # plan done <patterns> --attest "..."
+    p_done = plan_sub.add_parser(
+        "done", help="Mark findings as fixed (requires attestation, purges from plan)"
+    )
+    p_done.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_done.add_argument(
+        "--attest", type=str, default=None,
+        help="Attestation that findings were actually fixed (required)",
+    )
+
+    # plan reopen <patterns>
+    p_reopen = plan_sub.add_parser(
+        "reopen", help="Reopen resolved findings and move back to queue"
+    )
+    p_reopen.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+
+    # plan defer <patterns> (deprecated)
+    p_defer = plan_sub.add_parser("defer", help="(Deprecated: use `plan skip`) Defer findings")
+    p_defer.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+
+    # plan undefer <patterns> (deprecated)
+    p_undefer = plan_sub.add_parser("undefer", help="(Deprecated: use `plan unskip`) Bring deferred findings back")
+    p_undefer.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+
+    # plan wontfix <patterns> --note "..." --attest "..." (deprecated)
+    p_wontfix = plan_sub.add_parser(
+        "wontfix", help="(Deprecated: use `plan skip --permanent`) Mark as wontfix"
+    )
+    p_wontfix.add_argument(
+        "patterns", nargs="+", metavar="PATTERN",
+        help="Finding ID(s), prefix, detector name, file path, or glob",
+    )
+    p_wontfix.add_argument(
+        "--note", type=str, required=True, help="Explanation (required)",
+    )
+    p_wontfix.add_argument(
+        "--attest", type=str, required=True,
+        help="Attestation that findings were reviewed (must contain required phrases)",
+    )
+
+    # plan focus <cluster> | --clear
+    p_focus = plan_sub.add_parser("focus", help="Set or clear active cluster focus")
+    p_focus.add_argument("cluster_name", nargs="?", default=None, help="Cluster name")
+    p_focus.add_argument("--clear", action="store_true", help="Clear focus")
+
+    # plan cluster ...
+    p_cluster = plan_sub.add_parser("cluster", help="Manage finding clusters")
+    cluster_sub = p_cluster.add_subparsers(dest="cluster_action")
+
+    # plan cluster create <name> [--description "..."]
+    p_cc = cluster_sub.add_parser("create", help="Create a cluster")
+    p_cc.add_argument("cluster_name", type=str, help="Cluster name (slug)")
+    p_cc.add_argument("--description", type=str, default=None, help="Cluster description")
+
+    # plan cluster add <cluster> <patterns...>
+    p_ca = cluster_sub.add_parser("add", help="Add findings to a cluster")
+    p_ca.add_argument("cluster_name", type=str, help="Cluster name")
+    p_ca.add_argument("patterns", nargs="+", metavar="PATTERN", help="Finding patterns")
+
+    # plan cluster remove <cluster> <patterns...>
+    p_cr = cluster_sub.add_parser("remove", help="Remove findings from a cluster")
+    p_cr.add_argument("cluster_name", type=str, help="Cluster name")
+    p_cr.add_argument("patterns", nargs="+", metavar="PATTERN", help="Finding patterns")
+
+    # plan cluster delete <name>
+    p_cd = cluster_sub.add_parser("delete", help="Delete a cluster")
+    p_cd.add_argument("cluster_name", type=str, help="Cluster name")
+
+    # plan cluster move <cluster> <position> [target]
+    p_cm = cluster_sub.add_parser("move", help="Move cluster as a block")
+    p_cm.add_argument("cluster_name", type=str, help="Cluster name")
+    p_cm.add_argument(
+        "position", choices=["top", "bottom", "before", "after", "up", "down"],
+        help="Where to move",
+    )
+    p_cm.add_argument("target", nargs="?", default=None, help="Target or offset")
+
+    # plan cluster list
+    cluster_sub.add_parser("list", help="List all clusters")
 
 
 def _add_viz_parser(sub) -> None:

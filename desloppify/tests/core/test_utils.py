@@ -116,6 +116,25 @@ def test_matches_exclusion_partial_dir_no_match():
     assert matches_exclusion("src/test/bar.py", "src/tes") is False
 
 
+def test_matches_exclusion_dir_doublestar():
+    """'Wan2GP/**' matches files under Wan2GP/ (glob-style exclusion)."""
+    assert matches_exclusion("Wan2GP/models/rf.py", "Wan2GP/**") is True
+    assert matches_exclusion("Wan2GP/sub/deep/file.py", "Wan2GP/**") is True
+
+
+def test_matches_exclusion_dir_doublestar_no_match():
+    """'Wan2GP/**' does not match files outside Wan2GP/."""
+    assert matches_exclusion("Other/models/rf.py", "Wan2GP/**") is False
+    assert matches_exclusion("Wan2GPx/foo.py", "Wan2GP/**") is False
+
+
+def test_matches_exclusion_nested_dir_doublestar():
+    """'src/vendor/**' matches nested glob exclusions."""
+    assert matches_exclusion("src/vendor/foo.py", "src/vendor/**") is True
+    assert matches_exclusion("src/vendor/sub/bar.py", "src/vendor/**") is True
+    assert matches_exclusion("src/other/foo.py", "src/vendor/**") is False
+
+
 # ── find_source_files() ─────────────────────────────────────
 
 

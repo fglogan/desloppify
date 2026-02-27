@@ -89,6 +89,10 @@ def scope_matches(item: dict, scope: str | None) -> bool:
             or lowered in summary.lower()
         )
 
+    # Hash suffix: 8+ hex chars matches the tail segment of a finding ID.
+    if len(lowered) >= 8 and re.fullmatch(r"[0-9a-f]+", lowered):
+        return item_id.lower().endswith("::" + lowered)
+
     return (
         detector == scope
         or filepath == scope

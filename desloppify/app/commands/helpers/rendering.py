@@ -13,8 +13,16 @@ def print_agent_plan(
     *,
     next_command: str | None = None,
     header: str = "  AGENT PLAN:",
+    plan: dict | None = None,
 ) -> None:
-    """Print a consistent AGENT PLAN block with numbered steps."""
+    """Print a consistent AGENT PLAN block with numbered steps.
+
+    When a living *plan* is active, renders plan focus/progress instead
+    of the narrative-derived steps.
+    """
+    if plan and (plan.get("queue_order") or plan.get("clusters")):
+        _print_plan_agent_block(plan, header=header)
+        return
     if not steps:
         return
     print(colorize(header, "yellow"))
@@ -22,6 +30,22 @@ def print_agent_plan(
         print(colorize(f"  {idx}. {step}", "dim"))
     if next_command:
         print(colorize(f"  Next command: `{next_command}`", "dim"))
+
+
+def _print_plan_agent_block(plan: dict, *, header: str = "  AGENT PLAN:") -> None:
+    """Render the living plan as the agent plan block."""
+    active = plan.get("active_cluster")
+    ordered = len(plan.get("queue_order", []))
+    skipped = len(plan.get("skipped", {})) + len(plan.get("deferred", []))
+
+    print(colorize(header, "yellow"))
+    print(colorize(f"  Living plan active: {ordered} ordered, {skipped} skipped.", "dim"))
+    if active:
+        cluster = plan.get("clusters", {}).get(active, {})
+        remaining = len(cluster.get("finding_ids", []))
+        print(colorize(f"  Focused on: {active} ({remaining} items remaining).", "dim"))
+    print(colorize("  Next command: `desloppify next`", "dim"))
+    print(colorize("  View plan: `desloppify plan`", "dim"))
 
 
 def print_replacement_groups(
@@ -41,7 +65,9 @@ def print_replacement_groups(
     print()
 
 
-def print_ranked_actions(actions: list[dict], *, limit: int = 3) -> bool:
+def print_ranked_actions(
+    actions: list[dict], *, limit: int = 3, plan: dict | None = None
+) -> bool:
     """Print the highest-impact narrative actions and return True when shown."""
     ranked = sorted(
         [action for action in actions if int(action.get("count", 0)) > 0],
@@ -53,7 +79,9 @@ def print_ranked_actions(actions: list[dict], *, limit: int = 3) -> bool:
     )
     if not ranked:
         return False
-    print(colorize("  Biggest things impacting score:", "cyan"))
+    has_plan = plan and (plan.get("queue_order") or plan.get("clusters"))
+    label = "Score context:" if has_plan else "Biggest things impacting score:"
+    print(colorize(f"  {label}", "cyan"))
     for action in ranked[:limit]:
         detector = action.get("detector", "unknown")
         count = int(action.get("count", 0))

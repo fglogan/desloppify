@@ -19,7 +19,7 @@ def _build_handlers() -> dict[str, CommandHandler]:
     from desloppify.app.commands.langs import cmd_langs
     from desloppify.app.commands.move import cmd_move
     from desloppify.app.commands.next import cmd_next
-    from desloppify.app.commands.plan_cmd import cmd_plan_output
+    from desloppify.app.commands.plan import cmd_plan
     from desloppify.app.commands.resolve import cmd_ignore_pattern, cmd_resolve
     from desloppify.app.commands.review import cmd_review
     from desloppify.app.commands.scan import cmd_scan
@@ -37,7 +37,7 @@ def _build_handlers() -> dict[str, CommandHandler]:
         "resolve": cmd_resolve,
         "ignore": cmd_ignore_pattern,
         "fix": cmd_fix,
-        "plan": cmd_plan_output,
+        "plan": cmd_plan,
         "detect": cmd_detect,
         "tree": cmd_tree,
         "viz": cmd_viz,

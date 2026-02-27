@@ -160,6 +160,27 @@ class TestCountOpenByDetector:
         result = _count_open_by_detector(findings)
         assert result == {"unknown": 1}
 
+    def test_suppressed_findings_excluded(self):
+        findings = _findings_dict(
+            _finding("security", status="open"),
+            {**_finding("security", status="open"), "suppressed": True},
+            {**_finding("security", status="open"), "suppressed": True},
+            _finding("unused", status="open"),
+            {**_finding("unused", status="open"), "suppressed": True},
+        )
+        result = _count_open_by_detector(findings)
+        assert result == {"security": 1, "unused": 1}
+
+    def test_suppressed_review_uninvestigated_excluded(self):
+        findings = {
+            "a": {"status": "open", "detector": "review", "detail": {}},
+            "b": {"status": "open", "detector": "review", "detail": {},
+                   "suppressed": True},
+        }
+        result = _count_open_by_detector(findings)
+        assert result["review"] == 1
+        assert result["review_uninvestigated"] == 1
+
 
 # ===================================================================
 # _detect_phase

@@ -87,7 +87,10 @@ def _is_excluded_dir(name: str, rel_path: str, extra: tuple[str, ...]) -> bool:
     matches_extra_exclusion = bool(
         extra
         and any(
-            matches_exclusion(rel_path, exclusion) or exclusion == name
+            matches_exclusion(rel_path, exclusion)
+            or exclusion == name
+            or exclusion == name + "/**"
+            or exclusion == name + "/*"
             for exclusion in extra
         )
     )

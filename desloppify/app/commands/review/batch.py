@@ -26,6 +26,7 @@ from desloppify.intelligence.review.feedback_contract import (
 )
 from desloppify.core.output_api import colorize, log
 
+from .helpers import parse_dimensions
 from .import_cmd import do_import as _do_import
 from .runtime import setup_lang_concrete as _setup_lang
 
@@ -134,8 +135,8 @@ def _load_or_prepare_packet(
         return packet, packet_path, blind_path
 
     path = Path(args.path)
-    dims_str = getattr(args, "dimensions", None)
-    dimensions = dims_str.split(",") if dims_str else None
+    dims = parse_dimensions(args)
+    dimensions = list(dims) if dims else None
     retrospective = bool(getattr(args, "retrospective", False))
     retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),

@@ -15,7 +15,7 @@ def open_files_by_detector(findings: dict[str, dict[str, Any]]) -> dict[str, set
     """Collect file sets of open findings by detector."""
     by_detector: dict[str, set[str]] = {}
     for finding in findings.values():
-        if finding["status"] != "open":
+        if finding["status"] != "open" or finding.get("suppressed"):
             continue
         detector = finding.get("detector", "unknown")
         if detector in STRUCTURAL_MERGE:

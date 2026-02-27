@@ -194,6 +194,19 @@ def _add_next_parser(sub) -> None:
         help="Do not auto-fallback to another tier when --tier has no items",
     )
     p_next.add_argument(
+        "--cluster",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Filter to a specific plan cluster",
+    )
+    p_next.add_argument(
+        "--include-deferred",
+        "--include-skipped",
+        action="store_true",
+        help="Include skipped/deferred items in the queue",
+    )
+    p_next.add_argument(
         "--output",
         type=str,
         metavar="FILE",

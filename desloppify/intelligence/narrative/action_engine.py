@@ -81,6 +81,7 @@ def _fixer_has_applicable_findings(
     smell_id = fixer_name.replace("-", "_")
     return any(
         f.get("status") == "open"
+        and not f.get("suppressed")
         and f.get("detector") == "smells"
         and f.get("detail", {}).get("smell_id") == smell_id
         for f in state.get("findings", {}).values()

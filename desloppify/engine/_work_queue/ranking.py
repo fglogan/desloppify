@@ -178,6 +178,9 @@ def group_queue_items(items: list[dict], group: str) -> dict[str, list[dict]]:
             key = item.get("detector", "")
         elif group == "tier":
             key = f"T{int(item.get('effective_tier', item.get('tier', 3)))}"
+        elif group == "cluster":
+            plan_cluster = item.get("plan_cluster")
+            key = plan_cluster["name"] if isinstance(plan_cluster, dict) else "(unclustered)"
         else:
             key = "items"
         grouped.setdefault(key, []).append(item)

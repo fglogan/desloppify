@@ -12,6 +12,8 @@ from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.core.output_api import colorize
 
+from .helpers import parse_dimensions
+
 DEFAULT_REVIEW_BATCH_MAX_FILES = 80
 
 
@@ -42,8 +44,8 @@ def do_prepare(
 ) -> None:
     """Prepare mode: holistic-only review packet in query.json."""
     path = Path(args.path)
-    dims_str = getattr(args, "dimensions", None)
-    dimensions = dims_str.split(",") if dims_str else None
+    dims = parse_dimensions(args)
+    dimensions = list(dims) if dims else None
     retrospective = bool(getattr(args, "retrospective", False))
     retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),

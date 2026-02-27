@@ -37,7 +37,7 @@ def build_scan_query_payload(
         if isinstance(findings, dict)
         else None
     )
-    return {
+    payload = {
         "command": "scan",
         "overall_score": scores.overall,
         "objective_score": scores.objective,
@@ -66,6 +66,25 @@ def build_scan_query_payload(
         "narrative": narrative,
         "config": config_for_query(config),
     }
+
+    # Add plan context if a living plan exists
+    try:
+        from desloppify.engine.plan import load_plan
+        plan = load_plan()
+        if plan.get("queue_order") or plan.get("clusters") or plan.get("skipped") or plan.get("deferred"):
+            total_skipped = len(plan.get("skipped", {})) + len(plan.get("deferred", []))
+            payload["plan"] = {
+                "active": True,
+                "focus": plan.get("active_cluster"),
+                "total_ordered": len(plan.get("queue_order", [])),
+                "total_skipped": total_skipped,
+                "total_deferred": total_skipped,  # backwards compat
+                "plan_overrides_narrative": True,
+            }
+    except Exception:
+        pass
+
+    return payload
 
 
 def _load_scorecard_helpers():

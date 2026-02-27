@@ -21,6 +21,7 @@ from desloppify.intelligence import narrative as narrative_mod
 from desloppify.intelligence import review as review_mod
 from desloppify.core.output_api import colorize
 
+from .helpers import parse_dimensions
 from .import_cmd import do_import, do_validate_import
 
 # Backward-compatible override hooks for tests.
@@ -73,14 +74,6 @@ def _parse_iso(raw: object) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt.astimezone(UTC)
-
-
-def _split_dimensions(raw: object) -> list[str] | None:
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    values = [value.strip() for value in raw.split(",")]
-    cleaned = [value for value in values if value]
-    return cleaned or None
 
 
 def _session_id() -> str:
@@ -149,7 +142,8 @@ def _prepare_packet_snapshot(
 ) -> tuple[dict[str, Any], Path, Path]:
     """Prepare holistic review packet and persist immutable+blind snapshots."""
     path = Path(getattr(args, "path", ".") or ".")
-    dimensions = _split_dimensions(getattr(args, "dimensions", None))
+    dims = parse_dimensions(args)
+    dimensions = list(dims) if dims else None
     retrospective = bool(getattr(args, "retrospective", False))
     retrospective_max_issues = coerce_positive_int(
         getattr(args, "retrospective_max_issues", None),

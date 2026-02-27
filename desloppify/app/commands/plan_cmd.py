@@ -1,4 +1,8 @@
-"""plan command: generate prioritized markdown plan from state."""
+"""plan command: generate prioritized markdown plan from state.
+
+This module preserves the original import path. The full plan command
+(with subcommands) lives in ``desloppify.app.commands.plan.cmd``.
+"""
 
 from __future__ import annotations
 
@@ -28,10 +32,19 @@ def cmd_plan_output(args: argparse.Namespace) -> None:
         try:
             safe_write_text(output, plan_md)
             print(colorize(f"Plan written to {output}", "green"))
-            print_agent_plan(["Inspect and execute the generated plan."], next_command=next_command)
+            print_agent_plan(
+                ["Inspect and execute the generated plan."],
+                next_command=next_command,
+            )
         except OSError as e:
             warn_best_effort(f"Could not write plan to {output}: {e}")
     else:
         print(plan_md)
         print()
-        print_agent_plan(["Start from the top-ranked action in this plan."], next_command=next_command)
+        print_agent_plan(
+            ["Start from the top-ranked action in this plan."],
+            next_command=next_command,
+        )
+
+
+__all__ = ["cmd_plan_output"]

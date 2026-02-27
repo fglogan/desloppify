@@ -100,8 +100,16 @@ def show_post_scan_analysis(
     if narrative.get("headline"):
         print(colorize(f"  → {narrative['headline']}", "cyan"))
 
-    # Two pointers
+    # Pointers — include plan reference when active
+    try:
+        from desloppify.engine.plan import has_living_plan
+        _has_plan = has_living_plan()
+    except Exception:
+        _has_plan = False
+
     print(colorize("  Run `desloppify next` for the highest-priority item.", "dim"))
+    if _has_plan:
+        print(colorize("  Run `desloppify plan` to see the updated living plan.", "dim"))
     print(colorize("  Run `desloppify status` for the full dashboard.", "dim"))
     print()
 

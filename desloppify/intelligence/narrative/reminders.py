@@ -297,8 +297,18 @@ def _review_queue_reminders(
     return reminders
 
 
+def _has_open_findings(state: StateModel) -> bool:
+    """True when any non-suppressed open findings remain in the queue."""
+    return any(
+        f.get("status") == "open" and not f.get("suppressed")
+        for f in (state.get("findings") or {}).values()
+    )
+
+
 def _stale_assessment_reminder(state: StateModel) -> list[dict]:
     """Nudge when mechanical changes have staled subjective assessments."""
+    if _has_open_findings(state):
+        return []
     assessments = state.get("subjective_assessments") or {}
     stale_dims = [
         dim_key
@@ -400,7 +410,7 @@ _REMINDER_METADATA: dict[str, tuple[int, str]] = {
     "wontfix_stale": (2, "medium"),
     "stagnant_nudge": (2, "medium"),
     "review_stale": (2, "medium"),
-    "stale_assessments": (1, "high"),
+    "stale_assessments": (2, "medium"),
     "auto_fixers_available": (2, "medium"),
     "zone_classification": (2, "medium"),
     "fp_calibration": (2, "medium"),

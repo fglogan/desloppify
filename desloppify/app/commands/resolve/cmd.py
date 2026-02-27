@@ -86,6 +86,20 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         return
 
     _save_state_or_exit(state, state_file)
+
+    # Remove resolved items from the living plan queue
+    try:
+        from desloppify.engine.plan import has_living_plan, load_plan, purge_ids, save_plan
+
+        if has_living_plan():
+            plan = load_plan()
+            purged = purge_ids(plan, all_resolved)
+            if purged:
+                save_plan(plan)
+                print(colorize(f"  Plan updated: {purged} item(s) removed from queue.", "dim"))
+    except Exception:
+        pass
+
     _print_resolve_summary(status=args.status, all_resolved=all_resolved)
     _print_wontfix_batch_warning(
         state,

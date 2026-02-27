@@ -131,6 +131,19 @@ def _render_item(
             print(colorize(f"  explain: {reason}", "dim"))
         return
 
+    # Plan overrides: description, cluster, note
+    if item.get("plan_description"):
+        print(colorize(f"  → {item['plan_description']}", "cyan"))
+    plan_cluster = item.get("plan_cluster")
+    if isinstance(plan_cluster, dict):
+        cluster_name = plan_cluster.get("name", "")
+        cluster_desc = plan_cluster.get("description") or ""
+        total = plan_cluster.get("total_items", 0)
+        desc_str = f' — "{cluster_desc}"' if cluster_desc else ""
+        print(colorize(f"  Cluster: {cluster_name}{desc_str} ({total} items)", "dim"))
+    if item.get("plan_note"):
+        print(colorize(f"  Note: {item['plan_note']}", "dim"))
+
     print(f"  File: {item.get('file', '')}")
     print(colorize(f"  ID:   {item.get('id', '')}", "dim"))
 
@@ -298,14 +311,30 @@ def render_terminal_items(
     group: str,
     explain: bool,
     potentials: dict | None = None,
+    plan: dict | None = None,
 ) -> None:
+    # Show focus header if plan has active cluster
+    if plan and plan.get("active_cluster"):
+        cluster_name = plan["active_cluster"]
+        clusters = plan.get("clusters", {})
+        cluster_data = clusters.get(cluster_name, {})
+        total = len(cluster_data.get("finding_ids", []))
+        print(colorize(f"\n  Focused on: {cluster_name} ({len(items)} of {total} remaining)", "cyan"))
+
     if group != "item":
         _render_grouped(items, group)
         return
     for idx, item in enumerate(items):
         if idx > 0:
             print()
-        label = f"  [{idx + 1}/{len(items)}]" if len(items) > 1 else "  Next item"
+        queue_pos = item.get("queue_position")
+        if queue_pos and len(items) > 1:
+            label = f"  [#{queue_pos}]"
+        elif len(items) > 1:
+            label = f"  [{idx + 1}/{len(items)}]"
+        else:
+            pos_str = f"  (#{ queue_pos} in queue)" if queue_pos else ""
+            label = f"  Next item{pos_str}"
         print(colorize(label, "bold"))
         _render_item(item, dim_scores, findings_scoped, explain=explain, potentials=potentials)
 

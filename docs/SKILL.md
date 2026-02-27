@@ -143,7 +143,23 @@ Integrity safeguard:
 - If two or more subjective dimensions land on the strict target in the same scan, those dimensions are auto-reset to 0 for that scan and must be re-reviewed/imported.
 - Reviewers should score from evidence only (not from target-seeking).
 
-## 5. Quick Reference
+## 5. Living Plan
+
+If a living plan exists (`.desloppify/plan.json`), it is the **single source of truth**
+for work order. The plan lets users reorder, cluster, defer, and annotate findings.
+
+- `desloppify next` respects the plan — items appear in plan order, not mechanical rank.
+- `desloppify plan` shows the full ordered queue with clusters and deferred items.
+- `desloppify plan show` shows plan metadata (clusters, focus, counts).
+- `desloppify plan move <pattern> top` reorders items.
+- `desloppify plan cluster create <name>` groups related findings.
+- `desloppify plan focus <cluster>` auto-scopes `next` to a cluster.
+- `desloppify plan defer <pattern>` hides items from `next` (score-neutral).
+
+When a plan is active, follow it instead of `narrative.actions`. The plan overrides
+strategy hints and action recommendations.
+
+## 6. Quick Reference
 
 - **Tiers**: T1 auto-fix, T2 quick manual, T3 judgment call, T4 major refactor
 - **Zones**: production/script (scored), test/config/generated/vendor (not scored). Fix with `zone set`.
@@ -154,7 +170,7 @@ Integrity safeguard:
 - C# defaults to `--profile objective`; use `--profile full` to include subjective review.
 - Score can temporarily drop after fixes (cascade effects are normal).
 
-## 6. Escalate Tool Issues Upstream
+## 7. Escalate Tool Issues Upstream
 
 When desloppify itself appears wrong or inconsistent:
 

@@ -537,3 +537,102 @@ class TestMechanicalStaleness:
         ic = state["subjective_assessments"]["initialization_coupling"]
         assert ic["needs_review_refresh"] is True
         assert ic["refresh_reason"] == "mechanical_findings_changed"
+
+    def test_unchanged_detector_doesnt_stale_unrelated_dimension(self):
+        """Pre-populate structural finding, rescan with same structural + new unused
+        → design_coherence must NOT be marked stale (structural didn't change)."""
+        from desloppify.engine._state.merge import MergeScanOptions, merge_scan
+        from desloppify.engine._state.schema import empty_state
+
+        state = empty_state()
+        state["subjective_assessments"] = {
+            "design_coherence": {"score": 75.0},
+        }
+        # First scan: populate a structural finding
+        structural = _finding(
+            id="structural::big.py::large_file",
+            detector="structural",
+            file="big.py",
+            detail={"signals": {"loc": 500}},
+        )
+        merge_scan(state, [structural])
+        # Clear the stale flag set by the first scan
+        state["subjective_assessments"]["design_coherence"] = {"score": 75.0}
+
+        # Second scan: same structural finding + new unused finding
+        unused = _finding(id="unused::a.py::x", detector="unused", file="a.py")
+        merge_scan(state, [structural, unused])
+
+        dc = state["subjective_assessments"]["design_coherence"]
+        # structural was unchanged (same finding re-emitted) so design_coherence
+        # should NOT be marked stale; only unused changed, and unused has no
+        # subjective dimension mapping.
+        assert "needs_review_refresh" not in dc or not dc.get("needs_review_refresh")
+
+    def test_auto_resolved_detector_marks_its_dimensions_stale(self):
+        """Structural finding disappears → design_coherence IS marked stale."""
+        from desloppify.engine._state.merge import MergeScanOptions, merge_scan
+        from desloppify.engine._state.schema import empty_state
+
+        state = empty_state()
+        state["subjective_assessments"] = {
+            "design_coherence": {"score": 75.0},
+        }
+        # First scan: structural finding exists
+        structural = _finding(
+            id="structural::big.py::large_file",
+            detector="structural",
+            file="big.py",
+            detail={"signals": {"loc": 500}},
+        )
+        merge_scan(state, [structural], MergeScanOptions(force_resolve=True))
+        # Clear stale flag
+        state["subjective_assessments"]["design_coherence"] = {"score": 75.0}
+
+        # Second scan: structural finding disappears
+        merge_scan(state, [], MergeScanOptions(force_resolve=True))
+
+        dc = state["subjective_assessments"]["design_coherence"]
+        assert dc["needs_review_refresh"] is True
+
+
+class TestStaleReminderGating:
+    """Verify that stale assessment reminders are suppressed while queue has open findings."""
+
+    def test_stale_reminder_suppressed_when_queue_has_open_findings(self):
+        from desloppify.intelligence.narrative.reminders import _stale_assessment_reminder
+
+        state = {
+            "subjective_assessments": {
+                "design_coherence": {
+                    "score": 75.0,
+                    "needs_review_refresh": True,
+                    "refresh_reason": "mechanical_findings_changed",
+                    "stale_since": "2025-01-01T00:00:00+00:00",
+                },
+            },
+            "findings": {
+                "f1": {"status": "open", "suppressed": False},
+            },
+        }
+        assert _stale_assessment_reminder(state) == []
+
+    def test_stale_reminder_shown_when_queue_fully_cleared(self):
+        from desloppify.intelligence.narrative.reminders import _stale_assessment_reminder
+
+        state = {
+            "subjective_assessments": {
+                "design_coherence": {
+                    "score": 75.0,
+                    "needs_review_refresh": True,
+                    "refresh_reason": "mechanical_findings_changed",
+                    "stale_since": "2025-01-01T00:00:00+00:00",
+                },
+            },
+            "findings": {
+                "f1": {"status": "auto_resolved", "suppressed": False},
+            },
+        }
+        reminders = _stale_assessment_reminder(state)
+        assert len(reminders) == 1
+        assert reminders[0]["type"] == "stale_assessments"
