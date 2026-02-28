@@ -1,18 +1,23 @@
 # RESTART.md -- Session State
 
 ## Current State
-- **Session**: 1
+- **Session**: 2
 - **Last updated**: 2026-02-28
-- **Last commit**: `d80a17e`
+- **Last commit**: `6737602`
 - **Branch**: `main`
 - **Tests**: not run this session
 
 ## Sprint Status
-- Completed: project documentation suite for genesis-deslop Rust rewrite
+- Completed: project documentation suite, AGENTS.md, SPECIFICATION.md
 - In progress: none
 - Blocked: none
 
 ## Session Log
+
+### Session 2 -- 2026-02-28
+- Wrote `AGENTS.md` (188 lines): build/lint/test commands, code style guidelines, CI pipeline reference for AI coding agents
+- Wrote `SPECIFICATION.md` (779 lines): condensed master spec for the genesis-deslop Rust rewrite
+- Commit: `6737602` -- `docs: add AGENTS.md and SPECIFICATION.md for agentic workflow and Rust rewrite`
 
 ### Session 1 -- 2026-02-28
 - Wrote `RUST_SPECIFICATION.md`: exhaustive Rust implementation spec (2900+ lines) for the genesis-deslop rewrite covering workspace structure, 5 crates, 30 detectors, 28 language plugins, scoring pipeline, state management, CLI, error codes, and performance requirements
