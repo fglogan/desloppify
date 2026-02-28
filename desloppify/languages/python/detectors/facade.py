@@ -12,7 +12,7 @@ def is_py_facade(filepath: str) -> dict | None:
     """Check if a Python file is a pure re-export facade."""
     try:
         content = Path(filepath).read_text()
-        tree = ast.parse(content)
+        tree = ast.parse(content, filename=filepath)
     except (OSError, SyntaxError, UnicodeDecodeError):
         return None
 

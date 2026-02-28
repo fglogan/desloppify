@@ -92,7 +92,7 @@ def detect_responsibility_cohesion(
         full = Path(filepath) if Path(filepath).is_absolute() else PROJECT_ROOT / filepath
         try:
             source = full.read_text()
-            tree = ast.parse(source)
+            tree = ast.parse(source, filename=str(full))
         except (OSError, UnicodeDecodeError, SyntaxError) as exc:
             # Preserve parse/read context while intentionally skipping broken files.
             _ = (full, exc)

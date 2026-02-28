@@ -194,7 +194,7 @@ TREE_DETECTORS: tuple[_TreeDetectorSpec, ...] = (
 def _detect_ast_smells(filepath: str, content: str, smell_counts: dict[str, list]):
     """Detect AST-based code smells using registry-driven collector dispatch."""
     try:
-        tree = ast.parse(content)
+        tree = ast.parse(content, filename=filepath)
     except SyntaxError:
         return
 
