@@ -230,7 +230,7 @@ def _detect_stale_imports(
             continue
 
         try:
-            tree = ast.parse(content)
+            tree = ast.parse(content, filename=filepath)
         except SyntaxError as exc:
             logger.debug(
                 "Skipping unparseable python file %s in stale-import pass: %s",
@@ -301,7 +301,7 @@ def detect_global_mutable_config(path: Path) -> tuple[list[dict], int]:
             continue
 
         try:
-            tree = ast.parse(content)
+            tree = ast.parse(content, filename=filepath)
         except SyntaxError as exc:
             logger.debug(
                 "Skipping unparseable python file %s in mutable-state pass: %s",

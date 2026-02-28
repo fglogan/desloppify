@@ -79,7 +79,7 @@ def detect_implicit_mixin_contracts(
         full = Path(filepath) if Path(filepath).is_absolute() else PROJECT_ROOT / filepath
         try:
             content = full.read_text()
-            tree = ast.parse(content)
+            tree = ast.parse(content, filename=str(full))
         except (OSError, SyntaxError, UnicodeDecodeError) as exc:
             # Preserve parse/read context while intentionally skipping broken files.
             _ = (full, exc)

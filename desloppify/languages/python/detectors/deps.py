@@ -44,7 +44,7 @@ def build_dep_graph(
         )
         try:
             content = Path(abs_path).read_text()
-            tree = ast.parse(content)
+            tree = ast.parse(content, filename=abs_path)
         except (OSError, UnicodeDecodeError, SyntaxError) as exc:
             logger.debug(
                 "Skipping unreadable/unparseable python file %s in deps detector: %s",
@@ -255,7 +255,7 @@ def find_python_dynamic_imports(path: Path, extensions: list[str]) -> set[str]:
     targets: set[str] = set()
     for py_file in path.rglob("*.py"):
         try:
-            tree = ast.parse(py_file.read_text())
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
         except (SyntaxError, UnicodeDecodeError, OSError) as exc:
             logger.debug("Skipping unreadable file %s in dynamic import scan: %s", py_file, exc)
             continue

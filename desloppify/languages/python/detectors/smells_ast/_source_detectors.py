@@ -30,7 +30,7 @@ def _collect_module_constants(
     (dicts, lists, sets, tuples, numbers, strings).
     """
     try:
-        tree = ast.parse(content)
+        tree = ast.parse(content, filename=filepath)
     except SyntaxError as exc:
         logger.debug(
             "Skipping unparseable python file %s while collecting constants: %s",
@@ -97,7 +97,7 @@ def _detect_star_import_no_all(
     are part of the scanned project (not stdlib/third-party).
     """
     try:
-        tree = ast.parse(content)
+        tree = ast.parse(content, filename=filepath)
     except SyntaxError as exc:
         logger.debug(
             "Skipping unparseable python file %s for star-import analysis: %s",
@@ -207,7 +207,7 @@ def _detect_vestigial_parameter(
     like 'unused', 'legacy', 'deprecated', 'backward compat', etc.
     """
     try:
-        tree = ast.parse(content)
+        tree = ast.parse(content, filename=filepath)
     except SyntaxError as exc:
         logger.debug(
             "Skipping unparseable python file %s for vestigial-param analysis: %s",
